@@ -27,6 +27,16 @@ public partial class App : Application
                 "VRCDN Manager", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
+
+        if (e.Args.Length == 1 && e.Args[0] == "--debug-login")
+        {
+            // LoginWindow sets DialogResult on success, which requires ShowDialog (not Show).
+            var window = new Views.LoginWindow();
+            bool? result = window.ShowDialog();
+            Console.WriteLine($"Login result: {result}, cookie: {window.SessionCookie}");
+            Shutdown();
+            return;
+        }
     }
 
     private static void RunClassifierSmokeTest(string imagePath)

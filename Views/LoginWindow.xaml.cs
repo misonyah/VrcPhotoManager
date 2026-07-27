@@ -1,5 +1,3 @@
-using System.Net.Http;
-using System.Net.Http.Json;
 using System.Windows;
 
 namespace VrcdnManager.Views;
@@ -9,20 +7,35 @@ namespace VrcdnManager.Views;
 /// finishes logging in, the PHPSESSID cookie is read directly from WebView2's
 /// CookieManager - no external browser/DevTools dependency.
 ///
-/// Bug fixed 2026-07-27: originally guessed "logged in" from the page URL not
-/// containing "/login/". That never matched the real redirect path
-/// (id.vrcdn.live/Account/Login?ReturnUrl=...), and PHP sets a PHPSESSID cookie on
-/// the very first unauthenticated request anyway - so the dialog closed almost
-/// immediately with a bogus, unauthenticated cookie, before the user could actually
-/// log in. Fixed by testing the cookie against the real API (getQuota) instead of
-/// guessing from the URL - only treat it as a real session once the API actually
-/// accepts it.
+/// Bug history (2026-07-27):
+/// 1. Originally guessed "logged in" from the page URL not containing "/login/". That
+///    never matched the real redirect path (id.vrcdn.live/Account/Login?ReturnUrl=...),
+///    so the dialog closed almost instantly with a bogus, unauthenticated cookie.
+/// 2. Fixed by probing the real API (getQuota) on every SourceChanged - but this made an
+///    out-of-band HTTP request to panel.vrcdn.live WHILE its own OAuth callback
+///    (login/return.php) was mid-flight, validating its `state` against a PHP session.
+///    Confirmed via live WebView2 remote-debugging (chrome-devtools MCP attached to
+///    --remote-debugging-port) that this raced panel.vrcdn.live's own session handling:
+///    the OIDC handshake with id.vrcdn.live/Patreon completed successfully every time
+///    (valid code+state came back), but panel's own return.php intermittently rendered
+///    "Error: Unable to determine state" anyway - and manually re-navigating to the
+///    target page immediately afterward showed the session was ALREADY valid regardless
+///    of that error page. So: stop making any extra request mid-flow, and treat the
+///    error page as a transient hiccup worth one silent retry rather than a real failure.
+/// 3. SourceChanged fires on URL change, before the new page finishes loading - checking
+///    document.body.innerText right away can read an empty/partial DOM and miss the
+///    "Logout" marker entirely, with no second chance since the URL won't change again.
+///    Fixed by using NavigationCompleted instead, which fires once the page has actually
+///    finished loading.
 /// </summary>
 public partial class LoginWindow : Window
 {
+    private const string TargetUrl = "https://panel.vrcdn.live/obj-upload.php";
+
     public string? SessionCookie { get; private set; }
 
     private bool _checking;
+    private bool _retried;
 
     public LoginWindow()
     {
@@ -46,55 +59,49 @@ public partial class LoginWindow : Window
             return;
         }
 
-        Browser.CoreWebView2.SourceChanged += async (_, _) => await CheckForSessionCookieAsync();
-        Browser.CoreWebView2.Navigate("https://panel.vrcdn.live/obj-upload.php");
+        Browser.CoreWebView2.NavigationCompleted += async (_, _) => await OnNavigationCompletedAsync();
+        Browser.CoreWebView2.Navigate(TargetUrl);
     }
 
-    private async Task CheckForSessionCookieAsync()
+    private async Task OnNavigationCompletedAsync()
     {
-        if (_checking) return; // SourceChanged fires repeatedly during the OAuth redirect chain
+        if (_checking) return; // fires repeatedly during the OAuth redirect chain
         _checking = true;
         try
         {
-            var cookies = await Browser.CoreWebView2.CookieManager.GetCookiesAsync("https://panel.vrcdn.live");
-            var sessionCookie = cookies.FirstOrDefault(c => c.Name == "PHPSESSID");
-            if (sessionCookie is null) return;
+            string currentUrl = Browser.CoreWebView2.Source;
+            if (!currentUrl.StartsWith("https://panel.vrcdn.live", StringComparison.OrdinalIgnoreCase))
+                return; // still mid-flow through id.vrcdn.live / Patreon
 
-            if (!await IsAuthenticatedAsync(sessionCookie.Value)) return;
+            string pageText = await Browser.CoreWebView2.ExecuteScriptAsync("document.body.innerText");
 
-            SessionCookie = sessionCookie.Value;
-            DialogResult = true;
-            Close();
+            if (pageText.Contains("Unable to determine state", StringComparison.OrdinalIgnoreCase))
+            {
+                // Confirmed (via live devtools) this is a transient hiccup in panel's own
+                // callback handler, not an actual failed login - the underlying session is
+                // already valid by this point. One silent retry resolves it.
+                if (!_retried)
+                {
+                    _retried = true;
+                    Browser.CoreWebView2.Navigate(TargetUrl);
+                }
+                return;
+            }
+
+            if (pageText.Contains("Logout", StringComparison.OrdinalIgnoreCase))
+            {
+                var cookies = await Browser.CoreWebView2.CookieManager.GetCookiesAsync("https://panel.vrcdn.live");
+                var sessionCookie = cookies.FirstOrDefault(c => c.Name == "PHPSESSID");
+                if (sessionCookie is null) return;
+
+                SessionCookie = sessionCookie.Value;
+                DialogResult = true;
+                Close();
+            }
         }
         finally
         {
             _checking = false;
-        }
-    }
-
-    /// <summary>
-    /// The only reliable way to know the cookie is a real, logged-in session: ask the
-    /// API something that requires auth (getQuota) and see if it actually answers,
-    /// rather than inferring from the page URL.
-    /// </summary>
-    private static async Task<bool> IsAuthenticatedAsync(string cookieValue)
-    {
-        try
-        {
-            using var http = new HttpClient();
-            http.DefaultRequestHeaders.Add("Cookie", $"PHPSESSID={cookieValue}");
-            http.DefaultRequestHeaders.Add("Referer", "https://panel.vrcdn.live/obj-upload.php");
-            using var resp = await http.PostAsJsonAsync(
-                "https://panel.vrcdn.live/parts/s3.funcs.php", new { type = "getQuota" });
-            if (!resp.IsSuccessStatusCode) return false;
-            if (resp.Content.Headers.ContentType?.MediaType != "application/json") return false;
-
-            using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            return doc.RootElement.TryGetProperty("QuotaUsed", out _);
-        }
-        catch
-        {
-            return false;
         }
     }
 }
