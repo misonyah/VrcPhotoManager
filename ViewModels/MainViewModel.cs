@@ -15,7 +15,6 @@ namespace VrcdnManager.ViewModels;
 public class MainViewModel : INotifyPropertyChanged
 {
     private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
-    private const string VrcdnUsername = "misonyah";
     private const double RowMargin = 8;
 
     private readonly PhotoRepository _repo;
@@ -122,7 +121,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         var (tagger, taggerError) = await Task.Run(() =>
         {
-            var t = WdTaggerService.TryCreate(@"D:\AI-Tools\wd14-tagger\model", out string? error);
+            var t = WdTaggerService.TryCreate(ResolveWdTaggerModelDir(), out string? error);
             return (t, error);
         });
         _tagger = tagger;
@@ -213,12 +212,30 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = $"Scan complete: {files.Count} photos.";
     }
 
+    /// <summary>
+    /// Checks a folder next to the exe first (so a public build works for anyone who drops
+    /// the model there), falling back to the dev machine's path this was built against.
+    /// </summary>
+    private static string ResolveWdTaggerModelDir()
+    {
+        string local = Path.Combine(AppContext.BaseDirectory, "wd14-model");
+        return Directory.Exists(local) ? local : @"D:\AI-Tools\wd14-tagger\model";
+    }
+
+    private static string? ResolveWdTaggerIndexDb()
+    {
+        string local = Path.Combine(AppContext.BaseDirectory, "wd14-index.db");
+        if (File.Exists(local)) return local;
+        const string devPath = @"D:\AI-Tools\wd14-tagger\index.db";
+        return File.Exists(devPath) ? devPath : null;
+    }
+
     private async Task ImportRatingsAsync()
     {
-        const string indexDbPath = @"D:\AI-Tools\wd14-tagger\index.db";
-        if (!File.Exists(indexDbPath))
+        string? indexDbPath = ResolveWdTaggerIndexDb();
+        if (indexDbPath is null)
         {
-            StatusMessage = "WD14 index.db not found at D:\\AI-Tools\\wd14-tagger\\index.db";
+            StatusMessage = "WD14 index.db not found (checked next to the exe and the dev machine's path).";
             return;
         }
 
@@ -292,10 +309,11 @@ public class MainViewModel : INotifyPropertyChanged
         if (_api is null) { StatusMessage = "Log in first."; return; }
 
         StatusMessage = "Syncing metadata from VRCDN...";
+        string username = await _api.GetUsernameAsync();
         var remoteObjects = await _api.ListObjectsAsync();
         var unresolved = _repo.SyncRemoteMatches(
             remoteObjects.Select(o => (o.Original, o.Id, o.Extension, o.Size)),
-            VrcdnUsername);
+            username);
 
         // refresh in-memory view models from the db
         var refreshed = _repo.GetAll().ToDictionary(p => p.LocalPath);

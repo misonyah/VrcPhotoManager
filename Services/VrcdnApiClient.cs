@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace VrcdnManager.Services;
 
@@ -33,6 +34,7 @@ public class VrcdnApiClient
 {
     private const string Base = "https://panel.vrcdn.live";
     private readonly HttpClient _http;
+    private string? _cachedUsername;
 
     public VrcdnApiClient(string sessionCookie)
     {
@@ -60,6 +62,25 @@ public class VrcdnApiClient
                 $"{text[..Math.Min(200, text.Length)]}");
         }
         return JsonDocument.Parse(text);
+    }
+
+    /// <summary>
+    /// There's no API for this - the served-file username is embedded as `const userName =
+    /// "..."` in obj-files.php's own inline script (VRCDN's page templates it in server-side
+    /// per logged-in account). Scraped once and cached rather than hardcoded, since it's
+    /// different for every VRCDN account.
+    /// </summary>
+    public async Task<string> GetUsernameAsync(CancellationToken ct = default)
+    {
+        if (_cachedUsername is not null) return _cachedUsername;
+
+        string html = await _http.GetStringAsync("/obj-files.php", ct);
+        var match = Regex.Match(html, """const userName = "([^"]+)""");
+        if (!match.Success)
+            throw new InvalidOperationException("Could not determine VRCDN username from obj-files.php - page layout may have changed.");
+
+        _cachedUsername = match.Groups[1].Value;
+        return _cachedUsername;
     }
 
     public async Task<QuotaInfo> GetQuotaAsync(CancellationToken ct = default)
