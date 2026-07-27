@@ -47,55 +47,75 @@
             <Slider Minimum="80" Maximum="400" Width="180" Value="{Binding ThumbnailSize}" VerticalAlignment="Center" />
         </StackPanel>
 
-        <!-- Photo grid -->
-        <ScrollViewer Grid.Row="1" x:Name="GridScrollViewer" SizeChanged="GridScrollViewer_SizeChanged">
-            <ItemsControl ItemsSource="{Binding Rows}"
-                          VirtualizingPanel.IsVirtualizing="True"
-                          VirtualizingPanel.VirtualizationMode="Recycling"
-                          VirtualizingPanel.ScrollUnit="Pixel">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel Orientation="Vertical" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type vm:PhotoRow}">
-                        <ItemsControl ItemsSource="{Binding Items}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:PhotoViewModel}">
-                                    <Border Style="{StaticResource PhotoItemStyle}"
-                                            Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            Tag="{Binding}">
-                                        <Grid>
-                                            <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
-                                            <CheckBox IsChecked="{Binding Selected}"
-                                                      HorizontalAlignment="Left" VerticalAlignment="Top"
-                                                      Margin="4" />
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                                                    Margin="4" Width="14" Height="14" CornerRadius="7"
-                                                    BorderBrush="White" BorderThickness="1"
-                                                    Background="{Binding Rating, Converter={StaticResource RatingToBrushConverter}}"
-                                                    ToolTip="{Binding Rating}" />
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                                    Margin="4" Padding="4,1" CornerRadius="3"
-                                                    Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}">
-                                                <TextBlock Text="{Binding RemoteStatus}" FontSize="10" Foreground="White" />
-                                            </Border>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+        <!-- Photo grid. Uses ListBox rather than a plain ItemsControl: plain ItemsControl does
+             NOT actually virtualize regardless of VirtualizingPanel/VirtualizingStackPanel
+             settings - real UI virtualization needs a Selector-derived container. Without
+             this, all ~4800 photos (each triggering its lazy thumbnail load) were being
+             fully realized on the UI thread at startup, freezing the window for many
+             seconds. Selection chrome is stripped via ItemContainerStyle since we use our
+             own CheckBox-based multi-select, not ListBox's built-in selection. -->
+        <ListBox Grid.Row="1" x:Name="PhotoGrid" ItemsSource="{Binding Rows}"
+                 SizeChanged="PhotoGrid_SizeChanged"
+                 ScrollViewer.CanContentScroll="True"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 BorderThickness="0" Background="Transparent">
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel Orientation="Vertical" />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Focusable" Value="False" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <ContentPresenter />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:PhotoRow}">
+                    <ItemsControl ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:PhotoViewModel}">
+                                <Border Style="{StaticResource PhotoItemStyle}"
+                                        Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Tag="{Binding}">
+                                    <Grid>
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+                                        <CheckBox IsChecked="{Binding Selected}"
+                                                  HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                  Margin="4" />
+                                        <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                Margin="4" Width="14" Height="14" CornerRadius="7"
+                                                BorderBrush="White" BorderThickness="1"
+                                                Background="{Binding Rating, Converter={StaticResource RatingToBrushConverter}}"
+                                                ToolTip="{Binding Rating}" />
+                                        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                Margin="4" Padding="4,1" CornerRadius="3"
+                                                Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}">
+                                            <TextBlock Text="{Binding RemoteStatus}" FontSize="10" Foreground="White" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
 
         <!-- Status bar -->
         <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Margin="8,4" />

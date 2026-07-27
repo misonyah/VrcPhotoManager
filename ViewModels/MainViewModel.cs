@@ -21,7 +21,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly PhotoRepository _repo;
     private readonly ThumbnailService _thumbnails;
     private readonly CredentialStore _credentials;
-    private readonly WdTaggerService? _tagger;
+    private WdTaggerService? _tagger;
     private VrcdnApiClient? _api;
 
     private readonly List<PhotoViewModel> _allPhotos = [];
@@ -77,7 +77,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     public ICommand ScanLibraryCommand { get; }
     public ICommand ImportRatingsCommand { get; }
-    public ICommand ClassifyPhotosCommand { get; }
+    public RelayCommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
     public ICommand UploadSelectedCommand { get; }
@@ -89,21 +89,13 @@ public class MainViewModel : INotifyPropertyChanged
             "VrcdnManager");
         Directory.CreateDirectory(dataDir);
 
+        // Keep the constructor cheap - it runs on the UI thread before the window can even
+        // paint itself. Loading the ONNX model (a few seconds) and querying thousands of
+        // photos here made the whole window appear white/unresponsive until construction
+        // finished. Both are deferred to InitializeAsync, run after the window is visible.
         _repo = new PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _thumbnails = new ThumbnailService();
         _credentials = new CredentialStore(_repo);
-
-        _tagger = WdTaggerService.TryCreate(@"D:\AI-Tools\wd14-tagger\model", out string? taggerError);
-        if (_tagger is null && taggerError is not null)
-        {
-            _statusMessage = $"WD14 classifier unavailable: {taggerError}";
-        }
-
-        foreach (var photo in _repo.GetAll())
-        {
-            _allPhotos.Add(new PhotoViewModel(photo, _repo));
-        }
-        RebuildRows();
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         ImportRatingsCommand = new RelayCommand(ImportRatingsAsync);
@@ -112,7 +104,33 @@ public class MainViewModel : INotifyPropertyChanged
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync);
 
+        _statusMessage = "Loading...";
+        _ = InitializeAsync();
+    }
+
+    private async Task InitializeAsync()
+    {
+        var photos = await Task.Run(() => _repo.GetAll());
+        foreach (var photo in photos)
+        {
+            _allPhotos.Add(new PhotoViewModel(photo, _repo));
+        }
+        RebuildRows();
+        StatusMessage = $"{_allPhotos.Count} photos loaded.";
+
         TryAutoLogin();
+
+        var (tagger, taggerError) = await Task.Run(() =>
+        {
+            var t = WdTaggerService.TryCreate(@"D:\AI-Tools\wd14-tagger\model", out string? error);
+            return (t, error);
+        });
+        _tagger = tagger;
+        if (_tagger is null)
+        {
+            StatusMessage = $"WD14 classifier unavailable: {taggerError}";
+        }
+        ClassifyPhotosCommand.RaiseCanExecuteChanged();
     }
 
     private void TryAutoLogin()

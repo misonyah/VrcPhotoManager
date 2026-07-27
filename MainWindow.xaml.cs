@@ -23,7 +23,7 @@ public partial class MainWindow : Window
         _hoverTimer.Tick += HoverTimer_Tick;
     }
 
-    private void GridScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    private void PhotoGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (DataContext is MainViewModel vm)
         {
