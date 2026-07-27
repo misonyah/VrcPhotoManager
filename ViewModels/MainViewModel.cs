@@ -67,6 +67,17 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] StatusFilterOptions { get; } = ["All", "NotUploaded", "Uploading", "Uploaded", "Failed"];
 
+    private string _playerFilter = "";
+    /// <summary>
+    /// Filters against the author + embedded player-list text VRCX writes into each photo's
+    /// PNG metadata at capture time (see PngMetadataReader) - substring match, not exact.
+    /// </summary>
+    public string PlayerFilter
+    {
+        get => _playerFilter;
+        set { _playerFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+
     private string _statusMessage = "Not logged in. Click Login to start.";
     public string StatusMessage
     {
@@ -80,6 +91,7 @@ public class MainViewModel : INotifyPropertyChanged
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
     public ICommand UploadSelectedCommand { get; }
+    public ICommand CropPrintSelectedCommand { get; }
 
     public MainViewModel()
     {
@@ -102,6 +114,7 @@ public class MainViewModel : INotifyPropertyChanged
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync);
+        CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
 
         _statusMessage = "Loading...";
         _ = InitializeAsync();
@@ -167,7 +180,8 @@ public class MainViewModel : INotifyPropertyChanged
 
     private async Task ScanLibraryAsync()
     {
-        string root = @"C:\Users\redacted\Pictures\VRChat";
+        // VRChat's own default screenshot location, regardless of which account runs this.
+        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "VRChat");
         StatusMessage = "Scanning library...";
         var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Where(f => ImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
@@ -187,6 +201,38 @@ public class MainViewModel : INotifyPropertyChanged
                     var model = new Photo { Id = id, LocalPath = path, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate() };
                     existing = new PhotoViewModel(model, _repo);
                     _allPhotos.Add(existing);
+                }
+
+                if (!existing.Model.MetadataScanned)
+                {
+                    var meta = PngMetadataReader.TryReadVrcxMetadata(path);
+                    string? playerNames = meta?.Players is { Count: > 0 }
+                        ? string.Join(", ", meta.Players.Select(p => p.DisplayName))
+                        : null;
+                    _repo.SetVrcxMetadata(id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames);
+                    existing.Model.MetadataScanned = true;
+                    existing.Model.AuthorDisplayName = meta?.Author?.DisplayName;
+                    existing.Model.WorldName = meta?.World?.Name;
+                    existing.Model.PlayerNames = playerNames;
+                }
+
+                if (existing.Model.Width is null)
+                {
+                    try
+                    {
+                        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+                            new Uri(path), System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
+                            System.Windows.Media.Imaging.BitmapCacheOption.None);
+                        int w = decoder.Frames[0].PixelWidth;
+                        int h = decoder.Frames[0].PixelHeight;
+                        _repo.SetImageDimensions(id, w, h);
+                        existing.Model.Width = w;
+                        existing.Model.Height = h;
+                    }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"Couldn't read dimensions for {Path.GetFileName(path)}: {ex.Message}";
+                    }
                 }
 
                 if (!existing.Model.HasThumbnail)
@@ -304,6 +350,41 @@ public class MainViewModel : INotifyPropertyChanged
         RebuildRows();
     }
 
+    /// <summary>
+    /// VRChat's "Print" feature pads photos to 2048x1440 with a white border around the real
+    /// 1920x1080 content. Crops the border off selected photos that match, saving a new file
+    /// (original untouched) and adding it to the library.
+    /// </summary>
+    private async Task CropPrintSelectedAsync()
+    {
+        var candidates = _allPhotos.Where(p => p.Selected && CropPrintService.LooksLikePrintFormat(p.Model.Width, p.Model.Height)).ToList();
+        if (candidates.Count == 0) { StatusMessage = "No selected photos look like Print-format (2048x1440)."; return; }
+
+        int cropped = 0, skipped = 0;
+        foreach (var vm in candidates)
+        {
+            try
+            {
+                bool hasBorder = await Task.Run(() => CropPrintService.HasWhiteBorder(vm.Model.LocalPath));
+                if (!hasBorder) { skipped++; continue; }
+
+                string newPath = await Task.Run(() => CropPrintService.CropAndSave(vm.Model.LocalPath));
+                var info = new FileInfo(newPath);
+                long id = _repo.UpsertLocalFile(newPath, info.Length, info.LastWriteTimeUtc.ToOADate());
+                _repo.SetImageDimensions(id, 1920, 1080);
+                _allPhotos.Add(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080 }, _repo));
+                cropped++;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Crop failed for {vm.FileName}: {ex.Message}";
+            }
+        }
+
+        StatusMessage = $"Cropped {cropped} print-format photo(s), skipped {skipped} (no white border found).";
+        RebuildRows();
+    }
+
     private async Task SyncMetadataAsync()
     {
         if (_api is null) { StatusMessage = "Log in first."; return; }
@@ -385,6 +466,12 @@ public class MainViewModel : INotifyPropertyChanged
         if (StatusFilter != "All")
         {
             filtered = filtered.Where(p => p.RemoteStatus.ToString() == StatusFilter);
+        }
+        if (!string.IsNullOrWhiteSpace(PlayerFilter))
+        {
+            filtered = filtered.Where(p =>
+                (p.AuthorDisplayName?.Contains(PlayerFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (p.PlayerNames?.Contains(PlayerFilter, StringComparison.OrdinalIgnoreCase) ?? false));
         }
 
         int columns = Math.Max(1, (int)(_gridWidth / (_thumbnailSize + RowMargin)));

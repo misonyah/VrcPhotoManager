@@ -30,6 +30,21 @@ public class Photo
 
     public byte[]? Thumbnail { get; set; }
     public string? Rating { get; set; }
+
+    /// <summary>
+    /// VRCX embeds author/world/player info directly into the photo's PNG metadata at
+    /// capture time - not every photo has it (needs VRCX running with that feature active).
+    /// MetadataScanned distinguishes "checked, there was none" from "not checked yet" so
+    /// Scan Library doesn't keep re-parsing PNG chunks for photos that genuinely lack it.
+    /// </summary>
+    public bool MetadataScanned { get; set; }
+    public string? AuthorDisplayName { get; set; }
+    public string? WorldName { get; set; }
+
+    /// <summary>Comma-joined player display names - flat text is enough for substring
+    /// filtering (the actual use case) without needing a join table.</summary>
+    public string? PlayerNames { get; set; }
+
     public bool Selected { get; set; }
     public RemoteStatus RemoteStatus { get; set; } = RemoteStatus.NotUploaded;
     public string? RemoteUrl { get; set; }

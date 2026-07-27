@@ -101,6 +101,10 @@ public class PhotoRepository
                 FileHash = p.FileHash,
                 HasThumbnail = p.Thumbnail != null,
                 Rating = p.Rating,
+                MetadataScanned = p.MetadataScanned,
+                AuthorDisplayName = p.AuthorDisplayName,
+                WorldName = p.WorldName,
+                PlayerNames = p.PlayerNames,
                 Selected = p.Selected,
                 RemoteStatus = p.RemoteStatus,
                 RemoteUrl = p.RemoteUrl,
@@ -127,6 +131,16 @@ public class PhotoRepository
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id)
             .ExecuteUpdate(s => s.SetProperty(p => p.Width, width).SetProperty(p => p.Height, height));
+    }
+
+    public void SetVrcxMetadata(long id, string? authorDisplayName, string? worldName, string? playerNames)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s
+            .SetProperty(p => p.MetadataScanned, true)
+            .SetProperty(p => p.AuthorDisplayName, authorDisplayName)
+            .SetProperty(p => p.WorldName, worldName)
+            .SetProperty(p => p.PlayerNames, playerNames));
     }
 
     public void SetFileHash(long id, string hash)

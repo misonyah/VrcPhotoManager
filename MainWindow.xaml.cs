@@ -71,6 +71,7 @@ public partial class MainWindow : Window
             bmp.Freeze();
 
             PreviewImage.Source = bmp;
+            PreviewPlayers.Text = photo.PlayersTooltip;
             PreviewPopup.PlacementTarget = _hoverTarget;
             PreviewPopup.IsOpen = true;
         }

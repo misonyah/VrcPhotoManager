@@ -18,6 +18,31 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 2 && e.Args[0] == "--test-crop-print")
+        {
+            bool isWhite = Services.CropPrintService.HasWhiteBorder(e.Args[1]);
+            Console.WriteLine($"HasWhiteBorder: {isWhite}");
+            if (isWhite)
+            {
+                string newPath = Services.CropPrintService.CropAndSave(e.Args[1]);
+                Console.WriteLine($"Saved: {newPath}");
+            }
+            Shutdown();
+            return;
+        }
+
+        if (e.Args.Length == 2 && e.Args[0] == "--test-metadata")
+        {
+            var meta = Services.PngMetadataReader.TryReadVrcxMetadata(e.Args[1]);
+            Console.WriteLine(meta is null
+                ? "No VRCX metadata found."
+                : $"Author: {meta.Author?.DisplayName} ({meta.Author?.Id})\n" +
+                  $"World: {meta.World?.Name} ({meta.World?.Id})\n" +
+                  $"Players: {string.Join(", ", meta.Players?.Select(p => p.DisplayName) ?? [])}");
+            Shutdown();
+            return;
+        }
+
         // Unhandled exceptions on the UI thread (e.g. from an async void command handler)
         // would otherwise take the whole app down with no explanation - show them instead.
         DispatcherUnhandledException += (_, args) =>

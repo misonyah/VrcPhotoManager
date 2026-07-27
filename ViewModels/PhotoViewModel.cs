@@ -25,6 +25,13 @@ public class PhotoViewModel : INotifyPropertyChanged
     public string? Rating => Model.Rating;
     public RemoteStatus RemoteStatus => Model.RemoteStatus;
     public string? RemoteUrl => Model.RemoteUrl;
+    public string? AuthorDisplayName => Model.AuthorDisplayName;
+    public string? WorldName => Model.WorldName;
+    public string? PlayerNames => Model.PlayerNames;
+
+    public string PlayersTooltip => Model.MetadataScanned
+        ? (Model.PlayerNames is null ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers: {Model.PlayerNames}")
+        : "Not scanned yet";
 
     public bool Selected
     {

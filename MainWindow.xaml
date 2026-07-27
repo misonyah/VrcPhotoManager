@@ -35,13 +35,19 @@
             <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,8,0"
                     ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
             <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,8,0" />
-            <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,16,0" FontWeight="Bold" />
+            <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,8,0" FontWeight="Bold" />
+            <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,16,0"
+                    ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
 
             <TextBlock Text="Rating:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Width="110" Margin="0,0,16,0" />
 
             <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0" />
+
+            <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBox Text="{Binding PlayerFilter, UpdateSourceTrigger=PropertyChanged}" Width="140" Margin="0,0,16,0"
+                     ToolTip="Filters by author/player display name embedded by VRCX at capture time (Scan Library reads it)" />
 
             <TextBlock Text="Thumbnail size:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Slider Minimum="80" Maximum="400" Width="180" Value="{Binding ThumbnailSize}" VerticalAlignment="Center" Margin="0,0,16,0" />
@@ -125,7 +131,10 @@
         <!-- Hover preview popup -->
         <Popup x:Name="PreviewPopup" Placement="Mouse" AllowsTransparency="True" StaysOpen="False">
             <Border Background="Black" BorderBrush="White" BorderThickness="1" Padding="4">
-                <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />
+                <StackPanel>
+                    <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />
+                    <TextBlock x:Name="PreviewPlayers" Foreground="White" FontSize="11" Margin="4" TextWrapping="Wrap" MaxWidth="800" />
+                </StackPanel>
             </Border>
         </Popup>
     </Grid>

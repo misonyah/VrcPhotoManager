@@ -36,6 +36,10 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.FileHash).HasColumnName("file_hash");
             entity.Property(p => p.Thumbnail).HasColumnName("thumbnail");
             entity.Property(p => p.Rating).HasColumnName("rating");
+            entity.Property(p => p.MetadataScanned).HasColumnName("metadata_scanned");
+            entity.Property(p => p.AuthorDisplayName).HasColumnName("author_display_name");
+            entity.Property(p => p.WorldName).HasColumnName("world_name");
+            entity.Property(p => p.PlayerNames).HasColumnName("player_names");
             entity.Property(p => p.Selected).HasColumnName("selected");
             entity.Property(p => p.RemoteStatus).HasColumnName("remote_status").HasConversion<string>();
             entity.Property(p => p.RemoteUrl).HasColumnName("remote_url");
