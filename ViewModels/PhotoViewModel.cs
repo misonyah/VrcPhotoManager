@@ -71,6 +71,8 @@ public class PhotoViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(RemoteUrl));
     }
 
+    public void NotifyRatingChanged() => OnPropertyChanged(nameof(Rating));
+
     public void NotifyThumbnailReady()
     {
         _thumbnail = null;

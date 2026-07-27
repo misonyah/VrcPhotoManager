@@ -21,6 +21,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly PhotoRepository _repo;
     private readonly ThumbnailService _thumbnails;
     private readonly CredentialStore _credentials;
+    private readonly WdTaggerService? _tagger;
     private VrcdnApiClient? _api;
 
     private readonly List<PhotoViewModel> _allPhotos = [];
@@ -76,6 +77,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     public ICommand ScanLibraryCommand { get; }
     public ICommand ImportRatingsCommand { get; }
+    public ICommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
     public ICommand UploadSelectedCommand { get; }
@@ -91,6 +93,12 @@ public class MainViewModel : INotifyPropertyChanged
         _thumbnails = new ThumbnailService();
         _credentials = new CredentialStore(_repo);
 
+        _tagger = WdTaggerService.TryCreate(@"D:\AI-Tools\wd14-tagger\model", out string? taggerError);
+        if (_tagger is null && taggerError is not null)
+        {
+            _statusMessage = $"WD14 classifier unavailable: {taggerError}";
+        }
+
         foreach (var photo in _repo.GetAll())
         {
             _allPhotos.Add(new PhotoViewModel(photo, _repo));
@@ -99,6 +107,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         ImportRatingsCommand = new RelayCommand(ImportRatingsAsync);
+        ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync);
@@ -219,6 +228,44 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Imported ratings for {updated} photos.";
+        RebuildRows();
+    }
+
+    /// <summary>
+    /// Runs the WD14 classifier in-process for any photo that still has no rating -
+    /// e.g. newly scanned photos the Python tool never saw. Prefer Import Ratings first
+    /// where it applies (free, no compute); this covers everything else.
+    /// </summary>
+    private async Task ClassifyPhotosAsync()
+    {
+        if (_tagger is null) { StatusMessage = "WD14 classifier not available."; return; }
+
+        var toClassify = _allPhotos.Where(p => p.Rating is null).ToList();
+        if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has a rating."; return; }
+
+        int done = 0;
+        foreach (var vm in toClassify)
+        {
+            try
+            {
+                string rating = await Task.Run(() => _tagger.ClassifyRating(vm.Model.LocalPath));
+                vm.Model.Rating = rating;
+                _repo.SetRating(vm.Model.Id, rating);
+                vm.NotifyRatingChanged();
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Classification failed for {vm.FileName}: {ex.Message}";
+            }
+
+            done++;
+            if (done % 20 == 0 || done == toClassify.Count)
+            {
+                StatusMessage = $"Classifying... {done}/{toClassify.Count}";
+            }
+        }
+
+        StatusMessage = $"Classified {done} photos.";
         RebuildRows();
     }
 
