@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Media.Imaging;
+using VrcdnManager.Data;
 using VrcdnManager.Models;
 
 namespace VrcdnManager.ViewModels;
@@ -9,13 +10,15 @@ namespace VrcdnManager.ViewModels;
 public class PhotoViewModel : INotifyPropertyChanged
 {
     public Photo Model { get; }
+    private readonly PhotoRepository _repo;
 
     private BitmapImage? _thumbnail;
     private bool _thumbnailLoadAttempted;
 
-    public PhotoViewModel(Photo model)
+    public PhotoViewModel(Photo model, PhotoRepository repo)
     {
         Model = model;
+        _repo = repo;
     }
 
     public string FileName => Model.FileName;
@@ -35,23 +38,28 @@ public class PhotoViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Lazily decoded on first access (i.e. when the item is actually realized by the
-    /// virtualizing row panel), so off-screen rows never hold a decoded bitmap.
+    /// Lazily fetched from the db on first access (i.e. when the item is actually
+    /// realized by the virtualizing row panel), so off-screen rows never hold a decoded
+    /// bitmap or query the thumbnail blob at all.
     /// </summary>
     public BitmapImage? Thumbnail
     {
         get
         {
-            if (!_thumbnailLoadAttempted && Model.ThumbnailPath is not null && File.Exists(Model.ThumbnailPath))
+            if (!_thumbnailLoadAttempted && Model.HasThumbnail)
             {
                 _thumbnailLoadAttempted = true;
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.UriSource = new Uri(Model.ThumbnailPath);
-                bmp.EndInit();
-                bmp.Freeze();
-                _thumbnail = bmp;
+                byte[]? bytes = _repo.GetThumbnail(Model.Id);
+                if (bytes is not null)
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.StreamSource = new MemoryStream(bytes);
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    _thumbnail = bmp;
+                }
             }
             return _thumbnail;
         }
@@ -63,7 +71,7 @@ public class PhotoViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(RemoteUrl));
     }
 
-    public void ClearThumbnailCache()
+    public void NotifyThumbnailReady()
     {
         _thumbnail = null;
         _thumbnailLoadAttempted = false;

@@ -88,12 +88,12 @@ public class MainViewModel : INotifyPropertyChanged
         Directory.CreateDirectory(dataDir);
 
         _repo = new PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
-        _thumbnails = new ThumbnailService(Path.Combine(dataDir, "thumbnails"));
+        _thumbnails = new ThumbnailService();
         _credentials = new CredentialStore(_repo);
 
         foreach (var photo in _repo.GetAll())
         {
-            _allPhotos.Add(new PhotoViewModel(photo));
+            _allPhotos.Add(new PhotoViewModel(photo, _repo));
         }
         RebuildRows();
 
@@ -159,19 +159,23 @@ public class MainViewModel : INotifyPropertyChanged
                 if (existing is null)
                 {
                     var model = new Photo { Id = id, LocalPath = path, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate() };
-                    existing = new PhotoViewModel(model);
+                    existing = new PhotoViewModel(model, _repo);
                     _allPhotos.Add(existing);
                 }
 
-                try
+                if (!existing.Model.HasThumbnail)
                 {
-                    string thumbPath = await _thumbnails.EnsureThumbnailAsync(path);
-                    existing.Model.ThumbnailPath = thumbPath;
-                    _repo.SetThumbnailPath(id, thumbPath);
-                }
-                catch (Exception ex)
-                {
-                    StatusMessage = $"Thumbnail failed for {Path.GetFileName(path)}: {ex.Message}";
+                    try
+                    {
+                        byte[] thumbnail = await _thumbnails.GenerateThumbnailAsync(path);
+                        _repo.SetThumbnail(id, thumbnail);
+                        existing.Model.HasThumbnail = true;
+                        existing.NotifyThumbnailReady();
+                    }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"Thumbnail failed for {Path.GetFileName(path)}: {ex.Message}";
+                    }
                 }
             }
             processed += chunk.Count;
@@ -262,7 +266,9 @@ public class MainViewModel : INotifyPropertyChanged
 
             try
             {
-                await _api.UploadFileAsync(vm.Model.LocalPath);
+                byte[] resized = await _thumbnails.PrepareForUploadAsync(vm.Model.LocalPath);
+                string uploadFileName = Path.GetFileNameWithoutExtension(vm.FileName) + ".jpg";
+                await _api.UploadBytesAsync(uploadFileName, resized);
                 vm.Model.RemoteStatus = RemoteStatus.Uploaded;
                 vm.Model.UploadedAt = DateTime.UtcNow.ToString("o");
                 _repo.UpdateRemoteStatus(vm.Model.Id, RemoteStatus.Uploaded, uploadedAt: vm.Model.UploadedAt);

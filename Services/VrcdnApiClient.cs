@@ -48,8 +48,18 @@ public class VrcdnApiClient
     {
         using var resp = await _http.PostAsJsonAsync("/parts/s3.funcs.php", body, ct);
         resp.EnsureSuccessStatusCode();
-        var stream = await resp.Content.ReadAsStreamAsync(ct);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        string text = await resp.Content.ReadAsStringAsync(ct);
+        // An expired/invalid session gets redirected to an HTML login page (still 200 OK) rather
+        // than an error status - fail with a clear message instead of a cryptic JSON parse error.
+        if (resp.Content.Headers.ContentType?.MediaType != "application/json")
+        {
+            throw new InvalidOperationException(
+                $"VRCDN did not return JSON (got {resp.Content.Headers.ContentType?.MediaType}) - " +
+                $"the session is likely expired or invalid. Log in again. Response started with: " +
+                $"{text[..Math.Min(200, text.Length)]}");
+        }
+        return JsonDocument.Parse(text);
     }
 
     public async Task<QuotaInfo> GetQuotaAsync(CancellationToken ct = default)
@@ -76,28 +86,22 @@ public class VrcdnApiClient
     }
 
     /// <summary>
-    /// Uploads one file: requests a presigned URL, then PUTs the bytes with a matching
-    /// Content-Type header. The Content-Type header on the PUT is the one gotcha that
-    /// silently fails uploads - S3 returns 200 regardless, but the backend job processor
-    /// marks it "Failed" without it.
+    /// Uploads pre-processed bytes (already resized to fit VRChat's 2048x2048 image-loader
+    /// cap - see ThumbnailService.PrepareForUploadAsync): requests a presigned URL, then
+    /// PUTs the bytes with a matching Content-Type header. The Content-Type header on the
+    /// PUT is the one gotcha that silently fails uploads - S3 returns 200 regardless, but
+    /// the backend job processor marks it "Failed" without it.
     /// </summary>
-    public async Task<string> UploadFileAsync(string localPath, CancellationToken ct = default)
+    public async Task<string> UploadBytesAsync(string fileName, byte[] bytes, CancellationToken ct = default)
     {
-        var info = new FileInfo(localPath);
-        string contentType = Path.GetExtension(localPath).ToLowerInvariant() switch
-        {
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".png" => "image/png",
-            ".webp" => "image/webp",
-            _ => "application/octet-stream",
-        };
+        const string contentType = "image/jpeg"; // PrepareForUploadAsync always re-encodes as JPEG
 
         using var presignDoc = await PostAsync(new
         {
             type = "upload",
-            fileName = info.Name,
+            fileName,
             fileType = contentType,
-            fileSize = info.Length,
+            fileSize = bytes.LongLength,
         }, ct);
 
         var root = presignDoc.RootElement;
@@ -110,8 +114,7 @@ public class VrcdnApiClient
         string url = root.GetProperty("Url").GetString()!;
         string jobId = root.GetProperty("JobId").GetString()!;
 
-        using var fileStream = File.OpenRead(localPath);
-        using var content = new StreamContent(fileStream);
+        using var content = new ByteArrayContent(bytes);
         content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
 
         using var putResp = await new HttpClient().PutAsync(url, content, ct);

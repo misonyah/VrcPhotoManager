@@ -30,7 +30,7 @@ public class PhotoRepository
                 local_path TEXT UNIQUE NOT NULL,
                 file_size INTEGER NOT NULL,
                 mtime REAL NOT NULL,
-                thumbnail_path TEXT,
+                thumbnail BLOB,
                 rating TEXT,
                 selected INTEGER NOT NULL DEFAULT 0,
                 remote_status TEXT NOT NULL DEFAULT 'NotUploaded',
@@ -46,6 +46,27 @@ public class PhotoRepository
             );
             """;
         cmd.ExecuteNonQuery();
+
+        MigrateThumbnailPathToBlob(conn);
+    }
+
+    /// <summary>
+    /// Early dev versions stored thumbnails as file paths (thumbnail_path column); switched
+    /// to storing them as BLOBs directly (SQLite's own docs note blobs under ~100KB read
+    /// faster than separate files for this size/count). CREATE TABLE IF NOT EXISTS won't
+    /// migrate an existing table, so add the new column here if it's missing rather than
+    /// dropping the db - existing rows just re-generate their thumbnail on next scan.
+    /// </summary>
+    private static void MigrateThumbnailPathToBlob(SqliteConnection conn)
+    {
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('photos') WHERE name = 'thumbnail'";
+        long hasThumbnailColumn = (long)checkCmd.ExecuteScalar()!;
+        if (hasThumbnailColumn > 0) return;
+
+        using var alterCmd = conn.CreateCommand();
+        alterCmd.CommandText = "ALTER TABLE photos ADD COLUMN thumbnail BLOB";
+        alterCmd.ExecuteNonQuery();
     }
 
     public long UpsertLocalFile(string path, long size, double mtime)
@@ -64,11 +85,21 @@ public class PhotoRepository
         return (long)cmd.ExecuteScalar()!;
     }
 
+    /// <summary>
+    /// Deliberately excludes the thumbnail BLOB - loading all of them upfront would defeat
+    /// the point of lazy per-row loading. Use GetThumbnail(id) on demand (PhotoViewModel does
+    /// this only when a row is actually realized by the virtualizing panel).
+    /// </summary>
     public List<Photo> GetAll()
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, local_path, file_size, mtime, thumbnail_path, rating, selected, remote_status, remote_url, remote_id, uploaded_at FROM photos ORDER BY local_path";
+        cmd.CommandText = """
+            SELECT id, local_path, file_size, mtime,
+                   (thumbnail IS NOT NULL) AS has_thumbnail,
+                   rating, selected, remote_status, remote_url, remote_id, uploaded_at
+            FROM photos ORDER BY local_path
+            """;
         using var reader = cmd.ExecuteReader();
         var result = new List<Photo>();
         while (reader.Read())
@@ -84,7 +115,7 @@ public class PhotoRepository
         LocalPath = reader.GetString(1),
         FileSize = reader.GetInt64(2),
         Mtime = reader.GetDouble(3),
-        ThumbnailPath = reader.IsDBNull(4) ? null : reader.GetString(4),
+        HasThumbnail = reader.GetInt64(4) != 0,
         Rating = reader.IsDBNull(5) ? null : reader.GetString(5),
         Selected = reader.GetInt64(6) != 0,
         RemoteStatus = Enum.Parse<RemoteStatus>(reader.GetString(7)),
@@ -93,12 +124,22 @@ public class PhotoRepository
         UploadedAt = reader.IsDBNull(10) ? null : reader.GetString(10),
     };
 
-    public void SetThumbnailPath(long id, string thumbnailPath)
+    public byte[]? GetThumbnail(long id)
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE photos SET thumbnail_path = @t WHERE id = @id";
-        cmd.Parameters.AddWithValue("@t", thumbnailPath);
+        cmd.CommandText = "SELECT thumbnail FROM photos WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        var result = cmd.ExecuteScalar();
+        return result as byte[];
+    }
+
+    public void SetThumbnail(long id, byte[] thumbnail)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE photos SET thumbnail = @t WHERE id = @id";
+        cmd.Parameters.AddWithValue("@t", thumbnail);
         cmd.Parameters.AddWithValue("@id", id);
         cmd.ExecuteNonQuery();
     }

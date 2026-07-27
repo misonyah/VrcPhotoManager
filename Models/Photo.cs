@@ -14,7 +14,7 @@ public class Photo
     public required string LocalPath { get; set; }
     public long FileSize { get; set; }
     public double Mtime { get; set; }
-    public string? ThumbnailPath { get; set; }
+    public bool HasThumbnail { get; set; }
     public string? Rating { get; set; }
     public bool Selected { get; set; }
     public RemoteStatus RemoteStatus { get; set; } = RemoteStatus.NotUploaded;
