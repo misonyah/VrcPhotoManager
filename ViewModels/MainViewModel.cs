@@ -22,6 +22,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly CredentialStore _credentials;
     private readonly FaceRepository _faces;
     private FaceDetectionService? _faceDetector;
+    private VrcxProfileLookupService? _profileLookup;
     private WdTaggerService? _tagger;
     private VrcdnApiClient? _api;
 
@@ -136,6 +137,11 @@ public class MainViewModel : INotifyPropertyChanged
     /// MetadataWindow) can read/write the WD14 model path settings.</summary>
     public PhotoRepository Repo => _repo;
 
+    /// <summary>Exposed so MainWindow's code-behind can open TagFacesWindow (opened from
+    /// code-behind, like MetadataWindow/SettingsWindow).</summary>
+    public FaceRepository Faces => _faces;
+    public VrcxProfileLookupService? ProfileLookup => _profileLookup;
+
     public MainViewModel()
     {
         // Deliberately still "VrcdnManager" - the on-disk data folder name, kept stable
@@ -205,6 +211,17 @@ public class MainViewModel : INotifyPropertyChanged
             StatusMessage = $"Face detector unavailable: {faceDetectorError}";
         }
         ScanFacesCommand.RaiseCanExecuteChanged();
+
+        var (profileLookup, profileLookupError) = await Task.Run(() =>
+        {
+            var s = VrcxProfileLookupService.TryCreate(out string? error);
+            return (s, error);
+        });
+        _profileLookup = profileLookup;
+        if (_profileLookup is null)
+        {
+            StatusMessage = $"VRCX profile-picture bootstrap unavailable: {profileLookupError}";
+        }
     }
 
     private void TryAutoLogin()

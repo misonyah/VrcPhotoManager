@@ -1,0 +1,36 @@
+<Window x:Class="VrcPhotoManager.Views.TagFacesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tag Faces" Height="700" Width="900"
+        WindowStartupLocation="CenterOwner">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="ImageContainer" Grid.Row="0">
+            <Image x:Name="PhotoImage" Stretch="Uniform" SizeChanged="PhotoImage_SizeChanged" />
+            <Canvas x:Name="FaceCanvas" Background="Transparent" />
+        </Grid>
+
+        <TextBlock Grid.Row="1" Text="Click a box to tag who it is. Green = already tagged, yellow = untagged."
+                   Margin="8" Foreground="Gray" />
+
+        <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True">
+            <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1" Padding="8" MaxWidth="260">
+                <StackPanel>
+                    <TextBlock Text="Who is this?" Foreground="White" FontWeight="Bold" Margin="0,0,0,6" />
+                    <ListBox x:Name="SuggestionListBox" MaxHeight="200" DisplayMemberPath="DisplayText"
+                             MouseUp="SuggestionListBox_MouseUp" />
+                    <Separator Margin="0,6,0,6" />
+                    <TextBox x:Name="NewPersonNameTextBox" Margin="0,0,0,4"
+                             ToolTip="Type a name and press Enter to create a new person (no VRC id)"
+                             KeyDown="NewPersonNameTextBox_KeyDown" />
+                    <Button Content="Not a face / ignore" Click="IgnoreButton_Click" Margin="0,4,0,0" />
+                    <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</Window>

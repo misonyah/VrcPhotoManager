@@ -84,6 +84,21 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 3 && e.Args[0] == "--debug-tag-faces")
+        {
+            // Verification-only hook (like --debug-login) - accepts a db path (point at a
+            // scratch copy) so this never writes real tag data into the live database.
+            string dbPath = e.Args[1];
+            long photoId = long.Parse(e.Args[2]);
+            var photos = new Data.PhotoRepository(dbPath);
+            var faces = new Data.FaceRepository(dbPath);
+            var photo = photos.GetAll().First(p => p.Id == photoId);
+            var lookup = Services.VrcxProfileLookupService.TryCreate(out _);
+            new Views.TagFacesWindow(faces, photos, lookup, photo).ShowDialog();
+            Shutdown();
+            return;
+        }
+
         if (e.Args.Length == 3 && e.Args[0] == "--test-face-repo")
         {
             RunFaceRepoDiagnostic(e.Args[1], long.Parse(e.Args[2]));

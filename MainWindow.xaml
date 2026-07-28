@@ -118,6 +118,7 @@
                                                 <MenuItem Header="Clear (unclassified)" Command="{Binding SetRatingCommand}" CommandParameter="{x:Null}" />
                                             </MenuItem>
                                             <MenuItem Header="View Metadata..." Click="ViewMetadata_Click" />
+                                            <MenuItem Header="Tag Faces..." Click="TagFaces_Click" />
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                     <Grid>

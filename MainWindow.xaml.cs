@@ -42,6 +42,15 @@ public partial class MainWindow : Window
         new Views.MetadataWindow(photo) { Owner = this }.ShowDialog();
     }
 
+    private void TagFaces_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.ProfileLookup, photo.Model) { Owner = this }.ShowDialog();
+        vm.RefreshPlayerFilterOptions();
+    }
+
     private void PhotoImage_Click(object sender, MouseButtonEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is PhotoViewModel photo)
