@@ -161,6 +161,39 @@ public class PhotoRepository
         }
     }
 
+    public List<PhotoPlayer> GetPlayersForPhoto(long photoId)
+    {
+        using var context = NewContext();
+        return context.PhotoPlayers.AsNoTracking().Where(p => p.PhotoId == photoId).ToList();
+    }
+
+    /// <summary>
+    /// Every player VRCX has ever recorded, deduped by UserId (a person can be recorded under
+    /// different DisplayNames over time if they rename - this keeps the most
+    /// recently-recorded name). Pulled into memory for the group-by-latest logic, same
+    /// precedent as SyncRemoteMatches' in-memory regex matching - this table is bounded by
+    /// total photos scanned, not a runaway size.
+    /// </summary>
+    public List<(string UserId, string DisplayName)> GetDistinctPlayers()
+    {
+        using var context = NewContext();
+        return context.PhotoPlayers
+            .AsNoTracking()
+            .OrderByDescending(p => p.Id)
+            .Select(p => new { p.UserId, p.DisplayName })
+            .AsEnumerable()
+            .GroupBy(p => p.UserId)
+            .Select(g => (g.Key, g.First().DisplayName))
+            .OrderBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public HashSet<long> GetPhotoIdsForUser(string vrcUserId)
+    {
+        using var context = NewContext();
+        return context.PhotoPlayers.Where(p => p.UserId == vrcUserId).Select(p => p.PhotoId).ToHashSet();
+    }
+
     public void SetFileHash(long id, string hash)
     {
         using var context = NewContext();

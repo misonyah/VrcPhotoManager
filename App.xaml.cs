@@ -83,6 +83,60 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        if (e.Args.Length == 3 && e.Args[0] == "--test-face-repo")
+        {
+            RunFaceRepoDiagnostic(e.Args[1], long.Parse(e.Args[2]));
+            Shutdown();
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Exercises FaceRepository/PhotoRepository's tagging methods end-to-end against a given
+    /// db path (pass a scratch copy - this writes a throwaway person/label row). Verifies the
+    /// LINQ actually translates to valid SQL, not just that it compiles.
+    /// </summary>
+    private static void RunFaceRepoDiagnostic(string dbPath, long photoId)
+    {
+        var faces = new Data.FaceRepository(dbPath);
+        var photos = new Data.PhotoRepository(dbPath);
+
+        var detected = faces.GetDetectedFaces(photoId);
+        Console.WriteLine($"DetectedFaces for photo {photoId}: {detected.Count}");
+        if (detected.Count == 0)
+        {
+            Console.WriteLine("No detected faces for this photo - pick one that has been face-scanned.");
+            return;
+        }
+
+        var person = faces.FindOrCreatePersonByVrcUserId("usr_diagnostic_test_0000", "DiagnosticTestPerson");
+        Console.WriteLine($"FindOrCreatePersonByVrcUserId -> Id={person.Id}, Name={person.Name}");
+
+        long faceId = detected[0].Id;
+        faces.UpsertFaceLabel(faceId, person.Id, confirmed: true, Models.FaceLabelSource.Manual);
+        Console.WriteLine($"Tagged face {faceId} -> person {person.Id}");
+
+        var labels = faces.GetFaceLabelsByPhoto(photoId);
+        Console.WriteLine($"GetFaceLabelsByPhoto: {labels.Count} label(s), face {faceId} confirmed={labels[faceId].Confirmed}");
+
+        var taggedIds = faces.GetTaggedUserIds();
+        Console.WriteLine($"GetTaggedUserIds contains usr_diagnostic_test_0000: {taggedIds.Contains("usr_diagnostic_test_0000")}");
+
+        var taggedPhotoIds = faces.GetTaggedPhotoIdsForUser("usr_diagnostic_test_0000");
+        Console.WriteLine($"GetTaggedPhotoIdsForUser contains photo {photoId}: {taggedPhotoIds.Contains(photoId)}");
+
+        faces.SetVrcProfileThumbnail(person.Id, [1, 2, 3]);
+        Console.WriteLine("SetVrcProfileThumbnail: OK");
+
+        var distinctPlayers = photos.GetDistinctPlayers();
+        Console.WriteLine($"GetDistinctPlayers: {distinctPlayers.Count} distinct players");
+
+        var playersForPhoto = photos.GetPlayersForPhoto(photoId);
+        Console.WriteLine($"GetPlayersForPhoto({photoId}): {playersForPhoto.Count} player(s)");
+
+        faces.DeleteFaceLabel(faceId);
+        Console.WriteLine("DeleteFaceLabel: OK (cleanup)");
     }
 
     private static void RunVrcdnSyncDiagnostic()

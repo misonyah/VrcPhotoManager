@@ -38,4 +38,113 @@ public class FaceRepository(string dbPath)
             .Select(g => new { PhotoId = g.Key, Count = g.Count() })
             .ToDictionary(x => x.PhotoId, x => x.Count);
     }
+
+    public List<DetectedFace> GetDetectedFaces(long photoId)
+    {
+        using var context = NewContext();
+        return context.DetectedFaces.AsNoTracking().Where(f => f.PhotoId == photoId).OrderBy(f => f.Id).ToList();
+    }
+
+    public Dictionary<long, FaceLabel> GetFaceLabelsByPhoto(long photoId)
+    {
+        using var context = NewContext();
+        var faceIds = context.DetectedFaces.Where(f => f.PhotoId == photoId).Select(f => f.Id);
+        return context.FaceLabels.AsNoTracking()
+            .Where(l => faceIds.Contains(l.DetectedFaceId))
+            .ToDictionary(l => l.DetectedFaceId, l => l);
+    }
+
+    /// <summary>
+    /// Replaces any existing label for this face - a face has at most one label at a time,
+    /// same re-scan idiom as InsertDetectedFaces.
+    /// </summary>
+    public void UpsertFaceLabel(long detectedFaceId, long? personId, bool confirmed, FaceLabelSource source)
+    {
+        using var context = NewContext();
+        context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
+        context.FaceLabels.Add(new FaceLabel
+        {
+            DetectedFaceId = detectedFaceId,
+            PersonId = personId,
+            Confirmed = confirmed,
+            Source = source,
+            Confidence = 1.0f,
+        });
+        context.SaveChanges();
+    }
+
+    public void DeleteFaceLabel(long detectedFaceId)
+    {
+        using var context = NewContext();
+        context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
+    }
+
+    public RegisteredPerson FindOrCreatePersonByVrcUserId(string vrcUserId, string displayName)
+    {
+        using var context = NewContext();
+        var existing = context.RegisteredPeople.FirstOrDefault(p => p.VrcUserId == vrcUserId);
+        if (existing is not null) return existing;
+
+        var person = new RegisteredPerson { Name = displayName, VrcUserId = vrcUserId };
+        context.RegisteredPeople.Add(person);
+        context.SaveChanges();
+        return person;
+    }
+
+    public RegisteredPerson CreatePerson(string name)
+    {
+        using var context = NewContext();
+        var person = new RegisteredPerson { Name = name };
+        context.RegisteredPeople.Add(person);
+        context.SaveChanges();
+        return person;
+    }
+
+    public List<RegisteredPerson> GetAllPersons()
+    {
+        using var context = NewContext();
+        return context.RegisteredPeople.AsNoTracking().OrderBy(p => p.Name).ToList();
+    }
+
+    /// <summary>
+    /// Every VrcUserId with at least one confirmed visual face tag anywhere in the library -
+    /// drives the player-filter dropdown's "(tagged)" annotation.
+    /// </summary>
+    public HashSet<string> GetTaggedUserIds()
+    {
+        using var context = NewContext();
+        return context.FaceLabels.AsNoTracking()
+            .Where(l => l.Confirmed && l.PersonId != null)
+            .Join(context.RegisteredPeople, l => l.PersonId, p => p.Id, (l, p) => p.VrcUserId)
+            .Where(id => id != null)
+            .Select(id => id!)
+            .Distinct()
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// Photo ids where this specific VRC user has a confirmed visual face tag - drives the
+    /// "Tagged only" checkbox filter (distinct from "this photo's VRCX metadata lists this
+    /// player", which PhotoRepository.GetPhotoIdsForUser answers instead).
+    /// </summary>
+    public HashSet<long> GetTaggedPhotoIdsForUser(string vrcUserId)
+    {
+        using var context = NewContext();
+        var personIds = context.RegisteredPeople.Where(p => p.VrcUserId == vrcUserId).Select(p => p.Id);
+        var faceIds = context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId != null && personIds.Contains(l.PersonId!.Value))
+            .Select(l => l.DetectedFaceId);
+        return context.DetectedFaces
+            .Where(f => faceIds.Contains(f.Id))
+            .Select(f => f.PhotoId)
+            .ToHashSet();
+    }
+
+    public void SetVrcProfileThumbnail(long personId, byte[] thumbnail)
+    {
+        using var context = NewContext();
+        context.RegisteredPeople.Where(p => p.Id == personId).ExecuteUpdate(s => s
+            .SetProperty(p => p.VrcProfileThumbnail, thumbnail)
+            .SetProperty(p => p.VrcProfileThumbnailFetchedAt, DateTime.UtcNow));
+    }
 }
