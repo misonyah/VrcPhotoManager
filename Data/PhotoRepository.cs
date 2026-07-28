@@ -262,6 +262,11 @@ public class PhotoRepository
     /// this local library (e.g. curated/video-derived content also uploaded for the
     /// photo-frame slideshow) or an unhandled filename shape (~4% of local files have
     /// irregular names - a missing leading zero, an extra suffix, etc.).
+    ///
+    /// Matches against ALL local photos, not just ones still NotUploaded - a re-sync must
+    /// not report a remote object as "unresolved" just because its local twin was already
+    /// correctly marked Uploaded by an earlier sync (an earlier version of this method did
+    /// exactly that, making every re-sync look like it regressed to 0 matches).
     /// </summary>
     public List<string> SyncRemoteMatches(IEnumerable<(string OriginalFileName, string Id, string Extension, long Size)> remoteObjects, string vrcdnUsername)
     {
@@ -270,10 +275,10 @@ public class PhotoRepository
         // Loaded once and matched in memory - the fallback needs regex parsing that EF can't
         // translate to SQL, and re-querying per remote object would be thousands of round trips.
         var candidates = context.Photos
-            .Where(p => p.RemoteStatus != RemoteStatus.Uploaded)
             .OrderBy(p => p.Id)
-            .Select(p => new { p.Id, p.LocalPath })
+            .Select(p => new { p.Id, p.LocalPath, p.RemoteStatus })
             .ToList();
+        var statusById = candidates.ToDictionary(c => c.Id, c => c.RemoteStatus);
         var byNormalizedKey = candidates
             .Select(c => (c.Id, c.LocalPath, Key: TryParseLocalNameKey(c.LocalPath)))
             .Where(c => c.Key is not null)
@@ -305,6 +310,8 @@ public class PhotoRepository
             }
 
             claimed.Add(matchId.Value);
+            if (statusById[matchId.Value] == RemoteStatus.Uploaded) continue; // already correct from a prior sync
+
             var photo = context.Photos.First(p => p.Id == matchId.Value);
             photo.RemoteStatus = RemoteStatus.Uploaded;
             photo.RemoteUrl = $"https://vrcdn.cloud/{vrcdnUsername}/{obj.Id}.{obj.Extension}";

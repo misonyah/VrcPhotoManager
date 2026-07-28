@@ -46,9 +46,6 @@
 
             <TextBlock Text="Thumbnail size:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Slider Minimum="80" Maximum="400" Width="180" Value="{Binding ThumbnailSize}" VerticalAlignment="Center" Margin="0,0,16,0" />
-
-            <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,8,0" />
-            <Button Content="About" Click="AboutButton_Click" Padding="8,4" />
         </StackPanel>
 
         <!-- Photo grid (left) + action buttons (right). -->
@@ -182,6 +179,10 @@
                         ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
                 <Button Content="Scan Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Detects anime-style faces in every photo (OpenCvSharp + lbpcascade_animeface) and shows a count badge on each thumbnail" />
+
+                <Separator Margin="0,0,0,8" />
+                <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="About" Click="AboutButton_Click" Padding="8,4" />
             </StackPanel>
         </Grid>
 
