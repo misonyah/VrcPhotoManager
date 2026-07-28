@@ -334,4 +334,13 @@ public class PhotoRepository
         }
         context.SaveChanges();
     }
+
+    public string? GetStringSetting(string key)
+    {
+        byte[]? bytes = GetSetting(key);
+        return bytes is null ? null : System.Text.Encoding.UTF8.GetString(bytes);
+    }
+
+    public void SetStringSetting(string key, string value) =>
+        SetSetting(key, System.Text.Encoding.UTF8.GetBytes(value));
 }

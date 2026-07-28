@@ -25,6 +25,10 @@ public class MainViewModel : INotifyPropertyChanged
     private WdTaggerService? _tagger;
     private VrcdnApiClient? _api;
 
+    /// <summary>Cancelled when the window closes, so a long-running background scan stops
+    /// starting new file work instead of racing the process teardown.</summary>
+    private readonly CancellationTokenSource _shutdownCts = new();
+
     private readonly List<PhotoViewModel> _allPhotos = [];
     public ObservableCollection<PhotoRow> Rows { get; } = [];
 
@@ -104,6 +108,10 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand UploadSelectedCommand { get; }
     public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
+
+    /// <summary>Exposed so the Settings window (opened from code-behind, like AboutWindow/
+    /// MetadataWindow) can read/write the WD14 model path settings.</summary>
+    public PhotoRepository Repo => _repo;
 
     public MainViewModel()
     {
@@ -223,24 +231,49 @@ public class MainViewModel : INotifyPropertyChanged
     private bool CanRemoveFromVrcdn() =>
         _api is not null && _allPhotos.Any(p => p.Selected && p.RemoteStatus == RemoteStatus.Uploaded);
 
+    /// <summary>Called from MainWindow's Closing handler - lets an in-progress Scan Library
+    /// stop starting new file work promptly instead of continuing to churn as the app exits.</summary>
+    public void RequestShutdown() => _shutdownCts.Cancel();
+
     private void RaiseSelectionDependentCommands()
     {
         UploadSelectedCommand.RaiseCanExecuteChanged();
         RemoveFromVrcdnCommand.RaiseCanExecuteChanged();
     }
 
+    /// <summary>Result of the background-thread probe for one file - kept free of any
+    /// PhotoViewModel/Model references, since those are only ever touched back on the UI
+    /// thread once this returns.</summary>
+    private record ScanProbeResult(VrcxPhotoMetadata? Metadata, int? Width, int? Height);
+
     private async Task ScanLibraryAsync()
     {
+        var token = _shutdownCts.Token;
+
         // VRChat's own default screenshot location, regardless of which account runs this.
         string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "VRChat");
         StatusMessage = "Scanning library...";
-        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(f => ImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-            .ToList();
+
+        // Directory enumeration itself is synchronous I/O - offload it too so a large tree
+        // doesn't cause even a brief startup hitch.
+        List<string> files;
+        try
+        {
+            files = await Task.Run(() => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Where(f => ImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .ToList(), token);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Scan cancelled.";
+            return;
+        }
 
         int processed = 0;
         foreach (var chunk in Chunk(files, 25))
         {
+            if (token.IsCancellationRequested) { StatusMessage = "Scan cancelled."; return; }
+
             foreach (var path in chunk)
             {
                 var info = new FileInfo(path);
@@ -259,38 +292,63 @@ public class MainViewModel : INotifyPropertyChanged
                 // confirmed to have none, since re-parsing those files would be pure waste.
                 bool needsMetadataScan = !existing.Model.MetadataScanned
                     || (existing.Model.AuthorDisplayName is not null && existing.Model.AuthorId is null);
-                if (needsMetadataScan)
-                {
-                    var meta = PngMetadataReader.TryReadVrcxMetadata(path);
-                    string? playerNames = meta?.Players is { Count: > 0 }
-                        ? string.Join(", ", meta.Players.Select(p => p.DisplayName))
-                        : null;
-                    var players = meta?.Players?.Select(p => (p.Id, p.DisplayName));
-                    _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames, players);
-                    existing.Model.MetadataScanned = true;
-                    existing.Model.AuthorId = meta?.Author?.Id;
-                    existing.Model.AuthorDisplayName = meta?.Author?.DisplayName;
-                    existing.Model.WorldName = meta?.World?.Name;
-                    existing.Model.PlayerNames = playerNames;
-                    existing.NotifyMetadataChanged();
-                }
+                bool needsDimensions = existing.Model.Width is null;
 
-                if (existing.Model.Width is null)
+                if (needsMetadataScan || needsDimensions)
                 {
+                    ScanProbeResult probe;
                     try
                     {
-                        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
-                            new Uri(path), System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
-                            System.Windows.Media.Imaging.BitmapCacheOption.None);
-                        int w = decoder.Frames[0].PixelWidth;
-                        int h = decoder.Frames[0].PixelHeight;
-                        _repo.SetImageDimensions(id, w, h);
-                        existing.Model.Width = w;
-                        existing.Model.Height = h;
+                        // The actual file I/O and PNG/bitmap parsing runs off the UI thread -
+                        // this is what previously made Scan Library freeze the window, since
+                        // only thumbnail generation was ever backgrounded.
+                        probe = await Task.Run(() =>
+                        {
+                            var meta = needsMetadataScan ? PngMetadataReader.TryReadVrcxMetadata(path) : null;
+                            int? w = null, h = null;
+                            if (needsDimensions)
+                            {
+                                var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+                                    new Uri(path), System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
+                                    System.Windows.Media.Imaging.BitmapCacheOption.None);
+                                w = decoder.Frames[0].PixelWidth;
+                                h = decoder.Frames[0].PixelHeight;
+                            }
+                            return new ScanProbeResult(meta, w, h);
+                        }, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        StatusMessage = "Scan cancelled.";
+                        return;
                     }
                     catch (Exception ex)
                     {
-                        StatusMessage = $"Couldn't read dimensions for {Path.GetFileName(path)}: {ex.Message}";
+                        StatusMessage = $"Couldn't scan {Path.GetFileName(path)}: {ex.Message}";
+                        probe = new ScanProbeResult(null, null, null);
+                    }
+
+                    if (needsMetadataScan)
+                    {
+                        var meta = probe.Metadata;
+                        string? playerNames = meta?.Players is { Count: > 0 }
+                            ? string.Join(", ", meta.Players.Select(p => p.DisplayName))
+                            : null;
+                        var players = meta?.Players?.Select(p => (p.Id, p.DisplayName));
+                        _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames, players);
+                        existing.Model.MetadataScanned = true;
+                        existing.Model.AuthorId = meta?.Author?.Id;
+                        existing.Model.AuthorDisplayName = meta?.Author?.DisplayName;
+                        existing.Model.WorldName = meta?.World?.Name;
+                        existing.Model.PlayerNames = playerNames;
+                        existing.NotifyMetadataChanged();
+                    }
+
+                    if (needsDimensions && probe.Width is int w2 && probe.Height is int h2)
+                    {
+                        _repo.SetImageDimensions(id, w2, h2);
+                        existing.Model.Width = w2;
+                        existing.Model.Height = h2;
                     }
                 }
 
@@ -298,10 +356,15 @@ public class MainViewModel : INotifyPropertyChanged
                 {
                     try
                     {
-                        byte[] thumbnail = await _thumbnails.GenerateThumbnailAsync(path);
+                        byte[] thumbnail = await _thumbnails.GenerateThumbnailAsync(path, token);
                         _repo.SetThumbnail(id, thumbnail);
                         existing.Model.HasThumbnail = true;
                         existing.NotifyThumbnailReady();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        StatusMessage = "Scan cancelled.";
+                        return;
                     }
                     catch (Exception ex)
                     {
@@ -365,17 +428,24 @@ public class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Checks a folder next to the exe first (so a public build works for anyone who drops
-    /// the model there), falling back to the dev machine's path this was built against.
+    /// Checks the path configured via the Settings window first, then a folder next to the
+    /// exe (so a public build works for anyone who drops the model there), falling back to
+    /// the dev machine's path this was built against.
     /// </summary>
-    private static string ResolveWdTaggerModelDir()
+    private string ResolveWdTaggerModelDir()
     {
+        string? configured = _repo.GetStringSetting(SettingsKeys.WdModelDir);
+        if (configured is not null && Directory.Exists(configured)) return configured;
+
         string local = Path.Combine(AppContext.BaseDirectory, "wd14-model");
         return Directory.Exists(local) ? local : @"D:\AI-Tools\wd14-tagger\model";
     }
 
-    private static string? ResolveWdTaggerIndexDb()
+    private string? ResolveWdTaggerIndexDb()
     {
+        string? configured = _repo.GetStringSetting(SettingsKeys.WdIndexDb);
+        if (configured is not null && File.Exists(configured)) return configured;
+
         string local = Path.Combine(AppContext.BaseDirectory, "wd14-index.db");
         if (File.Exists(local)) return local;
         const string devPath = @"D:\AI-Tools\wd14-tagger\index.db";

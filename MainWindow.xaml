@@ -29,22 +29,8 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Toolbar -->
+        <!-- Filters -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8" VerticalAlignment="Center">
-            <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,8,0" />
-            <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,8,0" />
-            <Button Content="Import Ratings" Command="{Binding ImportRatingsCommand}" Padding="8,4" Margin="0,0,8,0" />
-            <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,8,0"
-                    ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
-            <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,8,0" />
-            <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,8,0" FontWeight="Bold" />
-            <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,8,0"
-                    ToolTip="Deletes selected, already-uploaded photos from VRCDN's storage and marks them Not Uploaded locally" />
-            <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,16,0"
-                    ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
-            <Button Content="Scan Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,8,0"
-                    ToolTip="Detects anime-style faces in every photo (OpenCvSharp + lbpcascade_animeface) and shows a count badge on each thumbnail" />
-
             <TextBlock Text="Rating:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Width="110" Margin="0,0,16,0" />
 
@@ -61,17 +47,25 @@
             <TextBlock Text="Thumbnail size:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Slider Minimum="80" Maximum="400" Width="180" Value="{Binding ThumbnailSize}" VerticalAlignment="Center" Margin="0,0,16,0" />
 
+            <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,8,0" />
             <Button Content="About" Click="AboutButton_Click" Padding="8,4" />
         </StackPanel>
 
-        <!-- Photo grid. Uses ListBox rather than a plain ItemsControl: plain ItemsControl does
-             NOT actually virtualize regardless of VirtualizingPanel/VirtualizingStackPanel
-             settings - real UI virtualization needs a Selector-derived container. Without
-             this, all ~4800 photos (each triggering its lazy thumbnail load) were being
-             fully realized on the UI thread at startup, freezing the window for many
-             seconds. Selection chrome is stripped via ItemContainerStyle since we use our
-             own CheckBox-based multi-select, not ListBox's built-in selection. -->
-        <ListBox Grid.Row="1" x:Name="PhotoGrid" ItemsSource="{Binding Rows}"
+        <!-- Photo grid (left) + action buttons (right). -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Uses ListBox rather than a plain ItemsControl: plain ItemsControl does
+                 NOT actually virtualize regardless of VirtualizingPanel/VirtualizingStackPanel
+                 settings - real UI virtualization needs a Selector-derived container. Without
+                 this, all ~4800 photos (each triggering its lazy thumbnail load) were being
+                 fully realized on the UI thread at startup, freezing the window for many
+                 seconds. Selection chrome is stripped via ItemContainerStyle since we use our
+                 own CheckBox-based multi-select, not ListBox's built-in selection. -->
+        <ListBox Grid.Column="0" x:Name="PhotoGrid" ItemsSource="{Binding Rows}"
                  SizeChanged="PhotoGrid_SizeChanged"
                  ScrollViewer.CanContentScroll="True"
                  VirtualizingPanel.IsVirtualizing="True"
@@ -171,6 +165,25 @@
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
+
+            <!-- Action buttons - all the same width via a fixed-width vertical StackPanel
+                 (Button's default HorizontalAlignment is Stretch, so each fills it). -->
+            <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
+                <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Import Ratings" Command="{Binding ImportRatingsCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
+                <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold" />
+                <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Deletes selected, already-uploaded photos from VRCDN's storage and marks them Not Uploaded locally" />
+                <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
+                <Button Content="Scan Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Detects anime-style faces in every photo (OpenCvSharp + lbpcascade_animeface) and shows a count badge on each thumbnail" />
+            </StackPanel>
+        </Grid>
 
         <!-- Status bar -->
         <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Margin="8,4" />

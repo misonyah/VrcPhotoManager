@@ -21,11 +21,19 @@ public partial class MainWindow : Window
 
         _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.25) };
         _hoverTimer.Tick += HoverTimer_Tick;
+
+        Closing += (_, _) => viewModel.RequestShutdown();
     }
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
     {
         new Views.AboutWindow { Owner = this }.ShowDialog();
+    }
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        new Views.SettingsWindow(vm.Repo) { Owner = this }.ShowDialog();
     }
 
     private void ViewMetadata_Click(object sender, RoutedEventArgs e)
