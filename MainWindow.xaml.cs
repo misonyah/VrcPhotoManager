@@ -28,6 +28,20 @@ public partial class MainWindow : Window
         new Views.AboutWindow { Owner = this }.ShowDialog();
     }
 
+    private void ViewMetadata_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
+        new Views.MetadataWindow(photo) { Owner = this }.ShowDialog();
+    }
+
+    private void PhotoImage_Click(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is PhotoViewModel photo)
+        {
+            photo.Selected = !photo.Selected;
+        }
+    }
+
     private void PhotoGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (DataContext is MainViewModel vm)

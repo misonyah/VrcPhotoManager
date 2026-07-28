@@ -90,7 +90,8 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
-    public ICommand UploadSelectedCommand { get; }
+    public RelayCommand UploadSelectedCommand { get; }
+    public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
 
     public MainViewModel()
@@ -113,7 +114,8 @@ public class MainViewModel : INotifyPropertyChanged
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
-        UploadSelectedCommand = new RelayCommand(UploadSelectedAsync);
+        UploadSelectedCommand = new RelayCommand(UploadSelectedAsync, CanUploadSelected);
+        RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
         CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
 
         _statusMessage = "Loading...";
@@ -125,7 +127,7 @@ public class MainViewModel : INotifyPropertyChanged
         var photos = await Task.Run(() => _repo.GetAll());
         foreach (var photo in photos)
         {
-            _allPhotos.Add(new PhotoViewModel(photo, _repo));
+            AddPhoto(new PhotoViewModel(photo, _repo));
         }
         RebuildRows();
         StatusMessage = $"{_allPhotos.Count} photos loaded.";
@@ -154,6 +156,7 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 _api = new VrcdnApiClient(cookie);
                 StatusMessage = "Logged in (restored session).";
+                RaiseSelectionDependentCommands();
             }
         }
         catch (InvalidOperationException)
@@ -175,7 +178,29 @@ public class MainViewModel : INotifyPropertyChanged
         _credentials.SaveCookie(window.SessionCookie, null);
         _api = new VrcdnApiClient(window.SessionCookie);
         StatusMessage = "Logged in.";
+        RaiseSelectionDependentCommands();
         await Task.CompletedTask;
+    }
+
+    /// <summary>Registers a photo with the library and wires its selection changes through
+    /// to the Upload/Remove commands' CanExecute, so those buttons stay disabled until
+    /// there's actually something selected they'd act on.</summary>
+    private void AddPhoto(PhotoViewModel vm)
+    {
+        vm.SelectionChanged += (_, _) => RaiseSelectionDependentCommands();
+        _allPhotos.Add(vm);
+    }
+
+    private bool CanUploadSelected() =>
+        _api is not null && _allPhotos.Any(p => p.Selected && p.RemoteStatus != RemoteStatus.Uploaded);
+
+    private bool CanRemoveFromVrcdn() =>
+        _api is not null && _allPhotos.Any(p => p.Selected && p.RemoteStatus == RemoteStatus.Uploaded);
+
+    private void RaiseSelectionDependentCommands()
+    {
+        UploadSelectedCommand.RaiseCanExecuteChanged();
+        RemoveFromVrcdnCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ScanLibraryAsync()
@@ -200,7 +225,7 @@ public class MainViewModel : INotifyPropertyChanged
                 {
                     var model = new Photo { Id = id, LocalPath = path, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate() };
                     existing = new PhotoViewModel(model, _repo);
-                    _allPhotos.Add(existing);
+                    AddPhoto(existing);
                 }
 
                 if (!existing.Model.MetadataScanned)
@@ -372,7 +397,7 @@ public class MainViewModel : INotifyPropertyChanged
                 var info = new FileInfo(newPath);
                 long id = _repo.UpsertLocalFile(newPath, info.Length, info.LastWriteTimeUtc.ToOADate());
                 _repo.SetImageDimensions(id, 1920, 1080);
-                _allPhotos.Add(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080 }, _repo));
+                AddPhoto(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080 }, _repo));
                 cropped++;
             }
             catch (Exception ex)
@@ -451,7 +476,54 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Upload complete: {done}/{toUpload.Count} processed.";
+        RaiseSelectionDependentCommands();
         await SyncMetadataAsync();
+    }
+
+    /// <summary>
+    /// Deletes selected, currently-uploaded photos from VRCDN's storage (not just local
+    /// bookkeeping) via the same removeObject call the web panel uses, then resets their
+    /// local status back to NotUploaded. This is destructive on VRCDN's end - the file has
+    /// to be re-uploaded to get a working URL again - so it's confirmed before running.
+    /// </summary>
+    private async Task RemoveFromVrcdnAsync()
+    {
+        if (_api is null) { StatusMessage = "Log in first."; return; }
+
+        var toRemove = _allPhotos.Where(p => p.Selected && p.RemoteStatus == RemoteStatus.Uploaded).ToList();
+        if (toRemove.Count == 0) { StatusMessage = "Nothing selected is currently uploaded."; return; }
+
+        var confirm = MessageBox.Show(
+            $"Remove {toRemove.Count} photo(s) from VRCDN? This deletes them from your VRCDN storage " +
+            "(any URL/photo-frame using them will break) - you'd need to re-upload to restore them.",
+            "Remove from VRCDN", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) { StatusMessage = "Remove cancelled."; return; }
+
+        int done = 0;
+        foreach (var vm in toRemove)
+        {
+            try
+            {
+                if (vm.Model.RemoteId is not null)
+                {
+                    await _api.RemoveObjectAsync(vm.Model.RemoteId);
+                }
+                _repo.ClearRemoteStatus(vm.Model.Id);
+                vm.Model.RemoteStatus = RemoteStatus.NotUploaded;
+                vm.Model.RemoteUrl = null;
+                vm.Model.RemoteId = null;
+                vm.Model.UploadedAt = null;
+                vm.RefreshStatus();
+                done++;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Failed to remove {vm.FileName}: {ex.Message}";
+            }
+        }
+
+        StatusMessage = $"Removed {done}/{toRemove.Count} photo(s) from VRCDN.";
+        RaiseSelectionDependentCommands();
     }
 
     private void RebuildRows()

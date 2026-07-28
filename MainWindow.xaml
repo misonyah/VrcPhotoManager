@@ -36,6 +36,8 @@
                     ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
             <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,8,0" />
             <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,8,0" FontWeight="Bold" />
+            <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,8,0"
+                    ToolTip="Deletes selected, already-uploaded photos from VRCDN's storage and marks them Not Uploaded locally" />
             <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,16,0"
                     ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
 
@@ -101,8 +103,27 @@
                                         Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
                                         Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
                                         Tag="{Binding}">
+                                    <Border.ContextMenu>
+                                        <!-- ContextMenu is a separate visual tree root, so DataContext doesn't
+                                             flow to it automatically - this is the standard WPF idiom to recover it. -->
+                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <MenuItem Header="Set Rating">
+                                                <MenuItem Header="General" Command="{Binding SetRatingCommand}" CommandParameter="general" />
+                                                <MenuItem Header="Sensitive" Command="{Binding SetRatingCommand}" CommandParameter="sensitive" />
+                                                <MenuItem Header="Questionable" Command="{Binding SetRatingCommand}" CommandParameter="questionable" />
+                                                <MenuItem Header="Explicit" Command="{Binding SetRatingCommand}" CommandParameter="explicit" />
+                                                <Separator />
+                                                <MenuItem Header="Clear (unclassified)" Command="{Binding SetRatingCommand}" CommandParameter="{x:Null}" />
+                                            </MenuItem>
+                                            <MenuItem Header="View Metadata..." Click="ViewMetadata_Click" />
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
                                     <Grid>
-                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+                                        <!-- Clicking the checkbox toggles it directly (it's drawn on top for its
+                                             own bounds, so this handler never double-fires for that click); clicking
+                                             anywhere else on the thumbnail toggles selection too, via this handler. -->
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
+                                               MouseLeftButtonUp="PhotoImage_Click" />
                                         <CheckBox IsChecked="{Binding Selected}"
                                                   HorizontalAlignment="Left" VerticalAlignment="Top"
                                                   Margin="4" />
@@ -128,8 +149,13 @@
         <!-- Status bar -->
         <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Margin="8,4" />
 
-        <!-- Hover preview popup -->
-        <Popup x:Name="PreviewPopup" Placement="Mouse" AllowsTransparency="True" StaysOpen="False">
+        <!-- Hover preview popup. IsHitTestVisible="False" is load-bearing: without it, the
+             popup (which overlaps the thumbnail it's previewing, since Placement="Mouse")
+             steals mouse-over from the Border underneath, firing MouseLeave -> closes the
+             popup -> MouseEnter again -> reopens - a rapid open/close flicker loop. With hit
+             testing disabled, mouse events pass through to the grid underneath uninterrupted. -->
+        <Popup x:Name="PreviewPopup" Placement="Mouse" AllowsTransparency="True" StaysOpen="False"
+               IsHitTestVisible="False">
             <Border Background="Black" BorderBrush="White" BorderThickness="1" Padding="4">
                 <StackPanel>
                     <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />

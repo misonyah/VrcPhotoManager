@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using VrcdnManager.Data;
 using VrcdnManager.Models;
@@ -15,10 +16,20 @@ public class PhotoViewModel : INotifyPropertyChanged
     private BitmapImage? _thumbnail;
     private bool _thumbnailLoadAttempted;
 
+    /// <summary>Right-click "Rating" submenu - CommandParameter is the rating string, or
+    /// null to clear it back to unclassified.</summary>
+    public ICommand SetRatingCommand { get; }
+
     public PhotoViewModel(Photo model, PhotoRepository repo)
     {
         Model = model;
         _repo = repo;
+        SetRatingCommand = new RelayCommand<string>(rating =>
+        {
+            Model.Rating = rating;
+            _repo.SetRating(Model.Id, rating);
+            NotifyRatingChanged();
+        });
     }
 
     public string FileName => Model.FileName;
@@ -33,6 +44,10 @@ public class PhotoViewModel : INotifyPropertyChanged
         ? (Model.PlayerNames is null ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers: {Model.PlayerNames}")
         : "Not scanned yet";
 
+    /// <summary>Raised when Selected changes, so MainViewModel can re-evaluate the
+    /// Upload/Remove-from-VRCDN commands' enabled state without polling every photo.</summary>
+    public event EventHandler? SelectionChanged;
+
     public bool Selected
     {
         get => Model.Selected;
@@ -41,6 +56,7 @@ public class PhotoViewModel : INotifyPropertyChanged
             if (Model.Selected == value) return;
             Model.Selected = value;
             OnPropertyChanged();
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

@@ -77,7 +77,17 @@ public class VrcdnApiClient
         string html = await _http.GetStringAsync("/obj-files.php", ct);
         var match = Regex.Match(html, """const userName = "([^"]+)""");
         if (!match.Success)
-            throw new InvalidOperationException("Could not determine VRCDN username from obj-files.php - page layout may have changed.");
+        {
+            // The overwhelmingly likely cause is an expired/invalid session getting
+            // redirected to the login page instead of the real obj-files.php content -
+            // same class of issue as the earlier login bugs. A genuine page-layout change
+            // is possible but much rarer; lead with the actionable explanation either way.
+            bool looksLikeLoginRedirect = html.Contains("id.vrcdn.live", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("Account/Login", StringComparison.OrdinalIgnoreCase);
+            throw new InvalidOperationException(looksLikeLoginRedirect
+                ? "Session appears to be expired or invalid - log in again."
+                : "Could not determine VRCDN username from obj-files.php - your session may be expired (try logging in again), or VRCDN's page layout may have changed.");
+        }
 
         _cachedUsername = match.Groups[1].Value;
         return _cachedUsername;

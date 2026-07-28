@@ -27,3 +27,12 @@ public class RelayCommand(Func<Task> execute, Func<bool>? canExecute = null) : I
 
     public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }
+
+/// <summary>Simple synchronous parameterized command - for per-item context menu actions
+/// like "set this photo's rating to X", where the parameter comes from CommandParameter.</summary>
+public class RelayCommand<T>(Action<T?> execute) : ICommand
+{
+    public event EventHandler? CanExecuteChanged { add { } remove { } }
+    public bool CanExecute(object? parameter) => true;
+    public void Execute(object? parameter) => execute((T?)parameter);
+}

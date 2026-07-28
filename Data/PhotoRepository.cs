@@ -180,6 +180,23 @@ public class PhotoRepository
     }
 
     /// <summary>
+    /// Resets a photo back to NotUploaded and clears its remote identifiers - used when
+    /// removing an object from VRCDN. Unlike UpdateRemoteStatus, this explicitly nulls
+    /// RemoteUrl/RemoteId/UploadedAt rather than leaving them (its null-coalescing update
+    /// only ever adds values, never clears them).
+    /// </summary>
+    public void ClearRemoteStatus(long id)
+    {
+        using var context = NewContext();
+        var photo = context.Photos.First(p => p.Id == id);
+        photo.RemoteStatus = RemoteStatus.NotUploaded;
+        photo.RemoteUrl = null;
+        photo.RemoteId = null;
+        photo.UploadedAt = null;
+        context.SaveChanges();
+    }
+
+    /// <summary>
     /// Matches remote objects (by filename only, VRCDN doesn't know local paths) against
     /// local rows and marks the first unclaimed match per filename as Uploaded. Returns the
     /// filenames of remote objects that didn't match any local row (or matched one already
