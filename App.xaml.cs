@@ -90,6 +90,34 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        if (e.Args.Length == 2 && e.Args[0] == "--test-vrcx-profile-lookup")
+        {
+            RunVrcxProfileLookupDiagnostic(e.Args[1]);
+            Shutdown();
+            return;
+        }
+    }
+
+    private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)
+    {
+        var service = Services.VrcxProfileLookupService.TryCreate(out string? error);
+        if (service is null)
+        {
+            Console.WriteLine($"Unavailable: {error}");
+            return;
+        }
+
+        // Same Task.Run(...).GetAwaiter().GetResult() pattern as RunVrcdnSyncDiagnostic -
+        // OnStartup runs on the WPF Dispatcher thread; blocking directly on an async chain
+        // that resumes on that same SynchronizationContext deadlocks.
+        Task.Run(async () =>
+        {
+            byte[]? bytes = await service.TryFetchLatestThumbnailAsync(vrcUserId);
+            Console.WriteLine(bytes is null
+                ? "No thumbnail found (user never observed by VRCX, or fetch failed)."
+                : $"Fetched {bytes.Length} bytes.");
+        }).GetAwaiter().GetResult();
     }
 
     /// <summary>
