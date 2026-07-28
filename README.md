@@ -15,17 +15,39 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 
 - **Thumbnail grid** — adjustable size, hover preview (after a brief pause so scrolling
   doesn't spam previews), scrolls smoothly through large libraries via real UI virtualization.
-- **Per-photo selection** — pick exactly what gets uploaded, with a status badge (Not
-  Uploaded / Uploading / Uploaded / Failed) and a rating badge (see below) on every thumbnail.
+  Click a thumbnail (or its checkbox) to select it.
+- **Filter & sort** — by rating, upload status, VRCX player/author name (substring match), and
+  sort by filename or capture date (newest/oldest first).
+- **Per-photo badges** — upload status (Not Uploaded / Uploading / Uploaded / Failed), content
+  rating, detected-face count, and whether VRCX metadata was found for that photo.
 - **Local nudity/content classifier** — runs the open [WD14 tagger](https://huggingface.co/SmilingWolf)
   model in-process via ONNX Runtime (DirectML-accelerated), entirely on-device. No photos or
-  classification results leave your machine for this step.
+  classification results leave your machine for this step. **Import Ratings** is a shortcut for
+  anyone who already has ratings from a separate WD14 pipeline; **Classify Photos** covers
+  anything that pipeline never saw.
+- **Local anime-face detection** — **Scan Faces** finds anime-style faces (an LBP cascade
+  trained for stylized/rendered faces, since detectors trained on real photos miss VRChat
+  avatars) and shows a per-photo face count. Ships bundled with the app, no separate setup.
+- **VRCX metadata capture** — Scan Library reads the author, world, and player list VRCX embeds
+  directly into each screenshot's PNG metadata at capture time (both display names and stable
+  VRChat user IDs), when VRCX was running to record it. Right-click a photo → **View
+  Metadata...** to see everything captured for it.
+- **Crop Print Borders** — detects photos in VRChat's in-game "Print" format (padded to
+  2048×1440) and crops the white border back to the real 1920×1080 content, without touching
+  the original file.
 - **SQLite-backed, EF Core 10** — tracks local file metadata, ratings, and per-photo upload
   status, with automatic migrations on startup.
 - **Session login via embedded WebView2** — no external browser required; the login flow
   happens inside the app.
-- **Sync Metadata** — reconciles the local index against what's actually on VRCDN, so a
-  fresh install doesn't risk re-uploading photos that already made it up some other way.
+- **Sync Metadata** — reconciles the local index against what's actually on VRCDN (matching by
+  filename, with a fallback for objects uploaded under a reformatted name by an older tool), so
+  a fresh install doesn't risk re-uploading photos that already made it up some other way.
+  Safe to re-run any time.
+- **Upload Selected / Remove from VRCDN** — upload picks resize to fit VRChat's image-loader
+  limits before going up; Remove deletes selected, already-uploaded photos from VRCDN's storage
+  (confirmed first — there's no undo except re-uploading).
+- **Settings screen** — configure where the WD14 model files live, with a one-click download
+  straight from Hugging Face (see [Local classifier setup](#local-classifier-setup)).
 
 ## Requirements
 
@@ -48,22 +70,35 @@ to index a folder of photos.
 
 ## Local classifier setup
 
-The nudity/content classifier expects the WD14 ONNX model files in a `wd14-model` folder next
-to the built exe:
+The nudity/content classifier (**Classify Photos**) needs two files from the
+[SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) model
+(or a compatible WD14-family model):
+
+```
+model.onnx           (~378 MB)
+selected_tags.csv    (~300 KB)
+```
+
+**Easiest way:** open **Settings** in the app, browse to (or type) a folder for the model
+files, and click **Download Model Files** — it fetches both directly from Hugging Face and
+saves the folder for next time. Restart the app afterward for it to pick up the change.
+
+**Manual alternative:** download both files yourself into a `wd14-model` folder next to the
+built exe:
 
 ```
 wd14-model\model.onnx
 wd14-model\selected_tags.csv
 ```
 
-(from [SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) or
-a compatible WD14-family model). If that folder doesn't exist, **Classify Photos** is disabled;
-everything else still works.
+If neither is set up, **Classify Photos** is simply disabled at startup (with a status-bar
+message saying so) — everything else works normally, including the anime-face detector, which
+is bundled with the app and needs no separate download.
 
 **Import Ratings** is a shortcut for anyone already running a separate WD14 tagging pipeline
-that produces a SQLite db with a `photos(path, rating)` table — point it at `wd14-index.db`
-next to the exe. Most people won't have this; **Classify Photos** covers the same need
-standalone.
+that produces a SQLite db with a `photos(path, rating)` table — set its path via **Settings**
+(or drop it as `wd14-index.db` next to the exe). Most people won't have this; **Classify
+Photos** covers the same need standalone.
 
 ## How the VRCDN integration works
 
