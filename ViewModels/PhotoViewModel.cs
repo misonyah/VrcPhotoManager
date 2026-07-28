@@ -60,6 +60,18 @@ public class PhotoViewModel : INotifyPropertyChanged
         }
     }
 
+    private int _detectedFaceCount;
+    public int DetectedFaceCount
+    {
+        get => _detectedFaceCount;
+        set
+        {
+            if (_detectedFaceCount == value) return;
+            _detectedFaceCount = value;
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>
     /// Lazily fetched from the db on first access (i.e. when the item is actually
     /// realized by the virtualizing row panel), so off-screen rows never hold a decoded
