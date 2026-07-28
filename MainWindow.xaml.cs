@@ -75,7 +75,7 @@ public partial class MainWindow : Window
     {
         _hoverTimer.Stop();
         _hoverTarget = null;
-        PreviewPopup.IsOpen = false;
+        PreviewOverlay.Visibility = Visibility.Collapsed;
     }
 
     private void ResetHoverTimer(FrameworkElement? element)
@@ -103,8 +103,7 @@ public partial class MainWindow : Window
 
             PreviewImage.Source = bmp;
             PreviewPlayers.Text = photo.PlayersTooltip;
-            PreviewPopup.PlacementTarget = _hoverTarget;
-            PreviewPopup.IsOpen = true;
+            PreviewOverlay.Visibility = Visibility.Visible;
         }
         catch
         {

@@ -194,23 +194,28 @@
         <!-- Status bar -->
         <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Margin="8,4" />
 
-        <!-- Hover preview popup. Placement="Right" (anchored to PlacementTarget, the hovered
-             Border, set in code-behind) instead of "Mouse" - a large preview (up to 800x800)
-             placed at the mouse position covers the thumbnail actually being hovered (and the
-             cursor itself), which kept flickering even with IsHitTestVisible="False": WPF
-             Popups render as a real separate window, and the cursor sitting over that window
-             disrupts the main window's own mouse-over tracking for whatever it's covering,
-             regardless of that WPF-level hit-test flag. Anchoring beside the target instead of
-             under the cursor means the hovered item (and the cursor on it) are never covered
-             in the first place - IsHitTestVisible="False" stays on as a second line of defense. -->
-        <Popup x:Name="PreviewPopup" Placement="Right" HorizontalOffset="8" AllowsTransparency="True" StaysOpen="False"
-               IsHitTestVisible="False">
-            <Border Background="Black" BorderBrush="White" BorderThickness="1" Padding="4">
-                <StackPanel>
-                    <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />
-                    <TextBlock x:Name="PreviewPlayers" Foreground="White" FontSize="11" Margin="4" TextWrapping="Wrap" MaxWidth="800" />
-                </StackPanel>
-            </Border>
-        </Popup>
+        <!-- Hover preview overlay. Used to be a Popup - a real separate OS window - anchored
+             beside the hovered thumbnail (Placement="Right") instead of at the cursor, to keep
+             the popup from covering the hovered item. That still flickered near the right/bottom
+             edges of the screen: WPF auto-repositions Popups that would go off-screen (flipping
+             or clamping), which can shift it right back over the hovered thumbnail and cursor.
+             Since a Popup is a separate window, the OS routes hit-testing to whichever window is
+             topmost at the cursor - once the popup covers it, the item underneath gets a
+             mouse-leave, closing the popup, which un-covers the cursor and reopens it -> a
+             flicker loop, regardless of the WPF-level IsHitTestVisible flag (that only affects
+             WPF's own software hit-testing, which the separate popup window bypasses).
+             An in-tree overlay isn't a separate window - there's only one real window, so
+             IsHitTestVisible="False" is genuinely effective (it's WPF's own layered hit-testing,
+             not OS window z-order) no matter where the overlay visually sits. Position is now
+             fixed (bottom-left) instead of following the hovered item, since correctness no
+             longer depends on avoiding the cursor. -->
+        <Border x:Name="PreviewOverlay" Grid.Row="1" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                Margin="16" Background="Black" BorderBrush="White" BorderThickness="1" Padding="4"
+                IsHitTestVisible="False" Visibility="Collapsed">
+            <StackPanel>
+                <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />
+                <TextBlock x:Name="PreviewPlayers" Foreground="White" FontSize="11" Margin="4" TextWrapping="Wrap" MaxWidth="800" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
