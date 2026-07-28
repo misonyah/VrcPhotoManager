@@ -332,7 +332,7 @@ public class MainViewModel : INotifyPropertyChanged
                     {
                         var meta = probe.Metadata;
                         string? playerNames = meta?.Players is { Count: > 0 }
-                            ? string.Join(", ", meta.Players.Select(p => p.DisplayName))
+                            ? string.Join("\n", meta.Players.Select(p => $"{p.DisplayName} {{{p.Id}}}"))
                             : null;
                         var players = meta?.Players?.Select(p => (p.Id, p.DisplayName));
                         _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames, players);

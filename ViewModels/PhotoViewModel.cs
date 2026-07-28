@@ -41,7 +41,7 @@ public class PhotoViewModel : INotifyPropertyChanged
     public string? PlayerNames => Model.PlayerNames;
 
     public string PlayersTooltip => Model.MetadataScanned
-        ? (Model.PlayerNames is null ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers: {Model.PlayerNames}")
+        ? (Model.PlayerNames is null ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers:\n{Model.PlayerNames}")
         : "Not scanned yet";
 
     /// <summary>Whether VRCX embedded any real metadata for this photo - drives the small
