@@ -19,7 +19,7 @@ public partial class MetadataWindow : Window
             "",
             $"Rating:      {m.Rating ?? "(unclassified)"}",
             "",
-            $"Author:      {m.AuthorDisplayName ?? "(no VRCX metadata)"}",
+            $"Author:      {m.AuthorDisplayName ?? "(no VRCX metadata)"}{(m.AuthorId is null ? "" : $" ({m.AuthorId})")}",
             $"World:       {m.WorldName ?? "-"}",
             $"Players:     {m.PlayerNames ?? "-"}",
             "",

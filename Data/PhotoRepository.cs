@@ -1,3 +1,5 @@
+using System.IO;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using VrcdnManager.Models;
@@ -102,6 +104,7 @@ public class PhotoRepository
                 HasThumbnail = p.Thumbnail != null,
                 Rating = p.Rating,
                 MetadataScanned = p.MetadataScanned,
+                AuthorId = p.AuthorId,
                 AuthorDisplayName = p.AuthorDisplayName,
                 WorldName = p.WorldName,
                 PlayerNames = p.PlayerNames,
@@ -133,14 +136,29 @@ public class PhotoRepository
             .ExecuteUpdate(s => s.SetProperty(p => p.Width, width).SetProperty(p => p.Height, height));
     }
 
-    public void SetVrcxMetadata(long id, string? authorDisplayName, string? worldName, string? playerNames)
+    public void SetVrcxMetadata(
+        long id, string? authorId, string? authorDisplayName, string? worldName, string? playerNames,
+        IEnumerable<(string UserId, string DisplayName)>? players = null)
     {
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s
             .SetProperty(p => p.MetadataScanned, true)
+            .SetProperty(p => p.AuthorId, authorId)
             .SetProperty(p => p.AuthorDisplayName, authorDisplayName)
             .SetProperty(p => p.WorldName, worldName)
             .SetProperty(p => p.PlayerNames, playerNames));
+
+        // Replace this photo's stored players (re-scanning shouldn't accumulate duplicates -
+        // same idempotency approach as FaceRepository.InsertDetectedFaces).
+        context.PhotoPlayers.Where(p => p.PhotoId == id).ExecuteDelete();
+        if (players is not null)
+        {
+            foreach (var player in players)
+            {
+                context.PhotoPlayers.Add(new PhotoPlayer { PhotoId = id, UserId = player.UserId, DisplayName = player.DisplayName });
+            }
+            context.SaveChanges();
+        }
     }
 
     public void SetFileHash(long id, string hash)
@@ -196,32 +214,101 @@ public class PhotoRepository
         context.SaveChanges();
     }
 
+    // Objects uploaded by this app keep the real local filename verbatim, so a literal
+    // suffix match handles those. Objects uploaded by the older Python pipeline
+    // (vrcdn_upload.py) were staged under a reformatted name first - lowercased, dashes and
+    // colons stripped - so ~76% of the 2,339 pre-existing uploads look like
+    // "vrchat_20251009_234906933_7680x4320.jpg" instead of the real
+    // "VRChat_2025-10-09_23-49-06.933_7680x4320.png". Neither name is a substring of the
+    // other, so those need matching on the embedded date+time+resolution instead.
+    private static readonly Regex UploadedNamePattern = new(
+        @"^vrchat_(?<date>\d{8})_(?<time>\d{9})_(?<res>\d+x\d+)\.jpg$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LocalNameDateFirstPattern = new(
+        @"^VRChat_(?<y>\d{4})-(?<mo>\d{2})-(?<d>\d{2})_(?<h>\d{2})-(?<mi>\d{2})-(?<s>\d{2})\.(?<ms>\d{3})_(?<res>\d+x\d+)\.",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LocalNameResFirstPattern = new(
+        @"^VRChat_(?<res>\d+x\d+)_(?<y>\d{4})-(?<mo>\d{2})-(?<d>\d{2})_(?<h>\d{2})-(?<mi>\d{2})-(?<s>\d{2})\.(?<ms>\d{3})\.",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Normalized "date-time-resolution" key so an uploaded name and a local
+    /// filename can be compared even though neither is a substring of the other.</summary>
+    private static string? TryParseUploadedNameKey(string uploadedName)
+    {
+        var m = UploadedNamePattern.Match(uploadedName);
+        return m.Success ? $"{m.Groups["date"].Value}-{m.Groups["time"].Value}-{m.Groups["res"].Value.ToLowerInvariant()}" : null;
+    }
+
+    private static string? TryParseLocalNameKey(string localPath)
+    {
+        string fileName = Path.GetFileName(localPath);
+        var m = LocalNameDateFirstPattern.Match(fileName);
+        m = m.Success ? m : LocalNameResFirstPattern.Match(fileName);
+        if (!m.Success) return null;
+
+        string date = $"{m.Groups["y"].Value}{m.Groups["mo"].Value}{m.Groups["d"].Value}";
+        string time = $"{m.Groups["h"].Value}{m.Groups["mi"].Value}{m.Groups["s"].Value}{m.Groups["ms"].Value}";
+        return $"{date}-{time}-{m.Groups["res"].Value.ToLowerInvariant()}";
+    }
+
     /// <summary>
-    /// Matches remote objects (by filename only, VRCDN doesn't know local paths) against
-    /// local rows and marks the first unclaimed match per filename as Uploaded. Returns the
-    /// filenames of remote objects that didn't match any local row (or matched one already
-    /// claimed - e.g. duplicate filenames from different folders).
+    /// Matches remote objects against local rows and marks the first unclaimed match per
+    /// object as Uploaded. Tries an exact filename-suffix match first (objects this app
+    /// itself uploaded), then falls back to the normalized date/time/resolution match above
+    /// (objects the older Python pipeline uploaded under a reformatted name). Returns the
+    /// original names of remote objects that matched neither - either genuinely not part of
+    /// this local library (e.g. curated/video-derived content also uploaded for the
+    /// photo-frame slideshow) or an unhandled filename shape (~4% of local files have
+    /// irregular names - a missing leading zero, an extra suffix, etc.).
     /// </summary>
     public List<string> SyncRemoteMatches(IEnumerable<(string OriginalFileName, string Id, string Extension, long Size)> remoteObjects, string vrcdnUsername)
     {
         using var context = NewContext();
+
+        // Loaded once and matched in memory - the fallback needs regex parsing that EF can't
+        // translate to SQL, and re-querying per remote object would be thousands of round trips.
+        var candidates = context.Photos
+            .Where(p => p.RemoteStatus != RemoteStatus.Uploaded)
+            .OrderBy(p => p.Id)
+            .Select(p => new { p.Id, p.LocalPath })
+            .ToList();
+        var byNormalizedKey = candidates
+            .Select(c => (c.Id, c.LocalPath, Key: TryParseLocalNameKey(c.LocalPath)))
+            .Where(c => c.Key is not null)
+            .ToLookup(c => c.Key!);
+
+        var claimed = new HashSet<long>();
         var unresolved = new List<string>();
+
         foreach (var obj in remoteObjects)
         {
-            var match = context.Photos
-                .Where(p => p.LocalPath.EndsWith(obj.OriginalFileName) && p.RemoteStatus != RemoteStatus.Uploaded)
-                .OrderBy(p => p.Id)
-                .FirstOrDefault();
+            long? matchId = candidates.FirstOrDefault(c => !claimed.Contains(c.Id) && c.LocalPath.EndsWith(obj.OriginalFileName))?.Id;
 
-            if (match is null)
+            if (matchId is null)
+            {
+                string? key = TryParseUploadedNameKey(obj.OriginalFileName);
+                if (key is not null)
+                {
+                    matchId = byNormalizedKey[key]
+                        .Where(c => !claimed.Contains(c.Id))
+                        .Select(c => (long?)c.Id)
+                        .FirstOrDefault();
+                }
+            }
+
+            if (matchId is null)
             {
                 unresolved.Add(obj.OriginalFileName);
                 continue;
             }
 
-            match.RemoteStatus = RemoteStatus.Uploaded;
-            match.RemoteUrl = $"https://vrcdn.cloud/{vrcdnUsername}/{obj.Id}.{obj.Extension}";
-            match.RemoteId = obj.Id;
+            claimed.Add(matchId.Value);
+            var photo = context.Photos.First(p => p.Id == matchId.Value);
+            photo.RemoteStatus = RemoteStatus.Uploaded;
+            photo.RemoteUrl = $"https://vrcdn.cloud/{vrcdnUsername}/{obj.Id}.{obj.Extension}";
+            photo.RemoteId = obj.Id;
             context.SaveChanges();
         }
         return unresolved;

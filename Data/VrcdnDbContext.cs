@@ -11,6 +11,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<PersonReferencePhoto> PersonReferencePhotos => Set<PersonReferencePhoto>();
     public DbSet<DetectedFace> DetectedFaces => Set<DetectedFace>();
     public DbSet<FaceLabel> FaceLabels => Set<FaceLabel>();
+    public DbSet<PhotoPlayer> PhotoPlayers => Set<PhotoPlayer>();
 
     private readonly string _dbPath;
 
@@ -41,6 +42,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.Thumbnail).HasColumnName("thumbnail");
             entity.Property(p => p.Rating).HasColumnName("rating");
             entity.Property(p => p.MetadataScanned).HasColumnName("metadata_scanned");
+            entity.Property(p => p.AuthorId).HasColumnName("author_id");
             entity.Property(p => p.AuthorDisplayName).HasColumnName("author_display_name");
             entity.Property(p => p.WorldName).HasColumnName("world_name");
             entity.Property(p => p.PlayerNames).HasColumnName("player_names");
@@ -113,6 +115,19 @@ public class VrcdnDbContext : DbContext
             entity.Property(l => l.Source).HasColumnName("source").HasConversion<string>();
             entity.Property(l => l.Confirmed).HasColumnName("confirmed");
             entity.Property(l => l.CreatedAt).HasColumnName("created_at");
+        });
+
+        modelBuilder.Entity<PhotoPlayer>(entity =>
+        {
+            entity.ToTable("photo_players");
+            entity.HasKey(p => p.Id);
+            entity.HasIndex(p => p.PhotoId);
+            entity.HasIndex(p => p.UserId);
+
+            entity.Property(p => p.Id).HasColumnName("id");
+            entity.Property(p => p.PhotoId).HasColumnName("photo_id");
+            entity.Property(p => p.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(p => p.DisplayName).HasColumnName("display_name").IsRequired();
         });
     }
 }

@@ -12,6 +12,7 @@
         <views:StatusToBrushConverter x:Key="StatusToBrushConverter" />
         <views:RatingToBrushConverter x:Key="RatingToBrushConverter" />
         <views:FaceCountToVisibilityConverter x:Key="FaceCountToVisibilityConverter" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="PhotoItemStyle" TargetType="Border">
             <Setter Property="Margin" Value="4" />
             <Setter Property="BorderThickness" Value="1" />
@@ -53,6 +54,9 @@
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <TextBox Text="{Binding PlayerFilter, UpdateSourceTrigger=PropertyChanged}" Width="140" Margin="0,0,16,0"
                      ToolTip="Filters by author/player display name embedded by VRCX at capture time (Scan Library reads it)" />
+
+            <TextBlock Text="Sort:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Width="150" Margin="0,0,16,0" />
 
             <TextBlock Text="Thumbnail size:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Slider Minimum="80" Maximum="400" Width="180" Value="{Binding ThumbnailSize}" VerticalAlignment="Center" Margin="0,0,16,0" />
@@ -146,6 +150,18 @@
                                                 Visibility="{Binding DetectedFaceCount, Converter={StaticResource FaceCountToVisibilityConverter}}"
                                                 ToolTip="Detected faces">
                                             <TextBlock Text="{Binding DetectedFaceCount}" FontSize="10" Foreground="White" />
+                                        </Border>
+                                        <!-- People icon: VRCX embedded author/world/player metadata for this photo.
+                                             Single color for now - a second color tier for "everyone in the photo
+                                             has been identified" needs Phase 2+'s person-labeling data, which
+                                             doesn't exist yet. -->
+                                        <Border HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                Margin="4" Width="16" Height="16" CornerRadius="8"
+                                                Background="#CC000000"
+                                                Visibility="{Binding HasVrcxMetadata, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                ToolTip="Has VRCX player metadata">
+                                            <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                                       Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                     </Grid>
                                 </Border>

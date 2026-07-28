@@ -44,6 +44,11 @@ public class PhotoViewModel : INotifyPropertyChanged
         ? (Model.PlayerNames is null ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers: {Model.PlayerNames}")
         : "Not scanned yet";
 
+    /// <summary>Whether VRCX embedded any real metadata for this photo - drives the small
+    /// people-icon badge on the thumbnail. Not the same signal as DetectedFaceCount (that's
+    /// computer-vision face detection; this is VRCX's own author/player tagging).</summary>
+    public bool HasVrcxMetadata => Model.AuthorDisplayName is not null;
+
     /// <summary>Raised when Selected changes, so MainViewModel can re-evaluate the
     /// Upload/Remove-from-VRCDN commands' enabled state without polling every photo.</summary>
     public event EventHandler? SelectionChanged;
@@ -107,6 +112,15 @@ public class PhotoViewModel : INotifyPropertyChanged
     }
 
     public void NotifyRatingChanged() => OnPropertyChanged(nameof(Rating));
+
+    public void NotifyMetadataChanged()
+    {
+        OnPropertyChanged(nameof(HasVrcxMetadata));
+        OnPropertyChanged(nameof(PlayersTooltip));
+        OnPropertyChanged(nameof(AuthorDisplayName));
+        OnPropertyChanged(nameof(WorldName));
+        OnPropertyChanged(nameof(PlayerNames));
+    }
 
     public void NotifyThumbnailReady()
     {

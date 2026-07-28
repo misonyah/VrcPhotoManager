@@ -38,11 +38,14 @@ public class Photo
     /// Scan Library doesn't keep re-parsing PNG chunks for photos that genuinely lack it.
     /// </summary>
     public bool MetadataScanned { get; set; }
+    public string? AuthorId { get; set; }
     public string? AuthorDisplayName { get; set; }
     public string? WorldName { get; set; }
 
     /// <summary>Comma-joined player display names - flat text is enough for substring
-    /// filtering (the actual use case) without needing a join table.</summary>
+    /// filtering (the actual use case) without needing a join table. Stable per-player user
+    /// ids live in the separate PhotoPlayer table instead, since display names can change
+    /// over time but ids don't.</summary>
     public string? PlayerNames { get; set; }
 
     public bool Selected { get; set; }

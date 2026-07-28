@@ -69,6 +69,14 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] StatusFilterOptions { get; } = ["All", "NotUploaded", "Uploading", "Uploaded", "Failed"];
 
+    private string _sortOption = "Filename (A-Z)";
+    public string SortOption
+    {
+        get => _sortOption;
+        set { _sortOption = value; OnPropertyChanged(); RebuildRows(); }
+    }
+    public string[] SortOptions { get; } = ["Filename (A-Z)", "Date (Newest First)", "Date (Oldest First)"];
+
     private string _playerFilter = "";
     /// <summary>
     /// Filters against the author + embedded player-list text VRCX writes into each photo's
@@ -246,17 +254,25 @@ public class MainViewModel : INotifyPropertyChanged
                     AddPhoto(existing);
                 }
 
-                if (!existing.Model.MetadataScanned)
+                // Re-checks photos that previously found real metadata but predate the
+                // AuthorId/PhotoPlayer columns (a one-time backfill) - skips photos already
+                // confirmed to have none, since re-parsing those files would be pure waste.
+                bool needsMetadataScan = !existing.Model.MetadataScanned
+                    || (existing.Model.AuthorDisplayName is not null && existing.Model.AuthorId is null);
+                if (needsMetadataScan)
                 {
                     var meta = PngMetadataReader.TryReadVrcxMetadata(path);
                     string? playerNames = meta?.Players is { Count: > 0 }
                         ? string.Join(", ", meta.Players.Select(p => p.DisplayName))
                         : null;
-                    _repo.SetVrcxMetadata(id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames);
+                    var players = meta?.Players?.Select(p => (p.Id, p.DisplayName));
+                    _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames, players);
                     existing.Model.MetadataScanned = true;
+                    existing.Model.AuthorId = meta?.Author?.Id;
                     existing.Model.AuthorDisplayName = meta?.Author?.DisplayName;
                     existing.Model.WorldName = meta?.World?.Name;
                     existing.Model.PlayerNames = playerNames;
+                    existing.NotifyMetadataChanged();
                 }
 
                 if (existing.Model.Width is null)
@@ -480,8 +496,19 @@ public class MainViewModel : INotifyPropertyChanged
         if (_api is null) { StatusMessage = "Log in first."; return; }
 
         StatusMessage = "Syncing metadata from VRCDN...";
-        string username = await _api.GetUsernameAsync();
-        var remoteObjects = await _api.ListObjectsAsync();
+        string username;
+        List<RemoteObject> remoteObjects;
+        try
+        {
+            username = await _api.GetUsernameAsync();
+            remoteObjects = await _api.ListObjectsAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Sync failed: {ex.Message}";
+            return;
+        }
+
         var unresolved = _repo.SyncRemoteMatches(
             remoteObjects.Select(o => (o.Original, o.Id, o.Extension, o.Size)),
             username);
@@ -610,6 +637,13 @@ public class MainViewModel : INotifyPropertyChanged
                 (p.AuthorDisplayName?.Contains(PlayerFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (p.PlayerNames?.Contains(PlayerFilter, StringComparison.OrdinalIgnoreCase) ?? false));
         }
+
+        filtered = SortOption switch
+        {
+            "Date (Newest First)" => filtered.OrderByDescending(p => p.Model.Mtime),
+            "Date (Oldest First)" => filtered.OrderBy(p => p.Model.Mtime),
+            _ => filtered.OrderBy(p => p.Model.LocalPath),
+        };
 
         int columns = Math.Max(1, (int)(_gridWidth / (_thumbnailSize + RowMargin)));
 

@@ -1,5 +1,6 @@
 using System.Configuration;
 using System.Data;
+using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -74,6 +75,63 @@ public partial class App : Application
             Console.WriteLine($"Login result: {result}, cookie: {window.SessionCookie}");
             Shutdown();
             return;
+        }
+
+        if (e.Args.Length == 1 && e.Args[0] == "--test-vrcdn-sync")
+        {
+            RunVrcdnSyncDiagnostic();
+            Shutdown();
+            return;
+        }
+    }
+
+    private static void RunVrcdnSyncDiagnostic()
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        var credentials = new Services.CredentialStore(repo);
+
+        string? cookie;
+        try
+        {
+            cookie = credentials.LoadCookie(null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.WriteLine($"Cookie load failed: {ex.Message}");
+            return;
+        }
+
+        if (cookie is null)
+        {
+            Console.WriteLine("No stored session cookie - not logged in.");
+            return;
+        }
+        Console.WriteLine($"Cookie loaded (length={cookie.Length}).");
+
+        var api = new Services.VrcdnApiClient(cookie);
+        try
+        {
+            // OnStartup runs on the WPF Dispatcher thread, which has a SynchronizationContext -
+            // blocking here with .GetAwaiter().GetResult() directly on an async chain that tries
+            // to resume on that same context deadlocks. Task.Run hops off it first.
+            Task.Run(async () =>
+            {
+                string username = await api.GetUsernameAsync();
+                Console.WriteLine($"Username: {username}");
+
+                var objects = await api.ListObjectsAsync();
+                Console.WriteLine($"ListObjectsAsync returned {objects.Count} objects.");
+
+                var unresolved = repo.SyncRemoteMatches(
+                    objects.Select(o => (o.Original, o.Id, o.Extension, o.Size)), username);
+                Console.WriteLine($"Matched {objects.Count - unresolved.Count}/{objects.Count}, {unresolved.Count} unresolved.");
+            }).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"ERROR: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
