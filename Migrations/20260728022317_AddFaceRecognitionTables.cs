@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace VrcdnManager.Migrations
+namespace VrcPhotoManager.Migrations
 {
     /// <inheritdoc />
     public partial class AddFaceRecognitionTables : Migration

@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using VrcdnManager.Models;
-using VrcdnManager.Services;
+using VrcPhotoManager.Models;
+using VrcPhotoManager.Services;
 
-namespace VrcdnManager.Data;
+namespace VrcPhotoManager.Data;
 
 public class FaceRepository(string dbPath)
 {

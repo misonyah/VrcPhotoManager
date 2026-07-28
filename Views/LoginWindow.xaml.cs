@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace VrcdnManager.Views;
+namespace VrcPhotoManager.Views;
 
 /// <summary>
 /// Embeds the Patreon-gated panel.vrcdn.live login inside the app. Once the user

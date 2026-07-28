@@ -1,7 +1,7 @@
 using System.IO;
 using System.Windows.Media.Imaging;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 /// <summary>
 /// Generates small JPEG thumbnails (as bytes, stored as a BLOB in the photos db rather

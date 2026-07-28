@@ -1,4 +1,4 @@
-namespace VrcdnManager.Models;
+namespace VrcPhotoManager.Models;
 
 public class DetectedFace
 {

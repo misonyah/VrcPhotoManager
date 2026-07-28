@@ -1,4 +1,4 @@
-namespace VrcdnManager.ViewModels;
+namespace VrcPhotoManager.ViewModels;
 
 /// <summary>
 /// A row of photos for the grid. Grouping the flat photo list into fixed-size rows lets the

@@ -3,10 +3,10 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
-using VrcdnManager.Data;
-using VrcdnManager.Models;
+using VrcPhotoManager.Data;
+using VrcPhotoManager.Models;
 
-namespace VrcdnManager.ViewModels;
+namespace VrcPhotoManager.ViewModels;
 
 public class PhotoViewModel : INotifyPropertyChanged
 {

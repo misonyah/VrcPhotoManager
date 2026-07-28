@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace VrcdnManager.Migrations
+namespace VrcPhotoManager.Migrations
 {
     /// <inheritdoc />
     public partial class AddImageMetadata : Migration

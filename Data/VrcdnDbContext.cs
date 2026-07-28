@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using VrcdnManager.Models;
+using VrcPhotoManager.Models;
 
-namespace VrcdnManager.Data;
+namespace VrcPhotoManager.Data;
 
 public class VrcdnDbContext : DbContext
 {

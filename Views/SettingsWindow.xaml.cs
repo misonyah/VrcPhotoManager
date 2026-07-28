@@ -1,9 +1,9 @@
 using System.Windows;
 using Microsoft.Win32;
-using VrcdnManager.Data;
-using VrcdnManager.Services;
+using VrcPhotoManager.Data;
+using VrcPhotoManager.Services;
 
-namespace VrcdnManager.Views;
+namespace VrcPhotoManager.Views;
 
 public partial class SettingsWindow : Window
 {

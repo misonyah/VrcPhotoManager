@@ -4,7 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 
-namespace VrcdnManager;
+namespace VrcPhotoManager;
 
 public partial class App : Application
 {
@@ -63,7 +63,7 @@ public partial class App : Application
         {
             MessageBox.Show(
                 $"Unexpected error:\n\n{args.Exception.Message}",
-                "VRCDN Manager", MessageBoxButton.OK, MessageBoxImage.Error);
+                "VRC Photo Manager", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
 
@@ -87,6 +87,8 @@ public partial class App : Application
 
     private static void RunVrcdnSyncDiagnostic()
     {
+        // Deliberately still "VrcdnManager" - the on-disk data folder name, kept stable
+        // across the app's rename so existing installs don't lose their database.
         string dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
         var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));

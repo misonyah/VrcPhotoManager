@@ -3,11 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using VrcdnManager.Data;
+using VrcPhotoManager.Data;
 
 #nullable disable
 
-namespace VrcdnManager.Migrations
+namespace VrcPhotoManager.Migrations
 {
     [DbContext(typeof(VrcdnDbContext))]
     [Migration("20260727165030_AddVrcxPhotoMetadata")]
@@ -19,7 +19,7 @@ namespace VrcdnManager.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
 
-            modelBuilder.Entity("VrcdnManager.Models.AppSetting", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.AppSetting", b =>
                 {
                     b.Property<string>("Key")
                         .HasColumnType("TEXT")
@@ -34,7 +34,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("settings", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.Photo", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.Photo", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()

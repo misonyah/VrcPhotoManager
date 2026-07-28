@@ -4,9 +4,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using VrcdnManager.ViewModels;
+using VrcPhotoManager.ViewModels;
 
-namespace VrcdnManager;
+namespace VrcPhotoManager;
 
 public partial class MainWindow : Window
 {

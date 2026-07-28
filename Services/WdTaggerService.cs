@@ -5,7 +5,7 @@ using System.Windows.Media.Imaging;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 /// <summary>
 /// Runs the same WD14 tagger model used by the Python pipeline (D:\AI-Tools\wd14-tagger)

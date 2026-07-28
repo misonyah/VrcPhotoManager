@@ -1,4 +1,4 @@
-namespace VrcdnManager.Models;
+namespace VrcPhotoManager.Models;
 
 /// <summary>Manual = hand-picked by the user when registering a person. ExifElimination =
 /// auto-bootstrapped by Phase 2's elimination labeling (see the design spec).</summary>

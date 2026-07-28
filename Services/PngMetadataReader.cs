@@ -2,7 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json.Serialization;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 public record VrcxPhotoAuthor(
     [property: JsonPropertyName("id")] string Id,

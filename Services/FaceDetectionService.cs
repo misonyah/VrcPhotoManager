@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using OpenCvSharp;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 public record FaceBox(int X, int Y, int Width, int Height);
 

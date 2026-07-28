@@ -1,4 +1,4 @@
-<Window x:Class="VrcdnManager.Views.SettingsWindow"
+<Window x:Class="VrcPhotoManager.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings" Height="360" Width="580"
@@ -27,7 +27,7 @@
         <TextBlock x:Name="DownloadStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
-            Changes take effect the next time you start VRCDN Manager.
+            Changes take effect the next time you start VRC Photo Manager.
         </TextBlock>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

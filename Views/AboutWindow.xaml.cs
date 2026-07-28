@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace VrcdnManager.Views;
+namespace VrcPhotoManager.Views;
 
 public partial class AboutWindow : Window
 {

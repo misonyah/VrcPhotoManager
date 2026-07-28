@@ -1,7 +1,7 @@
 using System.IO;
 using System.Net.Http;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 /// <summary>
 /// Downloads the WD14 tagger's two required files (model.onnx, ~378MB; selected_tags.csv,

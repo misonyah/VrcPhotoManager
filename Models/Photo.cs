@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace VrcdnManager.Models;
+namespace VrcPhotoManager.Models;
 
 public enum RemoteStatus
 {

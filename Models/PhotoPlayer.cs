@@ -1,4 +1,4 @@
-namespace VrcdnManager.Models;
+namespace VrcPhotoManager.Models;
 
 /// <summary>
 /// One row per player VRCX recorded as present when a photo was taken - both the stable

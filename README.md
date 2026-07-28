@@ -1,4 +1,4 @@
-# VRCDN Manager
+# VRC Photo Manager
 
 A Windows desktop tool for curating and uploading VRChat photos to [VRCDN](https://vrcdn.live)
 object storage — browse a thumbnail grid, pick what goes up and what doesn't, and track

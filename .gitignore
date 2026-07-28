@@ -3,7 +3,8 @@ obj/
 *.user
 .vs/
 
-# Local app data (db, thumbnails cache) lives in %LocalAppData%\VrcdnManager, not here.
+# Local app data (db, thumbnails cache) lives in %LocalAppData%\VrcdnManager, not here -
+# deliberately still the pre-rename folder name, so existing installs keep their database.
 
 # The WD14 classifier model files are large and not part of this repo - see README.md.
 wd14-model/

@@ -1,6 +1,6 @@
 using System.Windows.Input;
 
-namespace VrcdnManager.ViewModels;
+namespace VrcPhotoManager.ViewModels;
 
 public class RelayCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
 {

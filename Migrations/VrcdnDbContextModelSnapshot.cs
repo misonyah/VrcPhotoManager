@@ -3,11 +3,11 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using VrcdnManager.Data;
+using VrcPhotoManager.Data;
 
 #nullable disable
 
-namespace VrcdnManager.Migrations
+namespace VrcPhotoManager.Migrations
 {
     [DbContext(typeof(VrcdnDbContext))]
     partial class VrcdnDbContextModelSnapshot : ModelSnapshot
@@ -17,7 +17,7 @@ namespace VrcdnManager.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
 
-            modelBuilder.Entity("VrcdnManager.Models.AppSetting", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.AppSetting", b =>
                 {
                     b.Property<string>("Key")
                         .HasColumnType("TEXT")
@@ -32,7 +32,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("settings", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.DetectedFace", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.DetectedFace", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -74,7 +74,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("detected_faces", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.FaceLabel", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.FaceLabel", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -115,7 +115,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("face_labels", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.PersonReferencePhoto", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.PersonReferencePhoto", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -147,7 +147,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("person_reference_photos", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.Photo", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.Photo", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -238,7 +238,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("photos", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.PhotoPlayer", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.PhotoPlayer", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -268,7 +268,7 @@ namespace VrcdnManager.Migrations
                     b.ToTable("photo_players", (string)null);
                 });
 
-            modelBuilder.Entity("VrcdnManager.Models.RegisteredPerson", b =>
+            modelBuilder.Entity("VrcPhotoManager.Models.RegisteredPerson", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()

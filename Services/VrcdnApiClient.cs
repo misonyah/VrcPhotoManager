@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 public record RemoteObject(
     [property: JsonPropertyName("Id")] string Id,
@@ -43,7 +43,7 @@ public class VrcdnApiClient
         _http.DefaultRequestHeaders.Add("Cookie", $"PHPSESSID={sessionCookie}");
         _http.DefaultRequestHeaders.Add("Referer", $"{Base}/obj-upload.php");
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VrcdnManager/1.0");
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VrcPhotoManager/1.0");
     }
 
     private async Task<JsonDocument> PostAsync(object body, CancellationToken ct)

@@ -2,9 +2,9 @@ using System.IO;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using VrcdnManager.Models;
+using VrcPhotoManager.Models;
 
-namespace VrcdnManager.Data;
+namespace VrcPhotoManager.Data;
 
 public class PhotoRepository
 {

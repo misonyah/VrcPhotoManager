@@ -5,12 +5,12 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using Microsoft.Data.Sqlite;
-using VrcdnManager.Data;
-using VrcdnManager.Models;
-using VrcdnManager.Services;
-using VrcdnManager.Views;
+using VrcPhotoManager.Data;
+using VrcPhotoManager.Models;
+using VrcPhotoManager.Services;
+using VrcPhotoManager.Views;
 
-namespace VrcdnManager.ViewModels;
+namespace VrcPhotoManager.ViewModels;
 
 public class MainViewModel : INotifyPropertyChanged
 {
@@ -115,6 +115,8 @@ public class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel()
     {
+        // Deliberately still "VrcdnManager" - the on-disk data folder name, kept stable
+        // across the app's rename so existing installs don't lose their database.
         string dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "VrcdnManager");

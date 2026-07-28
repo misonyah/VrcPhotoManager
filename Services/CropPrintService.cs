@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 /// <summary>
 /// VRChat's in-game "Print" feature pads photos to 2048x1440 with a white border around the

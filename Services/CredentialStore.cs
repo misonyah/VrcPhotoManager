@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
-using VrcdnManager.Data;
+using VrcPhotoManager.Data;
 
-namespace VrcdnManager.Services;
+namespace VrcPhotoManager.Services;
 
 /// <summary>
 /// Encrypts the VRCDN session cookie with Windows DPAPI (tied to the current Windows

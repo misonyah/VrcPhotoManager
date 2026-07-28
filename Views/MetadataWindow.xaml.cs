@@ -1,7 +1,7 @@
 using System.Windows;
-using VrcdnManager.ViewModels;
+using VrcPhotoManager.ViewModels;
 
-namespace VrcdnManager.Views;
+namespace VrcPhotoManager.Views;
 
 public partial class MetadataWindow : Window
 {

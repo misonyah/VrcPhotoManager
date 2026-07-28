@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Windows.Data;
 using System.Windows.Media;
-using VrcdnManager.Models;
+using VrcPhotoManager.Models;
 
-namespace VrcdnManager.Views;
+namespace VrcPhotoManager.Views;
 
 public class StatusToBrushConverter : IValueConverter
 {

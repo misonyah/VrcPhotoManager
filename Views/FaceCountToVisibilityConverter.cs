@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 
-namespace VrcdnManager.Views;
+namespace VrcPhotoManager.Views;
 
 public class FaceCountToVisibilityConverter : IValueConverter
 {
