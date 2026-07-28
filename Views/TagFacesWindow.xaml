@@ -16,7 +16,11 @@
              Height, so they stay correctly aligned at any zoom level without extra math. -->
         <ScrollViewer x:Name="ImageScrollViewer" Grid.Row="0"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                      PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel">
+                      PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
+                      PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
+                      PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
+                      PreviewMouseUp="ImageScrollViewer_PreviewMouseUp"
+                      LostMouseCapture="ImageScrollViewer_LostMouseCapture">
             <Grid x:Name="ImageContainer">
                 <Grid.LayoutTransform>
                     <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
@@ -26,7 +30,8 @@
             </Grid>
         </ScrollViewer>
 
-        <TextBlock Grid.Row="1" Text="Click a box to tag who it is. Green = already tagged, yellow = untagged. Scroll to zoom."
+        <TextBlock Grid.Row="1"
+                   Text="Click a box to tag who it is. Green = already tagged, yellow = untagged. Scroll to zoom, middle-drag to pan."
                    Margin="8" Foreground="Gray" />
 
         <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True">

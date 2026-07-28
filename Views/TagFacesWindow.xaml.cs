@@ -24,6 +24,11 @@ public partial class TagFacesWindow : Window
     private long _activeFaceId;
     private double _fitZoomScale = 1.0;
 
+    private bool _isPanning;
+    private Point _panStartMousePosition;
+    private double _panStartHorizontalOffset;
+    private double _panStartVerticalOffset;
+
     private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId);
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
@@ -103,6 +108,47 @@ public partial class TagFacesWindow : Window
         ImageScrollViewer.ScrollToVerticalOffset(contentPos.Y * newZoom - cursorPos.Y);
     }
 
+    private void ImageScrollViewer_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+
+        _isPanning = true;
+        _panStartMousePosition = e.GetPosition(ImageScrollViewer);
+        _panStartHorizontalOffset = ImageScrollViewer.HorizontalOffset;
+        _panStartVerticalOffset = ImageScrollViewer.VerticalOffset;
+        ImageScrollViewer.Cursor = Cursors.ScrollAll;
+        ImageScrollViewer.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void ImageScrollViewer_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isPanning) return;
+
+        Point current = e.GetPosition(ImageScrollViewer);
+        ImageScrollViewer.ScrollToHorizontalOffset(_panStartHorizontalOffset - (current.X - _panStartMousePosition.X));
+        ImageScrollViewer.ScrollToVerticalOffset(_panStartVerticalOffset - (current.Y - _panStartMousePosition.Y));
+        e.Handled = true;
+    }
+
+    private void ImageScrollViewer_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        EndPanning();
+    }
+
+    /// <summary>Capture can be lost without a matching mouse-up (e.g. alt-tabbing mid-drag) -
+    /// this is the only reliable place to guarantee panning state doesn't get stuck on.</summary>
+    private void ImageScrollViewer_LostMouseCapture(object sender, MouseEventArgs e) => EndPanning();
+
+    private void EndPanning()
+    {
+        if (!_isPanning) return;
+        _isPanning = false;
+        ImageScrollViewer.Cursor = Cursors.Arrow;
+        ImageScrollViewer.ReleaseMouseCapture();
+    }
+
     private void LoadFaceData()
     {
         _detectedFaces = _faces.GetDetectedFaces(_photo.Id);
@@ -115,8 +161,13 @@ public partial class TagFacesWindow : Window
 
     /// <summary>
     /// Detected-face boxes are stored in the original image's pixel coordinates
-    /// (Photo.Width/Height), but Stretch="Uniform" letterboxes the displayed Image inside its
-    /// layout slot - boxes must be scaled and offset to match, recomputed on every resize.
+    /// (Photo.Width/Height). PhotoImage.ActualWidth/Height already equals the tightly-fit
+    /// (Stretch="Uniform") picture size - it does NOT stretch to fill FaceCanvas's larger
+    /// cell, and is centered within it (found via a live build/test loop: boxes were
+    /// rendering offset toward the top-left, since the old code re-derived letterbox
+    /// centering from PhotoImage's own bounds, double-counting). So the offset is just
+    /// "where does the image actually sit relative to the canvas" (via TranslatePoint), not
+    /// a second round of manual centering math. Recomputed on every resize.
     /// </summary>
     private void RedrawBoxes()
     {
@@ -126,34 +177,53 @@ public partial class TagFacesWindow : Window
         if (PhotoImage.ActualWidth == 0 || PhotoImage.ActualHeight == 0)
             return;
 
-        // PhotoImage.ActualWidth/Height already equals the tightly-fit (Stretch="Uniform")
-        // picture size - it does NOT stretch to fill FaceCanvas's larger cell, and is
-        // centered within it. So the letterbox math is just "where does the image actually
-        // sit relative to the canvas", not a second round of centering math against
-        // PhotoImage's own bounds (that double-counts and shifts boxes toward the top-left).
         double scale = Math.Min(PhotoImage.ActualWidth / imgWidth, PhotoImage.ActualHeight / imgHeight);
         var imageOrigin = PhotoImage.TranslatePoint(new System.Windows.Point(0, 0), FaceCanvas);
         double offsetX = imageOrigin.X;
         double offsetY = imageOrigin.Y;
 
+        const double hitPadding = 5;
         foreach (var face in _detectedFaces)
         {
             bool tagged = _labelsByFaceId.TryGetValue(face.Id, out var label) && label.Confirmed && label.PersonId is not null;
             string? personName = tagged && _personsById.TryGetValue(label!.PersonId!.Value, out var person) ? person.Name : null;
 
-            var rect = new Rectangle
+            double left = offsetX + face.X * scale;
+            double top = offsetY + face.Y * scale;
+            double width = face.Width * scale;
+            double height = face.Height * scale;
+
+            // A Rectangle with no Fill only hit-tests its Stroke line, not its interior -
+            // clicking anywhere inside a box wouldn't register at all. This invisible
+            // rectangle is the actual click target: Fill=Transparent makes the whole area
+            // hit-testable, and it's padded 5px beyond the visual border on every side so
+            // clicking near - but not exactly on - the edge (inward or outward) still counts.
+            // Added first/below the visual border, which has IsHitTestVisible="False" so this
+            // is always what actually receives the click regardless of paint order.
+            var hitTarget = new Rectangle
             {
-                Width = face.Width * scale,
-                Height = face.Height * scale,
-                Stroke = tagged ? Brushes.LimeGreen : Brushes.Yellow,
-                StrokeThickness = 2,
+                Width = width + hitPadding * 2,
+                Height = height + hitPadding * 2,
+                Fill = Brushes.Transparent,
                 Tag = face.Id,
                 Cursor = Cursors.Hand,
             };
-            rect.MouseLeftButtonUp += FaceBox_MouseLeftButtonUp;
-            Canvas.SetLeft(rect, offsetX + face.X * scale);
-            Canvas.SetTop(rect, offsetY + face.Y * scale);
-            FaceCanvas.Children.Add(rect);
+            hitTarget.MouseLeftButtonUp += FaceBox_MouseLeftButtonUp;
+            Canvas.SetLeft(hitTarget, left - hitPadding);
+            Canvas.SetTop(hitTarget, top - hitPadding);
+            FaceCanvas.Children.Add(hitTarget);
+
+            var visualBorder = new Rectangle
+            {
+                Width = width,
+                Height = height,
+                Stroke = tagged ? Brushes.LimeGreen : Brushes.Yellow,
+                StrokeThickness = 2,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(visualBorder, left);
+            Canvas.SetTop(visualBorder, top);
+            FaceCanvas.Children.Add(visualBorder);
 
             if (personName is not null)
             {
@@ -165,8 +235,8 @@ public partial class TagFacesWindow : Window
                     FontSize = 11,
                     Padding = new Thickness(2, 0, 2, 0),
                 };
-                Canvas.SetLeft(nameLabel, offsetX + face.X * scale);
-                Canvas.SetTop(nameLabel, offsetY + face.Y * scale + face.Height * scale);
+                Canvas.SetLeft(nameLabel, left);
+                Canvas.SetTop(nameLabel, top + height);
                 FaceCanvas.Children.Add(nameLabel);
             }
         }
