@@ -32,15 +32,43 @@ public class FaceDetectionService
     }
 
     /// <summary>
+    /// Wraps the constructor so a missing/corrupt cascade asset degrades to "face scanning
+    /// unavailable" instead of bringing down whatever constructs this at startup (mirrors
+    /// WdTaggerService.TryCreate).
+    /// </summary>
+    public static FaceDetectionService? TryCreate(out string? error)
+    {
+        error = null;
+        try
+        {
+            return new FaceDetectionService();
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Detects every anime-style face in the image. Unlike the Python reference-gathering
     /// scripts (identity_shortlist_v2.py), which only kept the largest face per image - fine for
     /// curating single-person reference sets - this returns every detected face, since group
     /// photos need all of them for VRCX-elimination labeling (Phase 2) to work.
+    ///
+    /// Throws if the image can't even be read (missing file, locked/partially-written file,
+    /// corrupt data, or the classic OpenCV-on-Windows trap of a non-ASCII path silently failing
+    /// Cv2.ImRead) - that case must be distinguishable from "zero faces found", since callers
+    /// (FaceRepository.InsertDetectedFaces) delete existing rows before inserting new ones and
+    /// would otherwise silently wipe out previously-correct detections on a bad re-scan.
     /// </summary>
     public List<FaceBox> DetectFaces(string imagePath)
     {
         using var img = Cv2.ImRead(imagePath, ImreadModes.Color);
-        if (img.Empty()) return [];
+        if (img.Empty())
+        {
+            throw new InvalidDataException($"Could not read image: {imagePath}");
+        }
 
         using var gray = new Mat();
         Cv2.CvtColor(img, gray, ColorConversionCodes.BGR2GRAY);

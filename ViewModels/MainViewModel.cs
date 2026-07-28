@@ -21,7 +21,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly ThumbnailService _thumbnails;
     private readonly CredentialStore _credentials;
     private readonly FaceRepository _faces;
-    private readonly FaceDetectionService _faceDetector = new();
+    private FaceDetectionService? _faceDetector;
     private WdTaggerService? _tagger;
     private VrcdnApiClient? _api;
 
@@ -88,7 +88,7 @@ public class MainViewModel : INotifyPropertyChanged
     }
 
     public ICommand ScanLibraryCommand { get; }
-    public ICommand ScanFacesCommand { get; }
+    public RelayCommand ScanFacesCommand { get; }
     public ICommand ImportRatingsCommand { get; }
     public RelayCommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
@@ -113,7 +113,7 @@ public class MainViewModel : INotifyPropertyChanged
         _faces = new FaceRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
-        ScanFacesCommand = new RelayCommand(ScanFacesAsync);
+        ScanFacesCommand = new RelayCommand(ScanFacesAsync, () => _faceDetector is not null);
         ImportRatingsCommand = new RelayCommand(ImportRatingsAsync);
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
         LoginCommand = new RelayCommand(LoginAsync);
@@ -149,6 +149,18 @@ public class MainViewModel : INotifyPropertyChanged
             StatusMessage = $"WD14 classifier unavailable: {taggerError}";
         }
         ClassifyPhotosCommand.RaiseCanExecuteChanged();
+
+        var (faceDetector, faceDetectorError) = await Task.Run(() =>
+        {
+            var d = FaceDetectionService.TryCreate(out string? error);
+            return (d, error);
+        });
+        _faceDetector = faceDetector;
+        if (_faceDetector is null)
+        {
+            StatusMessage = $"Face detector unavailable: {faceDetectorError}";
+        }
+        ScanFacesCommand.RaiseCanExecuteChanged();
     }
 
     private void TryAutoLogin()
@@ -266,23 +278,37 @@ public class MainViewModel : INotifyPropertyChanged
 
     private async Task ScanFacesAsync()
     {
-        StatusMessage = "Scanning for faces...";
-        int processed = 0, totalFaces = 0;
-        foreach (var vm in _allPhotos)
+        if (_faceDetector is null)
         {
-            var faces = await Task.Run(() => _faceDetector.DetectFaces(vm.Model.LocalPath));
-            _faces.InsertDetectedFaces(vm.Model.Id, faces);
-            totalFaces += faces.Count;
+            StatusMessage = "Face detector not available.";
+            return;
+        }
+
+        StatusMessage = "Scanning for faces...";
+        var photos = _allPhotos.ToList();
+        int processed = 0, totalFaces = 0;
+        foreach (var vm in photos)
+        {
+            try
+            {
+                var faces = await Task.Run(() => _faceDetector.DetectFaces(vm.Model.LocalPath));
+                _faces.InsertDetectedFaces(vm.Model.Id, faces);
+                totalFaces += faces.Count;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Face detection failed for {vm.FileName}: {ex.Message}";
+            }
 
             processed++;
-            if (processed % 25 == 0 || processed == _allPhotos.Count)
+            if (processed % 25 == 0 || processed == photos.Count)
             {
-                StatusMessage = $"Scanning for faces... {processed}/{_allPhotos.Count} photos, {totalFaces} faces found so far";
+                StatusMessage = $"Scanning for faces... {processed}/{photos.Count} photos, {totalFaces} faces found so far";
             }
         }
 
         ApplyFaceCounts();
-        StatusMessage = $"Face scan complete: {totalFaces} faces found across {_allPhotos.Count} photos.";
+        StatusMessage = $"Face scan complete: {totalFaces} faces found across {photos.Count} photos.";
     }
 
     /// <summary>Pulls face counts in one bulk query and applies them to already-loaded
