@@ -4,7 +4,6 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
-using Microsoft.Data.Sqlite;
 using VrcPhotoManager.Data;
 using VrcPhotoManager.Models;
 using VrcPhotoManager.Services;
@@ -125,7 +124,6 @@ public class MainViewModel : INotifyPropertyChanged
 
     public ICommand ScanLibraryCommand { get; }
     public RelayCommand ScanFacesCommand { get; }
-    public ICommand ImportRatingsCommand { get; }
     public RelayCommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
@@ -162,7 +160,6 @@ public class MainViewModel : INotifyPropertyChanged
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         ScanFacesCommand = new RelayCommand(ScanFacesAsync, () => _faceDetector is not null);
-        ImportRatingsCommand = new RelayCommand(ImportRatingsAsync);
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
@@ -496,57 +493,8 @@ public class MainViewModel : INotifyPropertyChanged
         return Directory.Exists(local) ? local : @"D:\AI-Tools\wd14-tagger\model";
     }
 
-    private string? ResolveWdTaggerIndexDb()
-    {
-        string? configured = _repo.GetStringSetting(SettingsKeys.WdIndexDb);
-        if (configured is not null && File.Exists(configured)) return configured;
-
-        string local = Path.Combine(AppContext.BaseDirectory, "wd14-index.db");
-        if (File.Exists(local)) return local;
-        const string devPath = @"D:\AI-Tools\wd14-tagger\index.db";
-        return File.Exists(devPath) ? devPath : null;
-    }
-
-    private async Task ImportRatingsAsync()
-    {
-        string? indexDbPath = ResolveWdTaggerIndexDb();
-        if (indexDbPath is null)
-        {
-            StatusMessage = "WD14 index.db not found (checked next to the exe and the dev machine's path).";
-            return;
-        }
-
-        StatusMessage = "Importing ratings from WD14 index...";
-        using var conn = new SqliteConnection($"Data Source={indexDbPath};Mode=ReadOnly");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT path, rating FROM photos";
-        using var reader = cmd.ExecuteReader();
-
-        int updated = 0;
-        while (reader.Read())
-        {
-            string path = reader.GetString(0);
-            string rating = reader.GetString(1);
-            string fileName = Path.GetFileName(path);
-            _repo.SetRatingByFileName(fileName, rating);
-
-            var match = _allPhotos.FirstOrDefault(p => p.FileName == fileName);
-            if (match is not null)
-            {
-                match.Model.Rating = rating;
-                updated++;
-            }
-        }
-
-        StatusMessage = $"Imported ratings for {updated} photos.";
-        RebuildRows();
-    }
-
     /// <summary>
-    /// Runs the WD14 classifier in-process for any photo that still has no rating -
-    /// e.g. newly scanned photos the Python tool never saw. Prefer Import Ratings first
-    /// where it applies (free, no compute); this covers everything else.
+    /// Runs the WD14 classifier in-process for any photo that still has no rating.
     /// </summary>
     private async Task ClassifyPhotosAsync()
     {

@@ -5,5 +5,4 @@ namespace VrcPhotoManager.Services;
 public static class SettingsKeys
 {
     public const string WdModelDir = "wd14_model_dir";
-    public const string WdIndexDb = "wd14_index_db_path";
 }

@@ -22,9 +22,7 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
   rating, detected-face count, and whether VRCX metadata was found for that photo.
 - **Local nudity/content classifier** — runs the open [WD14 tagger](https://huggingface.co/SmilingWolf)
   model in-process via ONNX Runtime (DirectML-accelerated), entirely on-device. No photos or
-  classification results leave your machine for this step. **Import Ratings** is a shortcut for
-  anyone who already has ratings from a separate WD14 pipeline; **Classify Photos** covers
-  anything that pipeline never saw.
+  classification results leave your machine for this step.
 - **Local anime-face detection** — **Scan Faces** finds anime-style faces (an LBP cascade
   trained for stylized/rendered faces, since detectors trained on real photos miss VRChat
   avatars) and shows a per-photo face count. Ships bundled with the app, no separate setup.
@@ -95,10 +93,12 @@ If neither is set up, **Classify Photos** is simply disabled at startup (with a 
 message saying so) — everything else works normally, including the anime-face detector, which
 is bundled with the app and needs no separate download.
 
-**Import Ratings** is a shortcut for anyone already running a separate WD14 tagging pipeline
-that produces a SQLite db with a `photos(path, rating)` table — set its path via **Settings**
-(or drop it as `wd14-index.db` next to the exe). Most people won't have this; **Classify
-Photos** covers the same need standalone.
+## Planned work
+
+- **Import/export lists** — a general mechanism to import and export the ratings list and the
+  registered-people/tag list (currently only a per-machine SQLite table), so this data isn't
+  locked to one machine's database. Replaces the old narrow "Import Ratings" feature (removed -
+  it only read from one specific external WD14-pipeline `index.db` format).
 
 ## How the VRCDN integration works
 

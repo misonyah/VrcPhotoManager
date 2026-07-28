@@ -16,7 +16,6 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _repo = repo;
         ModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.WdModelDir) ?? "";
-        IndexDbTextBox.Text = _repo.GetStringSetting(SettingsKeys.WdIndexDb) ?? "";
     }
 
     private void BrowseModelDir_Click(object sender, RoutedEventArgs e)
@@ -25,19 +24,6 @@ public partial class SettingsWindow : Window
         if (dialog.ShowDialog() == true)
         {
             ModelDirTextBox.Text = dialog.FolderName;
-        }
-    }
-
-    private void BrowseIndexDb_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFileDialog
-        {
-            Title = "Select WD14 index.db",
-            Filter = "SQLite database (*.db)|*.db|All files (*.*)|*.*",
-        };
-        if (dialog.ShowDialog() == true)
-        {
-            IndexDbTextBox.Text = dialog.FileName;
         }
     }
 
@@ -77,10 +63,6 @@ public partial class SettingsWindow : Window
         if (!string.IsNullOrWhiteSpace(ModelDirTextBox.Text))
         {
             _repo.SetStringSetting(SettingsKeys.WdModelDir, ModelDirTextBox.Text.Trim());
-        }
-        if (!string.IsNullOrWhiteSpace(IndexDbTextBox.Text))
-        {
-            _repo.SetStringSetting(SettingsKeys.WdIndexDb, IndexDbTextBox.Text.Trim());
         }
         DialogResult = true;
         Close();

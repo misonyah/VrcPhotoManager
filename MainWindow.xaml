@@ -173,7 +173,6 @@
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
                 <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8" />
                 <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8" />
-                <Button Content="Import Ratings" Command="{Binding ImportRatingsCommand}" Padding="8,4" Margin="0,0,0,8" />
                 <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
                 <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8" />

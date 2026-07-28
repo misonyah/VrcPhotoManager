@@ -15,12 +15,6 @@
             <TextBox x:Name="ModelDirTextBox" VerticalContentAlignment="Center" />
         </DockPanel>
 
-        <TextBlock Text="WD14 index.db (optional - for &quot;Import Ratings&quot; only):" Margin="0,0,0,4" />
-        <DockPanel Margin="0,0,0,12">
-            <Button DockPanel.Dock="Right" Content="Browse..." Padding="8,2" Margin="8,0,0,0" Click="BrowseIndexDb_Click" />
-            <TextBox x:Name="IndexDbTextBox" VerticalContentAlignment="Center" />
-        </DockPanel>
-
         <Button x:Name="DownloadButton" Content="Download Model Files" HorizontalAlignment="Left"
                 Padding="8,4" Margin="0,0,0,8" Click="DownloadModel_Click"
                 ToolTip="Downloads model.onnx (~378 MB) and selected_tags.csv into the folder above" />
