@@ -11,6 +11,7 @@
     <Window.Resources>
         <views:StatusToBrushConverter x:Key="StatusToBrushConverter" />
         <views:RatingToBrushConverter x:Key="RatingToBrushConverter" />
+        <views:FaceCountToVisibilityConverter x:Key="FaceCountToVisibilityConverter" />
         <Style x:Key="PhotoItemStyle" TargetType="Border">
             <Setter Property="Margin" Value="4" />
             <Setter Property="BorderThickness" Value="1" />
@@ -38,6 +39,8 @@
             <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,8,0" FontWeight="Bold" />
             <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,16,0"
                     ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
+            <Button Content="Scan Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,8,0"
+                    ToolTip="Detects anime-style faces in every photo (OpenCvSharp + lbpcascade_animeface) and shows a count badge on each thumbnail" />
 
             <TextBlock Text="Rating:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Width="110" Margin="0,0,16,0" />
@@ -115,6 +118,13 @@
                                                 Margin="4" Padding="4,1" CornerRadius="3"
                                                 Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}">
                                             <TextBlock Text="{Binding RemoteStatus}" FontSize="10" Foreground="White" />
+                                        </Border>
+                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                                Margin="4" Padding="4,1" CornerRadius="3"
+                                                Background="#CC000000"
+                                                Visibility="{Binding DetectedFaceCount, Converter={StaticResource FaceCountToVisibilityConverter}}"
+                                                ToolTip="Detected faces">
+                                            <TextBlock Text="{Binding DetectedFaceCount}" FontSize="10" Foreground="White" />
                                         </Border>
                                     </Grid>
                                 </Border>
