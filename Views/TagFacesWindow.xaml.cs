@@ -22,6 +22,7 @@ public partial class TagFacesWindow : Window
     private Dictionary<long, RegisteredPerson> _personsById = [];
     private List<PhotoPlayer> _photoPlayers = [];
     private long _activeFaceId;
+    private double _fitZoomScale = 1.0;
 
     private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId);
 
@@ -52,6 +53,54 @@ public partial class TagFacesWindow : Window
 
         LoadFaceData();
         RedrawBoxes();
+        // ScrollViewer gives its content infinite measure space on both axes (needed so it
+        // can scroll once zoomed past the viewport), which means Stretch="Uniform" no longer
+        // auto-fits the image to the window - Image just reports its native pixel size. Wait
+        // for the window's first layout pass (Loaded) to know the real viewport size, then set
+        // an initial zoom that reproduces the old "fit to window" starting view.
+        Loaded += (_, _) => InitializeZoom();
+    }
+
+    private void InitializeZoom()
+    {
+        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight || imgWidth == 0 || imgHeight == 0)
+            return;
+        if (ImageScrollViewer.ActualWidth == 0 || ImageScrollViewer.ActualHeight == 0)
+            return;
+
+        _fitZoomScale = Math.Min(ImageScrollViewer.ActualWidth / imgWidth, ImageScrollViewer.ActualHeight / imgHeight);
+        ZoomTransform.ScaleX = _fitZoomScale;
+        ZoomTransform.ScaleY = _fitZoomScale;
+    }
+
+    /// <summary>
+    /// Zooms toward the cursor (keeps the point under it stationary) rather than the
+    /// viewport's top-left, which is the standard expectation for wheel-zoom. Clamped between
+    /// the initial "fit to window" scale (can't zoom out further than the starting view) and
+    /// 8x that, so the range stays consistent regardless of the source photo's resolution.
+    /// </summary>
+    private void ImageScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        if (_fitZoomScale <= 0) return;
+
+        const double zoomStep = 1.15;
+        double minZoom = _fitZoomScale;
+        double maxZoom = _fitZoomScale * 8;
+
+        double oldZoom = ZoomTransform.ScaleX;
+        double newZoom = Math.Clamp(e.Delta > 0 ? oldZoom * zoomStep : oldZoom / zoomStep, minZoom, maxZoom);
+        if (Math.Abs(newZoom - oldZoom) < 0.0001) return;
+
+        Point cursorPos = e.GetPosition(ImageScrollViewer);
+        Point contentPos = e.GetPosition(ImageContainer);
+
+        ZoomTransform.ScaleX = newZoom;
+        ZoomTransform.ScaleY = newZoom;
+
+        ImageScrollViewer.UpdateLayout();
+        ImageScrollViewer.ScrollToHorizontalOffset(contentPos.X * newZoom - cursorPos.X);
+        ImageScrollViewer.ScrollToVerticalOffset(contentPos.Y * newZoom - cursorPos.Y);
     }
 
     private void LoadFaceData()

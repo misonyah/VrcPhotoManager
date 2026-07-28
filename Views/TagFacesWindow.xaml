@@ -9,12 +9,24 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid x:Name="ImageContainer" Grid.Row="0">
-            <Image x:Name="PhotoImage" Stretch="Uniform" SizeChanged="PhotoImage_SizeChanged" />
-            <Canvas x:Name="FaceCanvas" Background="Transparent" />
-        </Grid>
+        <!-- LayoutTransform (not RenderTransform) on the shared Image+Canvas container: it
+             affects the layout pass, so the ScrollViewer correctly grows its scrollable extent
+             as you zoom in, and it applies to the whole container as one visual unit - the face
+             boxes on FaceCanvas are positioned using PhotoImage's own (pre-transform) ActualWidth/
+             Height, so they stay correctly aligned at any zoom level without extra math. -->
+        <ScrollViewer x:Name="ImageScrollViewer" Grid.Row="0"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                      PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel">
+            <Grid x:Name="ImageContainer">
+                <Grid.LayoutTransform>
+                    <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
+                </Grid.LayoutTransform>
+                <Image x:Name="PhotoImage" Stretch="Uniform" SizeChanged="PhotoImage_SizeChanged" />
+                <Canvas x:Name="FaceCanvas" Background="Transparent" />
+            </Grid>
+        </ScrollViewer>
 
-        <TextBlock Grid.Row="1" Text="Click a box to tag who it is. Green = already tagged, yellow = untagged."
+        <TextBlock Grid.Row="1" Text="Click a box to tag who it is. Green = already tagged, yellow = untagged. Scroll to zoom."
                    Margin="8" Foreground="Gray" />
 
         <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True">
