@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VrcdnManager.Data;
 
@@ -10,9 +11,11 @@ using VrcdnManager.Data;
 namespace VrcdnManager.Migrations
 {
     [DbContext(typeof(VrcdnDbContext))]
-    partial class VrcdnDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728022317_AddFaceRecognitionTables")]
+    partial class AddFaceRecognitionTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");

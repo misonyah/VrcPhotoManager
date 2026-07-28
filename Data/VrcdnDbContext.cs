@@ -7,6 +7,10 @@ public class VrcdnDbContext : DbContext
 {
     public DbSet<Photo> Photos => Set<Photo>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
+    public DbSet<RegisteredPerson> RegisteredPeople => Set<RegisteredPerson>();
+    public DbSet<PersonReferencePhoto> PersonReferencePhotos => Set<PersonReferencePhoto>();
+    public DbSet<DetectedFace> DetectedFaces => Set<DetectedFace>();
+    public DbSet<FaceLabel> FaceLabels => Set<FaceLabel>();
 
     private readonly string _dbPath;
 
@@ -53,6 +57,62 @@ public class VrcdnDbContext : DbContext
             entity.HasKey(s => s.Key);
             entity.Property(s => s.Key).HasColumnName("key");
             entity.Property(s => s.Value).HasColumnName("value");
+        });
+
+        modelBuilder.Entity<RegisteredPerson>(entity =>
+        {
+            entity.ToTable("registered_people");
+            entity.HasKey(p => p.Id);
+            entity.HasIndex(p => p.Name).IsUnique();
+
+            entity.Property(p => p.Id).HasColumnName("id");
+            entity.Property(p => p.Name).HasColumnName("name").IsRequired();
+            entity.Property(p => p.CreatedAt).HasColumnName("created_at");
+        });
+
+        modelBuilder.Entity<PersonReferencePhoto>(entity =>
+        {
+            entity.ToTable("person_reference_photos");
+            entity.HasKey(p => p.Id);
+            entity.HasIndex(p => new { p.PersonId, p.PhotoId }).IsUnique();
+
+            entity.Property(p => p.Id).HasColumnName("id");
+            entity.Property(p => p.PersonId).HasColumnName("person_id");
+            entity.Property(p => p.PhotoId).HasColumnName("photo_id");
+            entity.Property(p => p.Source).HasColumnName("source").HasConversion<string>();
+            entity.Property(p => p.AddedAt).HasColumnName("added_at");
+        });
+
+        modelBuilder.Entity<DetectedFace>(entity =>
+        {
+            entity.ToTable("detected_faces");
+            entity.HasKey(f => f.Id);
+            entity.HasIndex(f => f.PhotoId);
+
+            entity.Property(f => f.Id).HasColumnName("id");
+            entity.Property(f => f.PhotoId).HasColumnName("photo_id");
+            entity.Property(f => f.X).HasColumnName("x");
+            entity.Property(f => f.Y).HasColumnName("y");
+            entity.Property(f => f.Width).HasColumnName("width");
+            entity.Property(f => f.Height).HasColumnName("height");
+            entity.Property(f => f.Embedding).HasColumnName("embedding");
+            entity.Property(f => f.DetectedAt).HasColumnName("detected_at");
+        });
+
+        modelBuilder.Entity<FaceLabel>(entity =>
+        {
+            entity.ToTable("face_labels");
+            entity.HasKey(l => l.Id);
+            entity.HasIndex(l => l.DetectedFaceId);
+            entity.HasIndex(l => l.PersonId);
+
+            entity.Property(l => l.Id).HasColumnName("id");
+            entity.Property(l => l.DetectedFaceId).HasColumnName("detected_face_id");
+            entity.Property(l => l.PersonId).HasColumnName("person_id");
+            entity.Property(l => l.Confidence).HasColumnName("confidence");
+            entity.Property(l => l.Source).HasColumnName("source").HasConversion<string>();
+            entity.Property(l => l.Confirmed).HasColumnName("confirmed");
+            entity.Property(l => l.CreatedAt).HasColumnName("created_at");
         });
     }
 }
