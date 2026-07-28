@@ -81,15 +81,38 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] SortOptions { get; } = ["Filename (A-Z)", "Date (Newest First)", "Date (Oldest First)"];
 
-    private string _playerFilter = "";
-    /// <summary>
-    /// Filters against the author + embedded player-list text VRCX writes into each photo's
-    /// PNG metadata at capture time (see PngMetadataReader) - substring match, not exact.
-    /// </summary>
-    public string PlayerFilter
+    public record PlayerFilterOption(string? VrcUserId, string DisplayText);
+
+    private static readonly PlayerFilterOption AllPlayersOption = new(null, "(all players)");
+
+    private PlayerFilterOption _selectedPlayerFilter = AllPlayersOption;
+    public PlayerFilterOption SelectedPlayerFilter
     {
-        get => _playerFilter;
-        set { _playerFilter = value; OnPropertyChanged(); RebuildRows(); }
+        get => _selectedPlayerFilter;
+        set
+        {
+            _selectedPlayerFilter = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CanFilterTaggedOnly));
+            RebuildRows();
+        }
+    }
+
+    private List<PlayerFilterOption> _playerFilterOptions = [AllPlayersOption];
+    public List<PlayerFilterOption> PlayerFilterOptions
+    {
+        get => _playerFilterOptions;
+        private set { _playerFilterOptions = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>The "Tagged only" checkbox is meaningless with no specific player selected.</summary>
+    public bool CanFilterTaggedOnly => SelectedPlayerFilter.VrcUserId is not null;
+
+    private bool _taggedOnlyFilter;
+    public bool TaggedOnlyFilter
+    {
+        get => _taggedOnlyFilter;
+        set { _taggedOnlyFilter = value; OnPropertyChanged(); RebuildRows(); }
     }
 
     private string _statusMessage = "Not logged in. Click Login to start.";
@@ -155,6 +178,7 @@ public class MainViewModel : INotifyPropertyChanged
         RebuildRows();
         StatusMessage = $"{_allPhotos.Count} photos loaded.";
         ApplyFaceCounts();
+        RefreshPlayerFilterOptions();
 
         TryAutoLogin();
 
@@ -415,6 +439,18 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyFaceCounts();
         StatusMessage = $"Face scan complete: {totalFaces} faces found across {photos.Count} photos.";
+    }
+
+    /// <summary>Rebuilds the player-filter dropdown from the current library state - called
+    /// once at startup and again after the Tag Faces window closes, so newly-tagged people
+    /// show "(tagged)" without needing a full app restart.</summary>
+    public void RefreshPlayerFilterOptions()
+    {
+        var taggedIds = _faces.GetTaggedUserIds();
+        var options = new List<PlayerFilterOption> { AllPlayersOption };
+        options.AddRange(_repo.GetDistinctPlayers().Select(p =>
+            new PlayerFilterOption(p.UserId, taggedIds.Contains(p.UserId) ? $"{p.DisplayName} (tagged)" : p.DisplayName)));
+        PlayerFilterOptions = options;
     }
 
     /// <summary>Pulls face counts in one bulk query and applies them to already-loaded
@@ -709,11 +745,15 @@ public class MainViewModel : INotifyPropertyChanged
         {
             filtered = filtered.Where(p => p.RemoteStatus.ToString() == StatusFilter);
         }
-        if (!string.IsNullOrWhiteSpace(PlayerFilter))
+        if (SelectedPlayerFilter.VrcUserId is string userId)
         {
-            filtered = filtered.Where(p =>
-                (p.AuthorDisplayName?.Contains(PlayerFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (p.PlayerNames?.Contains(PlayerFilter, StringComparison.OrdinalIgnoreCase) ?? false));
+            var photoIds = _repo.GetPhotoIdsForUser(userId);
+            filtered = filtered.Where(p => photoIds.Contains(p.Model.Id));
+            if (TaggedOnlyFilter)
+            {
+                var taggedPhotoIds = _faces.GetTaggedPhotoIdsForUser(userId);
+                filtered = filtered.Where(p => taggedPhotoIds.Contains(p.Model.Id));
+            }
         }
 
         filtered = SortOption switch

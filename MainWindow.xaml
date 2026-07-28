@@ -38,8 +38,12 @@
             <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0" />
 
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <TextBox Text="{Binding PlayerFilter, UpdateSourceTrigger=PropertyChanged}" Width="140" Margin="0,0,16,0"
-                     ToolTip="Filters by author/player display name embedded by VRCX at capture time (Scan Library reads it)" />
+            <ComboBox ItemsSource="{Binding PlayerFilterOptions}" DisplayMemberPath="DisplayText"
+                      SelectedItem="{Binding SelectedPlayerFilter}" Width="170" Margin="0,0,8,0"
+                      ToolTip="Filters by VRCX-recorded player identity - '(tagged)' means at least one confirmed face tag exists for that person" />
+            <CheckBox Content="Tagged only" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
+                      VerticalAlignment="Center" Margin="0,0,16,0"
+                      ToolTip="Only show photos where this person has an actual confirmed face tag, not just VRCX metadata presence" />
 
             <TextBlock Text="Sort:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Width="150" Margin="0,0,16,0" />
