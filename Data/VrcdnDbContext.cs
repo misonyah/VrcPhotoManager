@@ -65,11 +65,19 @@ public class VrcdnDbContext : DbContext
         {
             entity.ToTable("registered_people");
             entity.HasKey(p => p.Id);
-            entity.HasIndex(p => p.Name).IsUnique();
+            // VRChat display names are NOT globally unique across accounts, and this app now
+            // auto-creates people from real VRC accounts (FindOrCreatePersonByVrcUserId) - a
+            // unique constraint on Name alone would let two different real accounts collide.
+            // VrcUserId is the real identity key; it's only unique when present (a free-text
+            // "no VRC id" person and a VRC-linked person are allowed to share a Name).
+            entity.HasIndex(p => p.VrcUserId).IsUnique().HasFilter("vrc_user_id IS NOT NULL");
 
             entity.Property(p => p.Id).HasColumnName("id");
             entity.Property(p => p.Name).HasColumnName("name").IsRequired();
             entity.Property(p => p.CreatedAt).HasColumnName("created_at");
+            entity.Property(p => p.VrcUserId).HasColumnName("vrc_user_id");
+            entity.Property(p => p.VrcProfileThumbnail).HasColumnName("vrc_profile_thumbnail");
+            entity.Property(p => p.VrcProfileThumbnailFetchedAt).HasColumnName("vrc_profile_thumbnail_fetched_at");
         });
 
         modelBuilder.Entity<PersonReferencePhoto>(entity =>
