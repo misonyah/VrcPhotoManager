@@ -43,6 +43,19 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 2 && e.Args[0] == "--test-face-detect")
+        {
+            var detector = new Services.FaceDetectionService();
+            var faces = detector.DetectFaces(e.Args[1]);
+            Console.WriteLine($"Faces found: {faces.Count}");
+            foreach (var f in faces)
+            {
+                Console.WriteLine($"  ({f.X}, {f.Y}) {f.Width}x{f.Height}");
+            }
+            Shutdown();
+            return;
+        }
+
         // Unhandled exceptions on the UI thread (e.g. from an async void command handler)
         // would otherwise take the whole app down with no explanation - show them instead.
         DispatcherUnhandledException += (_, args) =>
