@@ -623,6 +623,12 @@ public class MainViewModel : INotifyPropertyChanged
                 vm.Model.RemoteStatus = RemoteStatus.Uploaded;
                 vm.Model.UploadedAt = DateTime.UtcNow.ToString("o");
                 _repo.UpdateRemoteStatus(vm.Model.Id, RemoteStatus.Uploaded, uploadedAt: vm.Model.UploadedAt);
+
+                // Clear selection on success (so the button correctly disables once nothing
+                // eligible remains, and the next batch starts from an empty selection) - but
+                // leave failed uploads selected, so they're easy to spot and retry.
+                vm.Selected = false;
+                _repo.SetSelected(vm.Model.Id, false);
             }
             catch (Exception ex)
             {

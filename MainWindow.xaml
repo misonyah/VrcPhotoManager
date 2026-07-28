@@ -189,12 +189,16 @@
         <!-- Status bar -->
         <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Margin="8,4" />
 
-        <!-- Hover preview popup. IsHitTestVisible="False" is load-bearing: without it, the
-             popup (which overlaps the thumbnail it's previewing, since Placement="Mouse")
-             steals mouse-over from the Border underneath, firing MouseLeave -> closes the
-             popup -> MouseEnter again -> reopens - a rapid open/close flicker loop. With hit
-             testing disabled, mouse events pass through to the grid underneath uninterrupted. -->
-        <Popup x:Name="PreviewPopup" Placement="Mouse" AllowsTransparency="True" StaysOpen="False"
+        <!-- Hover preview popup. Placement="Right" (anchored to PlacementTarget, the hovered
+             Border, set in code-behind) instead of "Mouse" - a large preview (up to 800x800)
+             placed at the mouse position covers the thumbnail actually being hovered (and the
+             cursor itself), which kept flickering even with IsHitTestVisible="False": WPF
+             Popups render as a real separate window, and the cursor sitting over that window
+             disrupts the main window's own mouse-over tracking for whatever it's covering,
+             regardless of that WPF-level hit-test flag. Anchoring beside the target instead of
+             under the cursor means the hovered item (and the cursor on it) are never covered
+             in the first place - IsHitTestVisible="False" stays on as a second line of defense. -->
+        <Popup x:Name="PreviewPopup" Placement="Right" HorizontalOffset="8" AllowsTransparency="True" StaysOpen="False"
                IsHitTestVisible="False">
             <Border Background="Black" BorderBrush="White" BorderThickness="1" Padding="4">
                 <StackPanel>
