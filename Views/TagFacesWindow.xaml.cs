@@ -76,6 +76,18 @@ public partial class TagFacesWindow : Window
         _fitZoomScale = Math.Min(ImageScrollViewer.ActualWidth / imgWidth, ImageScrollViewer.ActualHeight / imgHeight);
         ZoomTransform.ScaleX = _fitZoomScale;
         ZoomTransform.ScaleY = _fitZoomScale;
+
+        // Setting ZoomTransform doesn't itself trigger a layout pass, and RedrawBoxes' offset
+        // calculation is NOT actually scale-invariant the way it looks: PhotoImage (Stretch=
+        // Uniform) gets centered within ImageContainer whenever the ScrollViewer decides a given
+        // axis doesn't need scrolling and stretches the container to fill the viewport there -
+        // which is exactly the case at low zoom (found via a live build/test loop: the box
+        // offset baked in before this method ran was only ever correct by coincidence at high
+        // zoom, where both axes scroll and no such centering happens - it was stale and wrong
+        // everywhere else, including the initial "fit to window" view). Force a layout pass so
+        // TranslatePoint reflects the real post-zoom state, then recompute box positions for it.
+        ImageScrollViewer.UpdateLayout();
+        RedrawBoxes();
     }
 
     /// <summary>
@@ -106,6 +118,9 @@ public partial class TagFacesWindow : Window
         ImageScrollViewer.UpdateLayout();
         ImageScrollViewer.ScrollToHorizontalOffset(contentPos.X * newZoom - cursorPos.X);
         ImageScrollViewer.ScrollToVerticalOffset(contentPos.Y * newZoom - cursorPos.Y);
+        // Box offsets depend on the current zoom level (see the comment in InitializeZoom) -
+        // must recompute every time zoom actually changes, not just once at window open.
+        RedrawBoxes();
     }
 
     private void ImageScrollViewer_PreviewMouseDown(object sender, MouseButtonEventArgs e)
