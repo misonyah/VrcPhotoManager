@@ -29,7 +29,7 @@ public partial class TagFacesWindow : Window
     private double _panStartHorizontalOffset;
     private double _panStartVerticalOffset;
 
-    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId);
+    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false);
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
     {
@@ -200,8 +200,23 @@ public partial class TagFacesWindow : Window
         const double hitPadding = 5;
         foreach (var face in _detectedFaces)
         {
-            bool tagged = _labelsByFaceId.TryGetValue(face.Id, out var label) && label.Confirmed && label.PersonId is not null;
-            string? personName = tagged && _personsById.TryGetValue(label!.PersonId!.Value, out var person) ? person.Name : null;
+            _labelsByFaceId.TryGetValue(face.Id, out var label);
+            bool confirmed = label is not null && label.Confirmed && label.PersonId is not null;
+            bool suggested = label is not null && !label.Confirmed
+                && label.Source == FaceLabelSource.EmbeddingMatch && label.PersonId is not null;
+
+            string? personName = null;
+            Brush boxColor = Brushes.Yellow;
+            if (confirmed && _personsById.TryGetValue(label!.PersonId!.Value, out var confirmedPerson))
+            {
+                personName = confirmedPerson.Name;
+                boxColor = Brushes.LimeGreen;
+            }
+            else if (suggested && _personsById.TryGetValue(label!.PersonId!.Value, out var suggestedPerson))
+            {
+                personName = $"? {suggestedPerson.Name}";
+                boxColor = Brushes.Orange;
+            }
 
             double left = offsetX + face.X * scale;
             double top = offsetY + face.Y * scale;
@@ -232,7 +247,7 @@ public partial class TagFacesWindow : Window
             {
                 Width = width,
                 Height = height,
-                Stroke = tagged ? Brushes.LimeGreen : Brushes.Yellow,
+                Stroke = boxColor,
                 StrokeThickness = 2,
                 IsHitTestVisible = false,
             };
@@ -245,7 +260,7 @@ public partial class TagFacesWindow : Window
                 var nameLabel = new TextBlock
                 {
                     Text = personName,
-                    Background = Brushes.LimeGreen,
+                    Background = boxColor,
                     Foreground = Brushes.Black,
                     FontSize = 11,
                     Padding = new Thickness(2, 0, 2, 0),
@@ -266,11 +281,19 @@ public partial class TagFacesWindow : Window
     private void OpenPicker(long detectedFaceId, Rectangle box)
     {
         _activeFaceId = detectedFaceId;
-        bool alreadyTagged = _labelsByFaceId.TryGetValue(detectedFaceId, out var existing)
-            && existing.Confirmed && existing.PersonId is not null;
+        _labelsByFaceId.TryGetValue(detectedFaceId, out var existing);
+        bool alreadyTagged = existing is not null && existing.Confirmed && existing.PersonId is not null;
         ClearTagButton.Visibility = alreadyTagged ? Visibility.Visible : Visibility.Collapsed;
 
         var items = new List<PickerItem>();
+
+        bool isSuggestion = existing is not null && !existing.Confirmed
+            && existing.Source == FaceLabelSource.EmbeddingMatch && existing.PersonId is not null;
+        if (isSuggestion && _personsById.TryGetValue(existing!.PersonId!.Value, out var suggestedPerson))
+        {
+            items.Add(new PickerItem($"Confirm: {suggestedPerson.Name}", suggestedPerson.VrcUserId, suggestedPerson.Id, IsConfirmSuggestion: true));
+        }
+
         foreach (var player in _photoPlayers)
         {
             items.Add(new PickerItem($"{player.DisplayName} (in this photo)", player.UserId, null));
@@ -291,6 +314,12 @@ public partial class TagFacesWindow : Window
     {
         if (SuggestionListBox.SelectedItem is not PickerItem item) return;
         PersonPickerPopup.IsOpen = false;
+
+        if (item.IsConfirmSuggestion)
+        {
+            ApplyTag(_personsById[item.ExistingPersonId!.Value], FaceLabelSource.EmbeddingMatch);
+            return;
+        }
 
         RegisteredPerson person = item.ExistingPersonId is long existingId
             ? _personsById[existingId]
@@ -341,9 +370,9 @@ public partial class TagFacesWindow : Window
         RedrawBoxes();
     }
 
-    private void ApplyTag(RegisteredPerson person)
+    private void ApplyTag(RegisteredPerson person, FaceLabelSource source = FaceLabelSource.Manual)
     {
-        _faces.UpsertFaceLabel(_activeFaceId, person.Id, confirmed: true, FaceLabelSource.Manual);
+        _faces.UpsertFaceLabel(_activeFaceId, person.Id, confirmed: true, source);
         LoadFaceData();
         RedrawBoxes();
     }

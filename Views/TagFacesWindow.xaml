@@ -31,7 +31,7 @@
         </ScrollViewer>
 
         <TextBlock Grid.Row="1"
-                   Text="Click a box to tag who it is. Green = already tagged, yellow = untagged. Scroll to zoom, middle-drag to pan."
+                   Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged. Scroll to zoom, middle-drag to pan."
                    Margin="8" Foreground="Gray" />
 
         <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True">
