@@ -48,7 +48,6 @@
                     <TextBox x:Name="NewPersonNameTextBox" Margin="0,0,0,4"
                              ToolTip="Type a name and press Enter to create a new person (no VRC id)"
                              KeyDown="NewPersonNameTextBox_KeyDown" />
-                    <Button Content="Not a face / ignore" Click="IgnoreButton_Click" Margin="0,4,0,0" />
                     <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0" />
                 </StackPanel>
             </Border>

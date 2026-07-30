@@ -29,7 +29,7 @@ public partial class TagFacesWindow : Window
     private double _panStartHorizontalOffset;
     private double _panStartVerticalOffset;
 
-    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false);
+    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsNotAFace = false);
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
     {
@@ -303,6 +303,8 @@ public partial class TagFacesWindow : Window
             items.Add(new PickerItem($"Confirm: {suggestedPerson.Name}", suggestedPerson.VrcUserId, suggestedPerson.Id, IsConfirmSuggestion: true));
         }
 
+        items.Add(new PickerItem("<nobody> (wrongly detected face)", null, null, IsNotAFace: true));
+
         foreach (var player in _photoPlayers)
         {
             items.Add(new PickerItem($"{player.DisplayName} (in this photo)", player.UserId, null));
@@ -327,6 +329,14 @@ public partial class TagFacesWindow : Window
         if (item.IsConfirmSuggestion)
         {
             ApplyTag(_personsById[item.ExistingPersonId!.Value], FaceLabelSource.EmbeddingMatch);
+            return;
+        }
+
+        if (item.IsNotAFace)
+        {
+            _faces.UpsertFaceLabel(_activeFaceId, null, confirmed: true, FaceLabelSource.Manual);
+            LoadFaceData();
+            RedrawBoxes();
             return;
         }
 
@@ -361,14 +371,6 @@ public partial class TagFacesWindow : Window
 
         PersonPickerPopup.IsOpen = false;
         ApplyTag(_faces.CreatePerson(name));
-    }
-
-    private void IgnoreButton_Click(object sender, RoutedEventArgs e)
-    {
-        PersonPickerPopup.IsOpen = false;
-        _faces.UpsertFaceLabel(_activeFaceId, null, confirmed: true, FaceLabelSource.Manual);
-        LoadFaceData();
-        RedrawBoxes();
     }
 
     private void ClearTagButton_Click(object sender, RoutedEventArgs e)
