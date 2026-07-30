@@ -58,7 +58,7 @@ public class FaceRepository(string dbPath)
     /// Replaces any existing label for this face - a face has at most one label at a time,
     /// same re-scan idiom as InsertDetectedFaces.
     /// </summary>
-    public void UpsertFaceLabel(long detectedFaceId, long? personId, bool confirmed, FaceLabelSource source)
+    public void UpsertFaceLabel(long detectedFaceId, long? personId, bool confirmed, FaceLabelSource source, float confidence = 1.0f)
     {
         using var context = NewContext();
         context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
@@ -68,7 +68,7 @@ public class FaceRepository(string dbPath)
             PersonId = personId,
             Confirmed = confirmed,
             Source = source,
-            Confidence = 1.0f,
+            Confidence = confidence,
         });
         context.SaveChanges();
     }
@@ -146,5 +146,52 @@ public class FaceRepository(string dbPath)
         context.RegisteredPeople.Where(p => p.Id == personId).ExecuteUpdate(s => s
             .SetProperty(p => p.VrcProfileThumbnail, thumbnail)
             .SetProperty(p => p.VrcProfileThumbnailFetchedAt, DateTime.UtcNow));
+    }
+
+    public List<DetectedFace> GetDetectedFacesWithoutEmbedding()
+    {
+        using var context = NewContext();
+        return context.DetectedFaces.AsNoTracking().Where(f => f.Embedding == null).ToList();
+    }
+
+    public void SetEmbedding(long detectedFaceId, byte[] embedding)
+    {
+        using var context = NewContext();
+        context.DetectedFaces.Where(f => f.Id == detectedFaceId)
+            .ExecuteUpdate(s => s.SetProperty(f => f.Embedding, embedding));
+    }
+
+    /// <summary>
+    /// Embeddings of every confirmed FaceLabel pointing to this person - the "already
+    /// manually-tagged face crops" half of their reference material (the other half, the VRCX
+    /// profile picture, comes from RegisteredPerson.VrcProfileThumbnail directly and is
+    /// embedded separately by the caller).
+    /// </summary>
+    public List<byte[]> GetReferenceEmbeddingsForPerson(long personId)
+    {
+        using var context = NewContext();
+        return context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId == personId)
+            .Join(context.DetectedFaces, l => l.DetectedFaceId, f => f.Id, (l, f) => f.Embedding)
+            .Where(e => e != null)
+            .Select(e => e!)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Faces eligible for a new suggestion: have an embedding already computed, and either no
+    /// label at all, or only an unconfirmed EmbeddingMatch label (safe to re-score and replace
+    /// as more reference data accumulates - never touches a confirmed label, or any label from
+    /// a source other than EmbeddingMatch).
+    /// </summary>
+    public List<DetectedFace> GetFacesNeedingSuggestion()
+    {
+        using var context = NewContext();
+        var settledFaceIds = context.FaceLabels
+            .Where(l => l.Confirmed || l.Source != FaceLabelSource.EmbeddingMatch)
+            .Select(l => l.DetectedFaceId);
+        return context.DetectedFaces.AsNoTracking()
+            .Where(f => f.Embedding != null && !settledFaceIds.Contains(f.Id))
+            .ToList();
     }
 }

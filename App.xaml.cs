@@ -119,6 +119,59 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        if (e.Args.Length == 3 && e.Args[0] == "--test-clip-similarity")
+        {
+            RunClipSimilarityDiagnostic(e.Args[1], e.Args[2]);
+            Shutdown();
+            return;
+        }
+
+    }
+
+    private static void RunClipSimilarityDiagnostic(string dir1, string dir2)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        string? modelDir = repo.GetStringSetting(Services.SettingsKeys.ClipModelDir);
+        if (modelDir is null) { Console.WriteLine("CLIP model dir not configured."); return; }
+        var clip = Services.ClipEmbeddingService.TryCreate(modelDir, out string? error);
+        if (clip is null) { Console.WriteLine($"Unavailable: {error}"); return; }
+
+        string[] imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
+        var files1 = Directory.GetFiles(dir1).Where(f => imageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
+        var files2 = Directory.GetFiles(dir2).Where(f => imageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
+        Console.WriteLine($"dir1: {files1.Count} images, dir2: {files2.Count} images");
+
+        var embeddings1 = files1.Select(f => clip.ComputeEmbeddingFromBytes(File.ReadAllBytes(f))).ToList();
+        var embeddings2 = files2.Select(f => clip.ComputeEmbeddingFromBytes(File.ReadAllBytes(f))).ToList();
+
+        var within1 = PairwiseSimilarities(embeddings1);
+        var within2 = PairwiseSimilarities(embeddings2);
+        var cross = new List<float>();
+        foreach (var a in embeddings1)
+            foreach (var b in embeddings2)
+                cross.Add(Services.FaceMatcher.CosineSimilarity(a, b));
+
+        ReportStats("Within dir1 (same person)", within1);
+        ReportStats("Within dir2 (same person)", within2);
+        ReportStats("Cross dir1<->dir2 (different people)", cross);
+    }
+
+    private static List<float> PairwiseSimilarities(List<float[]> embeddings)
+    {
+        var result = new List<float>();
+        for (int i = 0; i < embeddings.Count; i++)
+            for (int j = i + 1; j < embeddings.Count; j++)
+                result.Add(Services.FaceMatcher.CosineSimilarity(embeddings[i], embeddings[j]));
+        return result;
+    }
+
+    private static void ReportStats(string label, List<float> values)
+    {
+        if (values.Count == 0) { Console.WriteLine($"{label}: no pairs"); return; }
+        Console.WriteLine($"{label}: min={values.Min():F4} avg={values.Average():F4} max={values.Max():F4} (n={values.Count})");
     }
 
     private static void RunClipEmbedDiagnostic(string imagePath)
