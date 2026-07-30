@@ -26,7 +26,11 @@
                     <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
                 </Grid.LayoutTransform>
                 <Image x:Name="PhotoImage" Stretch="Uniform" SizeChanged="PhotoImage_SizeChanged" />
-                <Canvas x:Name="FaceCanvas" Background="Transparent" />
+                <!-- Aliased (not anti-aliased): face-box strokes are always exactly 1 device
+                     pixel wide regardless of zoom (see RedrawBoxes' StrokeThickness math) - at
+                     that width, anti-aliasing just spreads the line across 2 semi-transparent
+                     pixels, making it look faint/missing at low zoom instead of crisp. -->
+                <Canvas x:Name="FaceCanvas" Background="Transparent" RenderOptions.EdgeMode="Aliased" />
             </Grid>
         </ScrollViewer>
 

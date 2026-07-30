@@ -197,7 +197,16 @@ public partial class TagFacesWindow : Window
         double offsetX = imageOrigin.X;
         double offsetY = imageOrigin.Y;
 
-        const double hitPadding = 5;
+        // Box coordinates live in native-pixel/pre-transform space, then get shrunk by
+        // ZoomTransform for final rendering - a fixed StrokeThickness/hit-padding written in
+        // that same space would shrink right along with it, becoming sub-pixel (and getting
+        // anti-aliased into a faint, near-invisible line) at low zoom. Dividing by the current
+        // zoom scale here cancels that out, so the visible border is always exactly 1 real
+        // screen pixel and the click padding is always exactly 5 real screen pixels,
+        // regardless of zoom level.
+        double zoomScale = ZoomTransform.ScaleX > 0 ? ZoomTransform.ScaleX : 1.0;
+        double strokeThickness = 1.0 / zoomScale;
+        double hitPadding = 5.0 / zoomScale;
         foreach (var face in _detectedFaces)
         {
             _labelsByFaceId.TryGetValue(face.Id, out var label);
@@ -248,7 +257,7 @@ public partial class TagFacesWindow : Window
                 Width = width,
                 Height = height,
                 Stroke = boxColor,
-                StrokeThickness = 2,
+                StrokeThickness = strokeThickness,
                 IsHitTestVisible = false,
             };
             Canvas.SetLeft(visualBorder, left);
