@@ -5,4 +5,5 @@ namespace VrcPhotoManager.Services;
 public static class SettingsKeys
 {
     public const string WdModelDir = "wd14_model_dir";
+    public const string ClipModelDir = "clip_model_dir";
 }

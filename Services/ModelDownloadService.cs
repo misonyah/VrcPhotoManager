@@ -13,6 +13,7 @@ namespace VrcPhotoManager.Services;
 public class ModelDownloadService
 {
     private const string ModelRepoBaseUrl = "https://huggingface.co/SmilingWolf/wd-vit-tagger-v3/resolve/main";
+    private const string ClipModelRepoBaseUrl = "https://huggingface.co/immich-app/ViT-L-14__laion2b-s32b-b82k/resolve/main/visual";
 
     public async Task DownloadWdTaggerModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
     {
@@ -21,6 +22,13 @@ public class ModelDownloadService
 
         await DownloadFileAsync(http, $"{ModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
         await DownloadFileAsync(http, $"{ModelRepoBaseUrl}/selected_tags.csv", Path.Combine(targetDir, "selected_tags.csv"), "selected_tags.csv", progress, ct);
+    }
+
+    public async Task DownloadClipModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(targetDir);
+        using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        await DownloadFileAsync(http, $"{ClipModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
     }
 
     private static async Task DownloadFileAsync(

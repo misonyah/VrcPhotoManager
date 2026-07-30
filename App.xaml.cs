@@ -112,6 +112,42 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        if (e.Args.Length == 2 && e.Args[0] == "--test-clip-embed")
+        {
+            RunClipEmbedDiagnostic(e.Args[1]);
+            Shutdown();
+            return;
+        }
+    }
+
+    private static void RunClipEmbedDiagnostic(string imagePath)
+    {
+        // Same "VrcdnManager" data-dir + vrcdn_manager.db pattern as RunVrcdnSyncDiagnostic -
+        // deliberately still the pre-rename folder name so existing installs keep their database.
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        string? modelDir = repo.GetStringSetting(Services.SettingsKeys.ClipModelDir);
+        if (modelDir is null)
+        {
+            Console.WriteLine("CLIP model dir not configured (set it via Settings first).");
+            return;
+        }
+
+        var clip = Services.ClipEmbeddingService.TryCreate(modelDir, out string? error);
+        if (clip is null)
+        {
+            Console.WriteLine($"Unavailable: {error}");
+            return;
+        }
+
+        byte[] bytes = File.ReadAllBytes(imagePath);
+        float[] embedding = clip.ComputeEmbeddingFromBytes(bytes);
+        Console.WriteLine($"Embedding length: {embedding.Length}");
+        Console.WriteLine($"First 5 values: {string.Join(", ", embedding.Take(5).Select(v => v.ToString("F4")))}");
+        float norm = MathF.Sqrt(embedding.Sum(v => v * v));
+        Console.WriteLine($"L2 norm (should be ~1.0): {norm:F4}");
     }
 
     private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)

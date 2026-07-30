@@ -1,7 +1,7 @@
 <Window x:Class="VrcPhotoManager.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="360" Width="580"
+        Title="Settings" Height="520" Width="580"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <StackPanel Margin="20">
         <TextBlock Text="WD14 Nudity Classifier Model" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
@@ -19,6 +19,23 @@
                 Padding="8,4" Margin="0,0,0,8" Click="DownloadModel_Click"
                 ToolTip="Downloads model.onnx (~378 MB) and selected_tags.csv into the folder above" />
         <TextBlock x:Name="DownloadStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+
+        <TextBlock Text="CLIP Face-Matching Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
+            Used by "Suggest Faces". Model: laion/CLIP-ViT-L-14-laion2B-s32B-b82K (Hugging Face,
+            ~1.2 GB, image encoder only).
+        </TextBlock>
+
+        <TextBlock Text="Model folder (model.onnx):" Margin="0,0,0,4" />
+        <DockPanel Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Content="Browse..." Padding="8,2" Margin="8,0,0,0" Click="BrowseClipModelDir_Click" />
+            <TextBox x:Name="ClipModelDirTextBox" VerticalContentAlignment="Center" />
+        </DockPanel>
+
+        <Button x:Name="DownloadClipButton" Content="Download CLIP Model Files" HorizontalAlignment="Left"
+                Padding="8,4" Margin="0,0,0,8" Click="DownloadClipModel_Click"
+                ToolTip="Downloads model.onnx (~1.2 GB) into the folder above" />
+        <TextBlock x:Name="DownloadClipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
             Changes take effect the next time you start VRC Photo Manager.
