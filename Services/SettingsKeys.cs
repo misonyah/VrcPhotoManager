@@ -6,4 +6,5 @@ public static class SettingsKeys
 {
     public const string WdModelDir = "wd14_model_dir";
     public const string ClipModelDir = "clip_model_dir";
+    public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
 }

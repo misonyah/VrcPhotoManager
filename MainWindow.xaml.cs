@@ -42,6 +42,22 @@ public partial class MainWindow : Window
         new Views.MetadataWindow(photo) { Owner = this }.ShowDialog();
     }
 
+    private void CopyVrcdnUrl_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        if (photo.RemoteUrl is string url)
+        {
+            Clipboard.SetText(url);
+            vm.StatusMessage = "Copied VRCDN URL to clipboard.";
+        }
+        else
+        {
+            vm.StatusMessage = "This photo hasn't been uploaded yet - no VRCDN URL to copy.";
+        }
+    }
+
     private void TagFaces_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
@@ -114,10 +130,19 @@ public partial class MainWindow : Window
             PreviewImage.Source = bmp;
             PreviewPlayers.Text = photo.PlayersTooltip;
             PreviewOverlay.Visibility = Visibility.Visible;
+
+            if (DataContext is MainViewModel vm && vm.AutoCopyUrlOnHover)
+            {
+                // Clipboard.SetText("") throws ArgumentException - empty string isn't a valid
+                // clipboard text value, so a not-yet-uploaded photo needs Clear() instead.
+                if (photo.RemoteUrl is string url) Clipboard.SetText(url);
+                else Clipboard.Clear();
+            }
         }
         catch
         {
-            // full-res original may be missing/moved since scan - just skip the preview
+            // full-res original may be missing/moved since scan, or the clipboard is
+            // momentarily locked by another process - either way, just skip silently.
         }
     }
 }

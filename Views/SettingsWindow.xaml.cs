@@ -17,6 +17,7 @@ public partial class SettingsWindow : Window
         _repo = repo;
         ModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.WdModelDir) ?? "";
         ClipModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.ClipModelDir) ?? "";
+        AutoCopyUrlCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
     }
 
     private void BrowseModelDir_Click(object sender, RoutedEventArgs e)
@@ -109,6 +110,7 @@ public partial class SettingsWindow : Window
         {
             _repo.SetStringSetting(SettingsKeys.ClipModelDir, ClipModelDirTextBox.Text.Trim());
         }
+        _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         DialogResult = true;
         Close();
     }

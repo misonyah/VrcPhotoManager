@@ -128,6 +128,7 @@
                                             </MenuItem>
                                             <MenuItem Header="View Metadata..." Click="ViewMetadata_Click" />
                                             <MenuItem Header="Tag Faces..." Click="TagFaces_Click" />
+                                            <MenuItem Header="Copy VRCDN URL" Click="CopyVrcdnUrl_Click" />
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                     <Grid>

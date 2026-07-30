@@ -1,7 +1,7 @@
 <Window x:Class="VrcPhotoManager.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="520" Width="580"
+        Title="Settings" Height="570" Width="580"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <StackPanel Margin="20">
         <TextBlock Text="WD14 Nudity Classifier Model" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
@@ -36,6 +36,11 @@
                 Padding="8,4" Margin="0,0,0,8" Click="DownloadClipModel_Click"
                 ToolTip="Downloads model.onnx (~1.2 GB) into the folder above" />
         <TextBlock x:Name="DownloadClipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+
+        <TextBlock Text="General" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+        <CheckBox x:Name="AutoCopyUrlCheckBox" Content="Automatically copy VRCDN URL to clipboard when hovering a photo"
+                  Margin="0,0,0,12"
+                  ToolTip="Copies the photo's VRCDN URL (or clears the clipboard if it isn't uploaded) every time the hover preview appears" />
 
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
             Changes take effect the next time you start VRC Photo Manager.

@@ -383,4 +383,13 @@ public class PhotoRepository
 
     public void SetStringSetting(string key, string value) =>
         SetSetting(key, System.Text.Encoding.UTF8.GetBytes(value));
+
+    public bool GetBoolSetting(string key, bool defaultValue = false)
+    {
+        string? value = GetStringSetting(key);
+        return value is null ? defaultValue : value == "true";
+    }
+
+    public void SetBoolSetting(string key, bool value) =>
+        SetStringSetting(key, value ? "true" : "false");
 }

@@ -167,6 +167,10 @@ public class MainViewModel : INotifyPropertyChanged
     public FaceRepository Faces => _faces;
     public VrcxProfileLookupService? ProfileLookup => _profileLookup;
 
+    /// <summary>Read fresh (not cached) each time - it's a single cheap SQLite lookup, so
+    /// there's no need for a separate "reload after Settings closes" step.</summary>
+    public bool AutoCopyUrlOnHover => _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
+
     public MainViewModel()
     {
         // Deliberately still "VrcdnManager" - the on-disk data folder name, kept stable
