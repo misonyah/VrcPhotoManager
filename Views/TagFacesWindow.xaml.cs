@@ -213,6 +213,10 @@ public partial class TagFacesWindow : Window
             bool confirmed = label is not null && label.Confirmed && label.PersonId is not null;
             bool suggested = label is not null && !label.Confirmed
                 && label.Source == FaceLabelSource.EmbeddingMatch && label.PersonId is not null;
+            // Confirmed=true with PersonId=null is the "<nobody>" case (a deliberately marked
+            // false-positive detection) - distinct from having no FaceLabel row at all (never
+            // reviewed), which is what the default yellow/untagged state below still means.
+            bool markedNotAFace = label is not null && label.Confirmed && label.PersonId is null;
 
             string? personName = null;
             Brush boxColor = Brushes.Yellow;
@@ -225,6 +229,11 @@ public partial class TagFacesWindow : Window
             {
                 personName = $"? {suggestedPerson.Name}";
                 boxColor = Brushes.Orange;
+            }
+            else if (markedNotAFace)
+            {
+                personName = "<nobody>";
+                boxColor = Brushes.Gray;
             }
 
             double left = offsetX + face.X * scale;
@@ -307,7 +316,7 @@ public partial class TagFacesWindow : Window
 
         foreach (var player in _photoPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this photo)", player.UserId, null));
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", player.UserId, null));
         }
         foreach (var person in _personsById.Values.OrderBy(p => p.Name))
         {
@@ -343,7 +352,7 @@ public partial class TagFacesWindow : Window
         RegisteredPerson person = item.ExistingPersonId is long existingId
             ? _personsById[existingId]
             : item.VrcUserId is string vrcUserId
-                ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.DisplayText.Replace(" (in this photo)", ""))
+                ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.DisplayText.Replace(" (in this instance, per VRCX)", ""))
                 : _faces.CreatePerson(item.DisplayText);
 
         bool isNewVrcLink = item.ExistingPersonId is null && item.VrcUserId is not null;
