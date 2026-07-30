@@ -45,6 +45,15 @@
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Only show photos where this person has an actual confirmed face tag, not just VRCX metadata presence" />
 
+            <TextBlock Text="Faces:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox ItemsSource="{Binding FaceCountFilterOptions}" SelectedItem="{Binding FaceCountFilter}" Width="70" Margin="0,0,16,0"
+                      ToolTip="Filters by detected-face count (from Scan Faces)" />
+
+            <TextBlock Text="Min suggestion confidence:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <Slider Minimum="0" Maximum="1" Value="{Binding MinSuggestionConfidence}" Width="120" VerticalAlignment="Center"
+                    ToolTip="Left = off. Dragging right shows only photos with an unconfirmed Suggest Faces match at or above this confidence." />
+            <TextBlock Text="{Binding MinSuggestionConfidenceLabel}" VerticalAlignment="Center" Width="32" Margin="4,0,16,0" />
+
             <TextBlock Text="Sort:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Width="150" Margin="0,0,16,0" />
 

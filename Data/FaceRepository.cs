@@ -148,6 +148,22 @@ public class FaceRepository(string dbPath)
             .SetProperty(p => p.VrcProfileThumbnailFetchedAt, DateTime.UtcNow));
     }
 
+    /// <summary>
+    /// Photo ids with at least one unconfirmed EmbeddingMatch suggestion at or above the given
+    /// confidence - drives the main window's "Min suggestion confidence" filter slider.
+    /// </summary>
+    public HashSet<long> GetPhotoIdsWithSuggestionConfidenceAtLeast(float minConfidence)
+    {
+        using var context = NewContext();
+        var faceIds = context.FaceLabels
+            .Where(l => !l.Confirmed && l.Source == FaceLabelSource.EmbeddingMatch && l.Confidence >= minConfidence)
+            .Select(l => l.DetectedFaceId);
+        return context.DetectedFaces
+            .Where(f => faceIds.Contains(f.Id))
+            .Select(f => f.PhotoId)
+            .ToHashSet();
+    }
+
     public List<DetectedFace> GetDetectedFacesWithoutEmbedding()
     {
         using var context = NewContext();

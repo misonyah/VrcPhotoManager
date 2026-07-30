@@ -74,6 +74,31 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] StatusFilterOptions { get; } = ["All", "NotUploaded", "Uploading", "Uploaded", "Failed"];
 
+    private string _faceCountFilter = "Any";
+    public string FaceCountFilter
+    {
+        get => _faceCountFilter;
+        set { _faceCountFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+    public string[] FaceCountFilterOptions { get; } = ["Any", "0", "1+"];
+
+    /// <summary>0 means "off" (no confidence-based filtering) - real confidence values are
+    /// always > 0 in practice, since only suggestions clearing FaceMatcher's own acceptance
+    /// threshold ever get written at all, so 0 as a sentinel doesn't collide with real data.</summary>
+    private double _minSuggestionConfidence;
+    public double MinSuggestionConfidence
+    {
+        get => _minSuggestionConfidence;
+        set
+        {
+            _minSuggestionConfidence = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MinSuggestionConfidenceLabel));
+            RebuildRows();
+        }
+    }
+    public string MinSuggestionConfidenceLabel => _minSuggestionConfidence <= 0 ? "Off" : _minSuggestionConfidence.ToString("F2");
+
     private string _sortOption = "Filename (A-Z)";
     public string SortOption
     {
@@ -826,6 +851,17 @@ public class MainViewModel : INotifyPropertyChanged
                 var taggedPhotoIds = _faces.GetTaggedPhotoIdsForUser(userId);
                 filtered = filtered.Where(p => taggedPhotoIds.Contains(p.Model.Id));
             }
+        }
+        filtered = FaceCountFilter switch
+        {
+            "0" => filtered.Where(p => p.DetectedFaceCount == 0),
+            "1+" => filtered.Where(p => p.DetectedFaceCount >= 1),
+            _ => filtered,
+        };
+        if (MinSuggestionConfidence > 0)
+        {
+            var suggestedPhotoIds = _faces.GetPhotoIdsWithSuggestionConfidenceAtLeast((float)MinSuggestionConfidence);
+            filtered = filtered.Where(p => suggestedPhotoIds.Contains(p.Model.Id));
         }
 
         filtered = SortOption switch
