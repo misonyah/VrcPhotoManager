@@ -59,6 +59,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void PhotoImage_MiddleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        if ((sender as FrameworkElement)?.DataContext is not PhotoViewModel photo) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.ProfileLookup, photo.Model) { Owner = this }.ShowDialog();
+        vm.RefreshPlayerFilterOptions();
+    }
+
     private void PhotoGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (DataContext is MainViewModel vm)

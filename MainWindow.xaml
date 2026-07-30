@@ -124,9 +124,13 @@
                                     <Grid>
                                         <!-- Clicking the checkbox toggles it directly (it's drawn on top for its
                                              own bounds, so this handler never double-fires for that click); clicking
-                                             anywhere else on the thumbnail toggles selection too, via this handler. -->
+                                             anywhere else on the thumbnail toggles selection too, via this handler.
+                                             Middle-click opens Tag Faces directly - MouseUp (not MouseLeftButtonUp)
+                                             since WPF has no MouseMiddleButtonUp, so the handler itself filters by
+                                             ChangedButton to avoid double-handling the left-click case above. -->
                                         <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
-                                               MouseLeftButtonUp="PhotoImage_Click" />
+                                               MouseLeftButtonUp="PhotoImage_Click"
+                                               MouseUp="PhotoImage_MiddleClick" />
                                         <CheckBox IsChecked="{Binding Selected}"
                                                   HorizontalAlignment="Left" VerticalAlignment="Top"
                                                   Margin="4" />
