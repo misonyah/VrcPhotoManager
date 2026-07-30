@@ -183,6 +183,8 @@
                         ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
                 <Button Content="Scan Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Detects anime-style faces in every photo (OpenCvSharp + lbpcascade_animeface) and shows a count badge on each thumbnail" />
+                <Button Content="Suggest Faces" Command="{Binding SuggestFacesCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Suggests who's in each untagged detected face using CLIP embedding similarity against registered people's confirmed reference photos - review and confirm in Tag Faces, not fully automatic" />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8" />

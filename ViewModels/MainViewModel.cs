@@ -22,6 +22,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly FaceRepository _faces;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
+    private ClipEmbeddingService? _clipEmbedder;
     private WdTaggerService? _tagger;
     private VrcdnApiClient? _api;
 
@@ -124,6 +125,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     public ICommand ScanLibraryCommand { get; }
     public RelayCommand ScanFacesCommand { get; }
+    public RelayCommand SuggestFacesCommand { get; }
     public RelayCommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
@@ -160,6 +162,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         ScanFacesCommand = new RelayCommand(ScanFacesAsync, () => _faceDetector is not null);
+        SuggestFacesCommand = new RelayCommand(SuggestFacesAsync, () => _clipEmbedder is not null);
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
@@ -218,6 +221,20 @@ public class MainViewModel : INotifyPropertyChanged
         if (_profileLookup is null)
         {
             StatusMessage = $"VRCX profile-picture bootstrap unavailable: {profileLookupError}";
+        }
+
+        var (clipEmbedder, clipError) = await Task.Run(() =>
+        {
+            string? modelDir = _repo.GetStringSetting(SettingsKeys.ClipModelDir);
+            if (modelDir is null) return (null, "CLIP model directory not configured (set it via Settings).");
+            var s = ClipEmbeddingService.TryCreate(modelDir, out string? error);
+            return (s, error);
+        });
+        _clipEmbedder = clipEmbedder;
+        SuggestFacesCommand.RaiseCanExecuteChanged();
+        if (_clipEmbedder is null)
+        {
+            StatusMessage = $"Face-matching unavailable: {clipError}";
         }
     }
 
@@ -453,6 +470,96 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyFaceCounts();
         StatusMessage = $"Face scan complete: {totalFaces} faces found across {photos.Count} photos.";
+    }
+
+    private async Task SuggestFacesAsync()
+    {
+        if (_clipEmbedder is null) { StatusMessage = "CLIP face-matching model not available."; return; }
+
+        StatusMessage = "Computing face embeddings...";
+        var pathById = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath);
+        var needingEmbedding = _faces.GetDetectedFacesWithoutEmbedding();
+        int embedded = 0;
+        foreach (var face in needingEmbedding)
+        {
+            if (!pathById.TryGetValue(face.PhotoId, out string? path)) continue;
+            try
+            {
+                float[] embedding = await Task.Run(() =>
+                    _clipEmbedder.ComputeEmbedding(path, face.X, face.Y, face.Width, face.Height));
+                _faces.SetEmbedding(face.Id, ClipEmbeddingService.EmbeddingToBytes(embedding));
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Embedding failed for face {face.Id}: {ex.Message}";
+            }
+
+            embedded++;
+            if (embedded % 25 == 0 || embedded == needingEmbedding.Count)
+            {
+                StatusMessage = $"Computing face embeddings... {embedded}/{needingEmbedding.Count}";
+            }
+        }
+
+        StatusMessage = "Building reference centroids...";
+        var persons = _faces.GetAllPersons();
+        var centroids = new Dictionary<long, float[]>();
+        foreach (var person in persons)
+        {
+            var refs = _faces.GetReferenceEmbeddingsForPerson(person.Id)
+                .Select(ClipEmbeddingService.BytesToEmbedding).ToList();
+            if (person.VrcProfileThumbnail is byte[] thumb)
+            {
+                try { refs.Add(await Task.Run(() => _clipEmbedder.ComputeEmbeddingFromBytes(thumb))); }
+                catch { /* corrupt/unreadable thumbnail - skip it, may still have enough tag-derived refs */ }
+            }
+
+            var centroid = FaceMatcher.TryComputeCentroid(refs);
+            if (centroid is not null) centroids[person.Id] = centroid;
+        }
+
+        if (centroids.Count == 0)
+        {
+            StatusMessage = $"No registered person has enough reference photos yet (need >= {FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).";
+            return;
+        }
+
+        StatusMessage = "Matching faces against registered people...";
+        var toScore = _faces.GetFacesNeedingSuggestion();
+        int suggested = 0;
+        foreach (var face in toScore)
+        {
+            if (face.Embedding is null) continue;
+            float[] faceEmbedding = ClipEmbeddingService.BytesToEmbedding(face.Embedding);
+
+            var scored = centroids
+                .Select(kv => (PersonId: kv.Key, Similarity: FaceMatcher.CosineSimilarity(faceEmbedding, kv.Value)))
+                .OrderByDescending(s => s.Similarity)
+                .ToList();
+
+            var best = scored[0];
+            bool accept;
+            float confidence;
+            if (scored.Count == 1)
+            {
+                accept = best.Similarity >= FaceMatcher.SingleCandidateThreshold;
+                confidence = best.Similarity;
+            }
+            else
+            {
+                float margin = best.Similarity - scored[1].Similarity;
+                accept = margin >= FaceMatcher.DifferentialMarginThreshold;
+                confidence = margin;
+            }
+
+            if (accept)
+            {
+                _faces.UpsertFaceLabel(face.Id, best.PersonId, confirmed: false, FaceLabelSource.EmbeddingMatch, confidence);
+                suggested++;
+            }
+        }
+
+        StatusMessage = $"Suggest Faces done: {embedded} embeddings computed, {suggested} new suggestions across {centroids.Count} eligible people.";
     }
 
     /// <summary>Rebuilds the player-filter dropdown from the current library state - called
