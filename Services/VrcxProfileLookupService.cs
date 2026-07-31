@@ -15,9 +15,12 @@ namespace VrcPhotoManager.Services;
 /// </summary>
 public class VrcxProfileLookupService
 {
-    // Single-account machine (see project CLAUDE.md) - VRCX names this table after the local
+    // Single-account machine (see project CLAUDE.md) - VRCX names these tables after the local
     // account's VRChat user id with "usr_" stripped and dashes removed.
-    private const string FeedAvatarTable = "usrf9065286b1f24b7fa00815fc2a117546_feed_avatar";
+    private const string LocalAccountIdNoPrefix = "f9065286b1f24b7fa00815fc2a117546";
+    private const string FeedAvatarTable = $"usr{LocalAccountIdNoPrefix}_feed_avatar";
+    private const string FriendLogTable = $"usr{LocalAccountIdNoPrefix}_friend_log_current";
+    private const string JoinLeaveTable = "gamelog_join_leave";
 
     private readonly string _vrcxDbPath;
     private readonly HttpClient _http;
@@ -59,6 +62,68 @@ public class VrcxProfileLookupService
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The local account isn't its own VRCX "friend" - friend_log_current only lists OTHER
+    /// people, so tagging yourself in a photo needs a separate lookup: the logged-in user id
+    /// from VRCX's own configs table, and the most recent display name VRCX logged for that id
+    /// from the game log (join/leave events record the local player same as everyone else in
+    /// the instance - VRCX has no dedicated "my own profile" table). Degrades to null if
+    /// either piece is missing, same as every other lookup here.
+    /// </summary>
+    public (string UserId, string DisplayName)? GetSelf()
+    {
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
+            conn.Open();
+
+            using var idCmd = conn.CreateCommand();
+            idCmd.CommandText = "SELECT value FROM configs WHERE key = 'config:lastuserloggedin'";
+            if (idCmd.ExecuteScalar() is not string userId || userId.Length == 0) return null;
+
+            using var nameCmd = conn.CreateCommand();
+            nameCmd.CommandText = $"""
+                SELECT display_name FROM "{JoinLeaveTable}"
+                WHERE user_id = @userId ORDER BY created_at DESC LIMIT 1
+                """;
+            nameCmd.Parameters.AddWithValue("@userId", userId);
+            return nameCmd.ExecuteScalar() is string displayName ? (userId, displayName) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Every friend VRCX currently has recorded for the local account - powers the "new
+    /// person" name autocomplete in Tag Faces, so a tagged name's spelling comes straight from
+    /// VRCX's own friends list instead of manual (typo-prone) typing. Same read-only, degrade-
+    /// to-empty safety as the thumbnail lookup above.
+    /// </summary>
+    public List<(string UserId, string DisplayName)> GetFriends()
+    {
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""SELECT user_id, display_name FROM "{FriendLogTable}" ORDER BY display_name COLLATE NOCASE""";
+            using var reader = cmd.ExecuteReader();
+
+            var result = new List<(string, string)>();
+            while (reader.Read())
+            {
+                result.Add((reader.GetString(0), reader.GetString(1)));
+            }
+            return result;
+        }
+        catch
+        {
+            return [];
         }
     }
 

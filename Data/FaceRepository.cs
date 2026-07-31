@@ -30,13 +30,49 @@ public class FaceRepository(string dbPath)
         context.SaveChanges();
     }
 
-    public Dictionary<long, int> GetFaceCountsByPhoto()
+    /// <summary>
+    /// Excludes faces confirmed as "&lt;unknown&gt;" (Confirmed=true, PersonId=null) - those are
+    /// deliberately marked false-positive detections, not real faces, so they shouldn't count
+    /// toward the thumbnail grid's per-photo face-count badge. Tagged counts only faces with a
+    /// confirmed real-person label - an unconfirmed EmbeddingMatch suggestion (orange box) isn't
+    /// "tagged" yet.
+    /// </summary>
+    public Dictionary<long, (int Total, int Tagged)> GetFaceCountsByPhoto()
     {
         using var context = NewContext();
-        return context.DetectedFaces
-            .GroupBy(f => f.PhotoId)
-            .Select(g => new { PhotoId = g.Key, Count = g.Count() })
-            .ToDictionary(x => x.PhotoId, x => x.Count);
+        var notAFaceIds = context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId == null)
+            .Select(l => l.DetectedFaceId);
+        var taggedFaceIds = context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId != null)
+            .Select(l => l.DetectedFaceId);
+
+        var rows = context.DetectedFaces
+            .Where(f => !notAFaceIds.Contains(f.Id))
+            .Select(f => new { f.PhotoId, IsTagged = taggedFaceIds.Contains(f.Id) })
+            .ToList();
+
+        return rows
+            .GroupBy(r => r.PhotoId)
+            .ToDictionary(g => g.Key, g => (Total: g.Count(), Tagged: g.Count(r => r.IsTagged)));
+    }
+
+    /// <summary>Adds a single manually-drawn face box (the detector missed a real face) - same
+    /// row shape as an auto-detected one, so it goes through the exact same tagging picker.</summary>
+    public DetectedFace AddManualFace(long photoId, FaceBox box)
+    {
+        using var context = NewContext();
+        var face = new DetectedFace
+        {
+            PhotoId = photoId,
+            X = box.X,
+            Y = box.Y,
+            Width = box.Width,
+            Height = box.Height,
+        };
+        context.DetectedFaces.Add(face);
+        context.SaveChanges();
+        return face;
     }
 
     public List<DetectedFace> GetDetectedFaces(long photoId)
@@ -61,6 +97,10 @@ public class FaceRepository(string dbPath)
     public void UpsertFaceLabel(long detectedFaceId, long? personId, bool confirmed, FaceLabelSource source, float confidence = 1.0f)
     {
         using var context = NewContext();
+        long? previousPersonId = context.FaceLabels
+            .Where(l => l.DetectedFaceId == detectedFaceId)
+            .Select(l => l.PersonId)
+            .FirstOrDefault();
         context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
         context.FaceLabels.Add(new FaceLabel
         {
@@ -71,12 +111,54 @@ public class FaceRepository(string dbPath)
             Confidence = confidence,
         });
         context.SaveChanges();
+        PruneIfOrphanedManualPerson(context, previousPersonId);
     }
 
     public void DeleteFaceLabel(long detectedFaceId)
     {
         using var context = NewContext();
+        long? personId = context.FaceLabels
+            .Where(l => l.DetectedFaceId == detectedFaceId)
+            .Select(l => l.PersonId)
+            .FirstOrDefault();
         context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
+        PruneIfOrphanedManualPerson(context, personId);
+    }
+
+    /// <summary>Permanently removes a detected face box (and any label on it) - used to
+    /// discard a manually-drawn box the user backed out of tagging, or to correct a
+    /// wrongly-placed box (manual or auto-detected).</summary>
+    public void DeleteDetectedFace(long detectedFaceId)
+    {
+        using var context = NewContext();
+        long? personId = context.FaceLabels
+            .Where(l => l.DetectedFaceId == detectedFaceId)
+            .Select(l => l.PersonId)
+            .FirstOrDefault();
+        context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
+        context.DetectedFaces.Where(f => f.Id == detectedFaceId).ExecuteDelete();
+        PruneIfOrphanedManualPerson(context, personId);
+    }
+
+    /// <summary>
+    /// A manually-created person (no VrcUserId) has no external identity to fall back on -
+    /// once their last confirmed face tag is removed or reassigned elsewhere, the entry is
+    /// just dead clutter in the player-filter dropdown, so it's deleted outright. A VRCX-linked
+    /// person is left alone even at zero current tags - they have real external identity (and
+    /// possibly a cached profile thumbnail) worth keeping for the next time they're tagged.
+    /// </summary>
+    private static void PruneIfOrphanedManualPerson(VrcdnDbContext context, long? personId)
+    {
+        if (personId is not long id) return;
+        bool stillTagged = context.FaceLabels.Any(l => l.Confirmed && l.PersonId == id);
+        if (stillTagged) return;
+
+        var person = context.RegisteredPeople.FirstOrDefault(p => p.Id == id);
+        if (person is not null && person.VrcUserId is null)
+        {
+            context.RegisteredPeople.Remove(person);
+            context.SaveChanges();
+        }
     }
 
     public RegisteredPerson FindOrCreatePersonByVrcUserId(string vrcUserId, string displayName)
@@ -98,6 +180,16 @@ public class FaceRepository(string dbPath)
         context.RegisteredPeople.Add(person);
         context.SaveChanges();
         return person;
+    }
+
+    /// <summary>Corrects a person's display name in place (e.g. a typo like "saya" ->
+    /// "sayakiss") - existing FaceLabels keep pointing at the same PersonId, so every photo
+    /// already tagged with them picks up the corrected name automatically.</summary>
+    public void RenamePerson(long personId, string newName)
+    {
+        using var context = NewContext();
+        context.RegisteredPeople.Where(p => p.Id == personId)
+            .ExecuteUpdate(s => s.SetProperty(p => p.Name, newName));
     }
 
     public List<RegisteredPerson> GetAllPersons()
@@ -133,6 +225,24 @@ public class FaceRepository(string dbPath)
         var personIds = context.RegisteredPeople.Where(p => p.VrcUserId == vrcUserId).Select(p => p.Id);
         var faceIds = context.FaceLabels
             .Where(l => l.Confirmed && l.PersonId != null && personIds.Contains(l.PersonId!.Value))
+            .Select(l => l.DetectedFaceId);
+        return context.DetectedFaces
+            .Where(f => faceIds.Contains(f.Id))
+            .Select(f => f.PhotoId)
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// Photo ids where this specific person has a confirmed face tag, looked up directly by
+    /// PersonId - the counterpart to GetTaggedPhotoIdsForUser for manually-created people who
+    /// have no VrcUserId to key off of (VRCX never observed them, so there's no "presence" set
+    /// to narrow from; a manual person's filter IS the tagged-photo set).
+    /// </summary>
+    public HashSet<long> GetTaggedPhotoIdsForPerson(long personId)
+    {
+        using var context = NewContext();
+        var faceIds = context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId == personId)
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces
             .Where(f => faceIds.Contains(f.Id))

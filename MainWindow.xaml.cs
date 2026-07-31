@@ -64,6 +64,7 @@ public partial class MainWindow : Window
         if (DataContext is not MainViewModel vm) return;
 
         new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.ProfileLookup, photo.Model) { Owner = this }.ShowDialog();
+        vm.ApplyFaceCounts();
         vm.RefreshPlayerFilterOptions();
     }
 
@@ -82,6 +83,7 @@ public partial class MainWindow : Window
         if (DataContext is not MainViewModel vm) return;
 
         new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.ProfileLookup, photo.Model) { Owner = this }.ShowDialog();
+        vm.ApplyFaceCounts();
         vm.RefreshPlayerFilterOptions();
     }
 

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using VrcPhotoManager.Data;
 using VrcPhotoManager.Models;
@@ -65,6 +66,16 @@ public class PhotoViewModel : INotifyPropertyChanged
         }
     }
 
+    private static readonly SolidColorBrush AllTaggedBadgeBrush = CreateFrozenBrush(0xCC, 0x1B, 0x5E, 0x20);
+    private static readonly SolidColorBrush DefaultBadgeBrush = CreateFrozenBrush(0xCC, 0x00, 0x00, 0x00);
+
+    private static SolidColorBrush CreateFrozenBrush(byte a, byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
     private int _detectedFaceCount;
     public int DetectedFaceCount
     {
@@ -74,8 +85,34 @@ public class PhotoViewModel : INotifyPropertyChanged
             if (_detectedFaceCount == value) return;
             _detectedFaceCount = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(FaceCountDisplay));
+            OnPropertyChanged(nameof(FaceCountBadgeBrush));
         }
     }
+
+    private int _taggedFaceCount;
+    public int TaggedFaceCount
+    {
+        get => _taggedFaceCount;
+        set
+        {
+            if (_taggedFaceCount == value) return;
+            _taggedFaceCount = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(FaceCountDisplay));
+            OnPropertyChanged(nameof(FaceCountBadgeBrush));
+        }
+    }
+
+    /// <summary>"3" while nobody's tagged yet, "1/3" while partially tagged, and back to just
+    /// "3" (rendered in FaceCountBadgeBrush's dark green) once every detected face has a
+    /// confirmed real-person label.</summary>
+    public string FaceCountDisplay => TaggedFaceCount > 0 && TaggedFaceCount < DetectedFaceCount
+        ? $"{TaggedFaceCount}/{DetectedFaceCount}"
+        : DetectedFaceCount.ToString();
+
+    public Brush FaceCountBadgeBrush =>
+        DetectedFaceCount > 0 && TaggedFaceCount == DetectedFaceCount ? AllTaggedBadgeBrush : DefaultBadgeBrush;
 
     /// <summary>
     /// Lazily fetched from the db on first access (i.e. when the item is actually

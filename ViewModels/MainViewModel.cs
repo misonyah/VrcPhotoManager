@@ -107,9 +107,18 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] SortOptions { get; } = ["Filename (A-Z)", "Date (Newest First)", "Date (Oldest First)"];
 
-    public record PlayerFilterOption(string? VrcUserId, string DisplayText);
+    /// <summary>
+    /// A player filter entry is keyed by exactly one of VrcUserId (VRCX-observed player - the
+    /// dropdown filters by VRCX's own "who was in this instance" data) or PersonId (a manually
+    /// registered person with no VRC id - VRCX never observed them, so the only meaningful
+    /// filter is "photos where this person has a confirmed face tag").
+    /// </summary>
+    public record PlayerFilterOption(string? VrcUserId, long? PersonId, string DisplayText)
+    {
+        public bool IsManual => PersonId is not null;
+    }
 
-    private static readonly PlayerFilterOption AllPlayersOption = new(null, "(all players)");
+    private static readonly PlayerFilterOption AllPlayersOption = new(null, null, "(all players)");
 
     private PlayerFilterOption _selectedPlayerFilter = AllPlayersOption;
     public PlayerFilterOption SelectedPlayerFilter
@@ -597,21 +606,53 @@ public class MainViewModel : INotifyPropertyChanged
     public void RefreshPlayerFilterOptions()
     {
         var taggedIds = _faces.GetTaggedUserIds();
+
+        var vrcxPlayers = _repo.GetDistinctPlayers().Select(p =>
+            (Name: p.DisplayName, Option: new PlayerFilterOption(p.UserId, null,
+                taggedIds.Contains(p.UserId) ? $"{p.DisplayName} (tagged)" : p.DisplayName)));
+
+        // Manually-created people (typed in the Tag Faces "new person" box, no linked VRC id)
+        // never show up in VRCX's own player data - mixed into the same sorted list (not
+        // appended after) so they land next to their alphabetical neighbors, marked "(manual)"
+        // so they're visually distinct until linked to a real VRC account (see
+        // PlayerFilterOption.IsManual / ItemContainerStyle in the XAML).
+        var manualPeople = _faces.GetAllPersons()
+            .Where(p => p.VrcUserId is null)
+            .Select(p => (Name: p.Name, Option: new PlayerFilterOption(null, p.Id, $"{p.Name} (manual)")));
+
         var options = new List<PlayerFilterOption> { AllPlayersOption };
-        options.AddRange(_repo.GetDistinctPlayers().Select(p =>
-            new PlayerFilterOption(p.UserId, taggedIds.Contains(p.UserId) ? $"{p.DisplayName} (tagged)" : p.DisplayName)));
+        options.AddRange(vrcxPlayers.Concat(manualPeople)
+            .OrderBy(x => NaturalSortKey(x.Name), StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.Option));
         PlayerFilterOptions = options;
     }
 
+    /// <summary>
+    /// VRChat display names are full of decorative symbols, emoji, and stylized brackets
+    /// (zero-width joiners, "★Aiko", "『Name』") - sorting on the raw string puts them in
+    /// unicode-codepoint order, not where a human expects. Stripping everything but letters/
+    /// digits before comparing sorts by what a person actually reads as the name; an
+    /// all-symbol name (no letters/digits at all) falls back to the raw string so it still
+    /// sorts somewhere stable instead of colliding with every other symbol-only name at "".
+    /// </summary>
+    private static string NaturalSortKey(string name)
+    {
+        var letters = name.Where(char.IsLetterOrDigit).ToArray();
+        return letters.Length > 0 ? new string(letters) : name;
+    }
+
     /// <summary>Pulls face counts in one bulk query and applies them to already-loaded
-    /// PhotoViewModels - called after a scan, and once at startup so counts from a previous
-    /// scan are visible immediately without re-scanning.</summary>
-    private void ApplyFaceCounts()
+    /// PhotoViewModels - called after a scan, once at startup so counts from a previous scan
+    /// are visible immediately without re-scanning, and after the Tag Faces window closes so
+    /// the badge for the just-tagged photo updates without a full re-scan.</summary>
+    public void ApplyFaceCounts()
     {
         var counts = _faces.GetFaceCountsByPhoto();
         foreach (var vm in _allPhotos)
         {
-            vm.DetectedFaceCount = counts.GetValueOrDefault(vm.Model.Id, 0);
+            var (total, tagged) = counts.GetValueOrDefault(vm.Model.Id, (0, 0));
+            vm.DetectedFaceCount = total;
+            vm.TaggedFaceCount = tagged;
         }
     }
 
@@ -848,13 +889,22 @@ public class MainViewModel : INotifyPropertyChanged
         }
         if (SelectedPlayerFilter.VrcUserId is string userId)
         {
-            var photoIds = _repo.GetPhotoIdsForUser(userId);
+            // "Tagged only" stands on its own - it must NOT further narrow the VRCX-presence
+            // set below, since a confirmed face tag can exist on a photo VRCX never matched a
+            // player to at all (e.g. a manually-drawn box, or metadata scanning missed them).
+            // Requiring both would silently hide correctly-tagged photos (found via a real
+            // report: Sayakiss tagged on a photo with zero photo_players rows).
+            var photoIds = TaggedOnlyFilter
+                ? _faces.GetTaggedPhotoIdsForUser(userId)
+                : _repo.GetPhotoIdsForUser(userId);
             filtered = filtered.Where(p => photoIds.Contains(p.Model.Id));
-            if (TaggedOnlyFilter)
-            {
-                var taggedPhotoIds = _faces.GetTaggedPhotoIdsForUser(userId);
-                filtered = filtered.Where(p => taggedPhotoIds.Contains(p.Model.Id));
-            }
+        }
+        else if (SelectedPlayerFilter.PersonId is long personId)
+        {
+            // Manual person - no VRCX presence data to filter from, so "selected" already
+            // means "show their tagged photos" (see GetTaggedPhotoIdsForPerson).
+            var taggedPhotoIds = _faces.GetTaggedPhotoIdsForPerson(personId);
+            filtered = filtered.Where(p => taggedPhotoIds.Contains(p.Model.Id));
         }
         filtered = FaceCountFilter switch
         {

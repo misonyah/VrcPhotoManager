@@ -3,6 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Tag Faces" Height="700" Width="900"
         WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -30,25 +33,49 @@
                      pixel wide regardless of zoom (see RedrawBoxes' StrokeThickness math) - at
                      that width, anti-aliasing just spreads the line across 2 semi-transparent
                      pixels, making it look faint/missing at low zoom instead of crisp. -->
-                <Canvas x:Name="FaceCanvas" Background="Transparent" RenderOptions.EdgeMode="Aliased" />
+                <Canvas x:Name="FaceCanvas" Background="Transparent" RenderOptions.EdgeMode="Aliased"
+                        MouseLeftButtonDown="FaceCanvas_MouseLeftButtonDown"
+                        MouseMove="FaceCanvas_MouseMove"
+                        MouseLeftButtonUp="FaceCanvas_MouseLeftButtonUp" />
             </Grid>
         </ScrollViewer>
 
         <TextBlock Grid.Row="1"
-                   Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged. Scroll to zoom, middle-drag to pan."
+                   Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;. Click-drag empty space to add a missed face. Scroll to zoom, middle-drag to pan."
                    Margin="8" Foreground="Gray" />
 
-        <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True">
+        <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True"
+               Closed="PersonPickerPopup_Closed">
             <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1" Padding="8" MaxWidth="260">
                 <StackPanel>
                     <TextBlock Text="Who is this?" Foreground="White" FontWeight="Bold" Margin="0,0,0,6" />
-                    <ListBox x:Name="SuggestionListBox" MaxHeight="200" DisplayMemberPath="DisplayText"
-                             MouseUp="SuggestionListBox_MouseUp" />
+                    <ListBox x:Name="SuggestionListBox" MaxHeight="200"
+                             MouseUp="SuggestionListBox_MouseUp">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding DisplayText}" VerticalAlignment="Center" />
+                                    <Button Grid.Column="1" Content="&#xE70F;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                            Padding="4,0" Margin="4,0,0,0"
+                                            Visibility="{Binding CanRename, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Click="RenamePersonButton_Click" ToolTip="Rename this person" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                     <Separator Margin="0,6,0,6" />
+                    <TextBlock x:Name="RenameHintText" Foreground="Orange" FontSize="10" TextWrapping="Wrap"
+                               Margin="0,0,0,4" Visibility="Collapsed" />
                     <TextBox x:Name="NewPersonNameTextBox" Margin="0,0,0,4"
-                             ToolTip="Type a name and press Enter to create a new person (no VRC id)"
-                             KeyDown="NewPersonNameTextBox_KeyDown" />
+                             ToolTip="Type a name and press Enter to create a new person (no VRC id), or type 2+ characters to search your VRCX friends list"
+                             KeyDown="NewPersonNameTextBox_KeyDown" TextChanged="NewPersonNameTextBox_TextChanged" />
                     <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0" />
+                    <Button Content="Delete box" Click="DeleteFaceButton_Click" Margin="0,4,0,0"
+                            ToolTip="Permanently remove this face box (e.g. a wrongly-placed manual box)" />
                 </StackPanel>
             </Border>
         </Popup>

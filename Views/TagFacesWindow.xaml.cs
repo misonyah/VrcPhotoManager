@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -21,7 +22,11 @@ public partial class TagFacesWindow : Window
     private Dictionary<long, FaceLabel> _labelsByFaceId = [];
     private Dictionary<long, RegisteredPerson> _personsById = [];
     private List<PhotoPlayer> _photoPlayers = [];
+    private List<(string UserId, string DisplayName)> _friends = [];
+    private (string UserId, string DisplayName)? _self;
+    private List<PickerItem> _staticPickerItems = [];
     private long _activeFaceId;
+    private long? _renamingPersonId;
     private double _fitZoomScale = 1.0;
 
     private bool _isPanning;
@@ -29,7 +34,25 @@ public partial class TagFacesWindow : Window
     private double _panStartHorizontalOffset;
     private double _panStartVerticalOffset;
 
-    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsNotAFace = false);
+    private bool _isDrawingBox;
+    private Point _drawStartCanvasPoint;
+    private Rectangle? _drawPreviewRect;
+
+    /// <summary>Set right after a manually-drawn box is created and its picker opened; cleared
+    /// by any action that resolves it (tag someone, mark &lt;unknown&gt;, explicit delete). If
+    /// the popup closes while this is still set, the user backed out without choosing anything -
+    /// PersonPickerPopup_Closed deletes the box rather than leaving an orphaned untagged one.</summary>
+    private long? _pendingManualFaceId;
+
+    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsNotAFace = false)
+    {
+        /// <summary>Rename (pencil) button only makes sense for an already-registered person
+        /// with no linked VRC account - not the "confirm suggestion"/"&lt;unknown&gt;" pseudo-
+        /// entries, not a bare VRCX player/friend row that hasn't been linked to a
+        /// RegisteredPerson yet, and not a person who already has a known VRC username (their
+        /// name comes from VRCX, so editing it here would just drift out of sync).</summary>
+        public bool CanRename => ExistingPersonId is not null && VrcUserId is null && !IsConfirmSuggestion && !IsNotAFace;
+    }
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
     {
@@ -39,6 +62,14 @@ public partial class TagFacesWindow : Window
         _profileLookup = profileLookup;
         _photo = photo;
         Title = $"Tag Faces - {photo.FileName}";
+        _friends = profileLookup?.GetFriends() ?? [];
+        _self = profileLookup?.GetSelf();
+        // You're not your own VRCX friend, so the friends-list autocomplete would never
+        // surface yourself - fold it into the same searchable list explicitly.
+        if (_self is (string selfId, string selfName))
+        {
+            _friends.Insert(0, (selfId, selfName));
+        }
 
         try
         {
@@ -184,18 +215,31 @@ public partial class TagFacesWindow : Window
     /// "where does the image actually sit relative to the canvas" (via TranslatePoint), not
     /// a second round of manual centering math. Recomputed on every resize.
     /// </summary>
+    private double CurrentZoomScale() => ZoomTransform.ScaleX > 0 ? ZoomTransform.ScaleX : 1.0;
+
+    /// <summary>
+    /// Where the (pre-transform) photo sits on FaceCanvas, and the native-pixel-to-canvas
+    /// scale factor - shared by RedrawBoxes (drawing existing boxes) and the manual-box-draw
+    /// handlers below (converting a drawn canvas rectangle back to native pixel coordinates for
+    /// storage). Scale is 0 if the photo's dimensions or the image control aren't ready yet.
+    /// </summary>
+    private (double OffsetX, double OffsetY, double Scale) GetImageToCanvasTransform()
+    {
+        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight || imgWidth == 0 || imgHeight == 0)
+            return (0, 0, 0);
+        if (PhotoImage.ActualWidth == 0 || PhotoImage.ActualHeight == 0)
+            return (0, 0, 0);
+
+        double scale = Math.Min(PhotoImage.ActualWidth / imgWidth, PhotoImage.ActualHeight / imgHeight);
+        var imageOrigin = PhotoImage.TranslatePoint(new Point(0, 0), FaceCanvas);
+        return (imageOrigin.X, imageOrigin.Y, scale);
+    }
+
     private void RedrawBoxes()
     {
         FaceCanvas.Children.Clear();
-        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight || imgWidth == 0 || imgHeight == 0)
-            return;
-        if (PhotoImage.ActualWidth == 0 || PhotoImage.ActualHeight == 0)
-            return;
-
-        double scale = Math.Min(PhotoImage.ActualWidth / imgWidth, PhotoImage.ActualHeight / imgHeight);
-        var imageOrigin = PhotoImage.TranslatePoint(new System.Windows.Point(0, 0), FaceCanvas);
-        double offsetX = imageOrigin.X;
-        double offsetY = imageOrigin.Y;
+        var (offsetX, offsetY, scale) = GetImageToCanvasTransform();
+        if (scale <= 0) return;
 
         // Box coordinates live in native-pixel/pre-transform space, then get shrunk by
         // ZoomTransform for final rendering - a fixed StrokeThickness/hit-padding written in
@@ -204,16 +248,24 @@ public partial class TagFacesWindow : Window
         // zoom scale here cancels that out, so the visible border is always exactly 1 real
         // screen pixel and the click padding is always exactly 5 real screen pixels,
         // regardless of zoom level.
-        double zoomScale = ZoomTransform.ScaleX > 0 ? ZoomTransform.ScaleX : 1.0;
+        double zoomScale = CurrentZoomScale();
         double strokeThickness = 1.0 / zoomScale;
         double hitPadding = 5.0 / zoomScale;
+        // Name labels are TextBlocks living on the same zoom-transformed FaceCanvas as the
+        // boxes, so a fixed FontSize shrinks right along with the image at low zoom (a fit-to-
+        // window view of a 3840x2160 photo can run zoomScale ~0.2, turning an 11px font into an
+        // unreadable ~2px on screen) - same fix shape as strokeThickness/hitPadding above: divide
+        // by the current zoom so the label is always exactly 13 real screen pixels regardless of
+        // zoom level.
+        double labelFontSize = 13.0 / zoomScale;
+        double labelPaddingH = 2.0 / zoomScale;
         foreach (var face in _detectedFaces)
         {
             _labelsByFaceId.TryGetValue(face.Id, out var label);
             bool confirmed = label is not null && label.Confirmed && label.PersonId is not null;
             bool suggested = label is not null && !label.Confirmed
                 && label.Source == FaceLabelSource.EmbeddingMatch && label.PersonId is not null;
-            // Confirmed=true with PersonId=null is the "<nobody>" case (a deliberately marked
+            // Confirmed=true with PersonId=null is the "<unknown>" case (a deliberately marked
             // false-positive detection) - distinct from having no FaceLabel row at all (never
             // reviewed), which is what the default yellow/untagged state below still means.
             bool markedNotAFace = label is not null && label.Confirmed && label.PersonId is null;
@@ -232,7 +284,7 @@ public partial class TagFacesWindow : Window
             }
             else if (markedNotAFace)
             {
-                personName = "<nobody>";
+                personName = "<unknown>";
                 boxColor = Brushes.Gray;
             }
 
@@ -280,8 +332,8 @@ public partial class TagFacesWindow : Window
                     Text = personName,
                     Background = boxColor,
                     Foreground = Brushes.Black,
-                    FontSize = 11,
-                    Padding = new Thickness(2, 0, 2, 0),
+                    FontSize = labelFontSize,
+                    Padding = new Thickness(labelPaddingH, 0, labelPaddingH, 0),
                 };
                 Canvas.SetLeft(nameLabel, left);
                 Canvas.SetTop(nameLabel, top + height);
@@ -296,9 +348,107 @@ public partial class TagFacesWindow : Window
         OpenPicker((long)box.Tag, box);
     }
 
+    /// <summary>
+    /// Click-drag on empty canvas draws a new face box for a face the detector missed - left
+    /// button down starts it, but only when the click didn't land on an existing face's
+    /// hitTarget rectangle (identified by having a long Tag), so clicking an existing box still
+    /// goes through FaceBox_MouseLeftButtonUp exactly as before.
+    /// </summary>
+    private void FaceCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is Rectangle { Tag: long }) return;
+
+        _isDrawingBox = true;
+        _drawStartCanvasPoint = e.GetPosition(FaceCanvas);
+        _drawPreviewRect = new Rectangle
+        {
+            // Width/Height default to NaN until MouseMove sets them - a plain click (no
+            // intervening MouseMove) would leave them NaN, and "NaN < minScreenPixels" is
+            // FALSE under IEEE754, silently defeating the minimum-size guard below. Starting
+            // at a real 0 makes a plain click correctly measure as a zero-size box.
+            Width = 0,
+            Height = 0,
+            Stroke = Brushes.Cyan,
+            StrokeThickness = 1.0 / CurrentZoomScale(),
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(_drawPreviewRect, _drawStartCanvasPoint.X);
+        Canvas.SetTop(_drawPreviewRect, _drawStartCanvasPoint.Y);
+        FaceCanvas.Children.Add(_drawPreviewRect);
+        FaceCanvas.CaptureMouse();
+    }
+
+    private void FaceCanvas_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isDrawingBox || _drawPreviewRect is null) return;
+
+        Point current = e.GetPosition(FaceCanvas);
+        Canvas.SetLeft(_drawPreviewRect, Math.Min(current.X, _drawStartCanvasPoint.X));
+        Canvas.SetTop(_drawPreviewRect, Math.Min(current.Y, _drawStartCanvasPoint.Y));
+        _drawPreviewRect.Width = Math.Abs(current.X - _drawStartCanvasPoint.X);
+        _drawPreviewRect.Height = Math.Abs(current.Y - _drawStartCanvasPoint.Y);
+    }
+
+    private void FaceCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isDrawingBox) return;
+        _isDrawingBox = false;
+        FaceCanvas.ReleaseMouseCapture();
+
+        Rectangle? preview = _drawPreviewRect;
+        _drawPreviewRect = null;
+        if (preview is null) return;
+        FaceCanvas.Children.Remove(preview);
+
+        double canvasLeft = Canvas.GetLeft(preview);
+        double canvasTop = Canvas.GetTop(preview);
+        double canvasWidth = preview.Width;
+        double canvasHeight = preview.Height;
+
+        // Require a deliberate drag (8 real screen pixels in each dimension), not an accidental
+        // click on empty canvas - same screen-pixel-independent-of-zoom idea as hitPadding.
+        double zoomScale = CurrentZoomScale();
+        const double minScreenPixels = 8;
+        if (canvasWidth * zoomScale < minScreenPixels || canvasHeight * zoomScale < minScreenPixels) return;
+
+        var (offsetX, offsetY, scale) = GetImageToCanvasTransform();
+        if (scale <= 0) return;
+        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight) return;
+
+        int x = (int)Math.Clamp((canvasLeft - offsetX) / scale, 0, imgWidth);
+        int y = (int)Math.Clamp((canvasTop - offsetY) / scale, 0, imgHeight);
+        int width = (int)Math.Clamp(canvasWidth / scale, 1, imgWidth - x);
+        int height = (int)Math.Clamp(canvasHeight / scale, 1, imgHeight - y);
+
+        var newFace = _faces.AddManualFace(_photo.Id, new FaceBox(x, y, width, height));
+        LoadFaceData();
+        RedrawBoxes();
+
+        if (FaceCanvas.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag is long id && id == newFace.Id) is Rectangle newHitTarget)
+        {
+            _pendingManualFaceId = newFace.Id;
+            OpenPicker(newFace.Id, newHitTarget);
+        }
+    }
+
+    /// <summary>See _pendingManualFaceId - fires whenever the popup closes for any reason
+    /// (outside click, Escape, an action that explicitly closes it), so this is the one place
+    /// that reliably catches "user backed out without tagging the box they just drew".</summary>
+    private void PersonPickerPopup_Closed(object? sender, EventArgs e)
+    {
+        if (_pendingManualFaceId is not long pendingId) return;
+        _pendingManualFaceId = null;
+        _faces.DeleteDetectedFace(pendingId);
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
     private void OpenPicker(long detectedFaceId, Rectangle box)
     {
         _activeFaceId = detectedFaceId;
+        _renamingPersonId = null;
+        RenameHintText.Visibility = Visibility.Collapsed;
         _labelsByFaceId.TryGetValue(detectedFaceId, out var existing);
         bool alreadyTagged = existing is not null && existing.Confirmed && existing.PersonId is not null;
         ClearTagButton.Visibility = alreadyTagged ? Visibility.Visible : Visibility.Collapsed;
@@ -312,7 +462,7 @@ public partial class TagFacesWindow : Window
             items.Add(new PickerItem($"Confirm: {suggestedPerson.Name}", suggestedPerson.VrcUserId, suggestedPerson.Id, IsConfirmSuggestion: true));
         }
 
-        items.Add(new PickerItem("<nobody> (wrongly detected face)", null, null, IsNotAFace: true));
+        items.Add(new PickerItem("<unknown> (wrongly detected face)", null, null, IsNotAFace: true));
 
         foreach (var player in _photoPlayers)
         {
@@ -324,6 +474,7 @@ public partial class TagFacesWindow : Window
             items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id));
         }
 
+        _staticPickerItems = items;
         SuggestionListBox.ItemsSource = items;
         NewPersonNameTextBox.Text = "";
         PersonPickerPopup.PlacementTarget = box;
@@ -333,6 +484,10 @@ public partial class TagFacesWindow : Window
     private void SuggestionListBox_MouseUp(object sender, MouseButtonEventArgs e)
     {
         if (SuggestionListBox.SelectedItem is not PickerItem item) return;
+        // Every branch below is a deliberate choice, not backing out - must clear this BEFORE
+        // closing the popup, since setting IsOpen=false fires PersonPickerPopup_Closed
+        // synchronously (clearing it inside ApplyTag etc. would run too late).
+        _pendingManualFaceId = null;
         PersonPickerPopup.IsOpen = false;
 
         if (item.IsConfirmSuggestion)
@@ -352,7 +507,10 @@ public partial class TagFacesWindow : Window
         RegisteredPerson person = item.ExistingPersonId is long existingId
             ? _personsById[existingId]
             : item.VrcUserId is string vrcUserId
-                ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.DisplayText.Replace(" (in this instance, per VRCX)", ""))
+                ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.DisplayText
+                    .Replace(" (in this instance, per VRCX)", "")
+                    .Replace(" (VRCX friend)", "")
+                    .Replace(" (you)", ""))
                 : _faces.CreatePerson(item.DisplayText);
 
         bool isNewVrcLink = item.ExistingPersonId is null && item.VrcUserId is not null;
@@ -378,14 +536,80 @@ public partial class TagFacesWindow : Window
         string name = NewPersonNameTextBox.Text.Trim();
         if (string.IsNullOrEmpty(name)) return;
 
+        if (_renamingPersonId is long personId)
+        {
+            // Renaming an unrelated person doesn't resolve the active face's tag - if this
+            // popup belongs to a just-drawn manual box, leave _pendingManualFaceId set so
+            // PersonPickerPopup_Closed still cleans it up if the user closes without tagging it.
+            PersonPickerPopup.IsOpen = false;
+            _faces.RenamePerson(personId, name);
+            _renamingPersonId = null;
+            LoadFaceData();
+            RedrawBoxes();
+            return;
+        }
+
+        // Creating + tagging a new person IS a deliberate choice - must clear before closing
+        // the popup, since IsOpen=false fires PersonPickerPopup_Closed synchronously.
+        _pendingManualFaceId = null;
         PersonPickerPopup.IsOpen = false;
         ApplyTag(_faces.CreatePerson(name));
     }
 
+    /// <summary>
+    /// Typing 2+ characters searches VRCX's friends list (see VrcxProfileLookupService.
+    /// GetFriends) instead of the static suggestion list, so the display name and correct
+    /// spelling come straight from VRCX rather than being typed by hand - picking a match
+    /// still goes through the normal FindOrCreatePersonByVrcUserId path in
+    /// SuggestionListBox_MouseUp. Clearing the search restores the original static list.
+    /// </summary>
+    private void NewPersonNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_renamingPersonId is not null) return; // renaming types the exact existing name
+
+        string query = NewPersonNameTextBox.Text.Trim();
+        if (query.Length < 2)
+        {
+            SuggestionListBox.ItemsSource = _staticPickerItems;
+            return;
+        }
+
+        var matches = _friends
+            .Where(f => f.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Take(20)
+            .Select(f => new PickerItem(
+                $"{f.DisplayName} ({(f.UserId == _self?.UserId ? "you" : "VRCX friend")})", f.UserId, null))
+            .ToList();
+        SuggestionListBox.ItemsSource = matches.Count > 0 ? matches : _staticPickerItems;
+    }
+
+    private void RenamePersonButton_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if ((sender as FrameworkElement)?.DataContext is not PickerItem item || item.ExistingPersonId is not long personId) return;
+
+        _renamingPersonId = personId;
+        NewPersonNameTextBox.Text = item.DisplayText;
+        NewPersonNameTextBox.Focus();
+        NewPersonNameTextBox.SelectAll();
+        RenameHintText.Text = $"Renaming \"{item.DisplayText}\" - press Enter to save";
+        RenameHintText.Visibility = Visibility.Visible;
+    }
+
     private void ClearTagButton_Click(object sender, RoutedEventArgs e)
     {
+        _pendingManualFaceId = null;
         PersonPickerPopup.IsOpen = false;
         _faces.DeleteFaceLabel(_activeFaceId);
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void DeleteFaceButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingManualFaceId = null; // explicit delete, not the auto-cleanup path
+        PersonPickerPopup.IsOpen = false;
+        _faces.DeleteDetectedFace(_activeFaceId);
         LoadFaceData();
         RedrawBoxes();
     }

@@ -40,10 +40,20 @@
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding PlayerFilterOptions}" DisplayMemberPath="DisplayText"
                       SelectedItem="{Binding SelectedPlayerFilter}" Width="170" Margin="0,0,8,0"
-                      ToolTip="Filters by VRCX-recorded player identity - '(tagged)' means at least one confirmed face tag exists for that person" />
+                      ToolTip="Filters by VRCX-recorded player identity - '(tagged)' means at least one confirmed face tag exists for that person. '(manual)' entries have no linked VRC account yet.">
+                <ComboBox.ItemContainerStyle>
+                    <Style TargetType="ComboBoxItem">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsManual}" Value="True">
+                                <Setter Property="Foreground" Value="DarkOrange" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ComboBox.ItemContainerStyle>
+            </ComboBox>
             <CheckBox Content="Tagged only" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
-                      ToolTip="Only show photos where this person has an actual confirmed face tag, not just VRCX metadata presence" />
+                      ToolTip="Show photos with an actual confirmed face tag for this person, regardless of VRCX metadata presence (unchecked shows VRCX-recorded presence instead)" />
 
             <TextBlock Text="Faces:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding FaceCountFilterOptions}" SelectedItem="{Binding FaceCountFilter}" Width="70" Margin="0,0,16,0"
@@ -156,10 +166,10 @@
                                         </Border>
                                         <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                                 Margin="4" Padding="4,1" CornerRadius="3"
-                                                Background="#CC000000"
+                                                Background="{Binding FaceCountBadgeBrush}"
                                                 Visibility="{Binding DetectedFaceCount, Converter={StaticResource FaceCountToVisibilityConverter}}"
-                                                ToolTip="Detected faces">
-                                            <TextBlock Text="{Binding DetectedFaceCount}" FontSize="10" Foreground="White" />
+                                                ToolTip="Detected faces (tagged/total)">
+                                            <TextBlock Text="{Binding FaceCountDisplay}" FontSize="10" Foreground="White" />
                                         </Border>
                                         <!-- People icon: VRCX embedded author/world/player metadata for this photo.
                                              Single color for now - a second color tier for "everyone in the photo
