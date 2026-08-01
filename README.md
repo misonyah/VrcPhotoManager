@@ -4,20 +4,25 @@ A Windows desktop tool for curating and uploading VRChat photos to [VRCDN](https
 object storage — browse a thumbnail grid, pick what goes up and what doesn't, and track
 upload status per photo, instead of blanket-uploading a whole library by filter alone.
 
-> **⚠️ Not affiliated with VRCDN.** This is an independent, unofficial, community-made tool.
-> It is not endorsed by, sponsored by, or connected to VRCDN in any way. It talks to VRCDN's
+> **⚠️ Not affiliated with VRChat Inc. or VRCDN.** This is an independent, unofficial,
+> community-made tool. It is not endorsed by, sponsored by, or connected to either in any way.
+> It reads photos and data from your own local VRChat/VRCX installation, and talks to VRCDN's
 > panel via an API discovered through normal browser inspection of the public web UI — not a
-> published or supported integration — and VRCDN could change or break it at any time without
-> notice. "VRCDN" is a trademark of its respective owner; this project's icon is an original
-> design and does not use VRCDN's logo or branding.
+> published or supported integration — so either could change or break it at any time without
+> notice. "VRChat" is a trademark of VRChat Inc.; "VRCDN" is a trademark of its respective
+> owner. This project's icon is an original design and does not use either party's logo or
+> branding.
 
 ## Features
 
 - **Thumbnail grid** — adjustable size, hover preview (after a brief pause so scrolling
   doesn't spam previews), scrolls smoothly through large libraries via real UI virtualization.
   Click a thumbnail (or its checkbox) to select it.
-- **Filter & sort** — by rating, upload status, VRCX player/author name (substring match), and
-  sort by filename or capture date (newest/oldest first).
+- **Filter & sort** — by rating, upload status, detected-face count, VRCX-recorded world
+  occupancy, and face-match suggestion confidence. The player filter is a fuzzy, Unicode-
+  tolerant autocomplete search (matches stylized VRChat names and recorded aliases, not just
+  exact substrings) rather than a plain dropdown. Sort by filename, capture date (newest/oldest
+  first), remaining untagged faces, or busiest instance.
 - **Per-photo badges** — upload status (Not Uploaded / Uploading / Uploaded / Failed), content
   rating, detected-face count, and whether VRCX metadata was found for that photo.
 - **Local nudity/content classifier** — runs the open [WD14 tagger](https://huggingface.co/SmilingWolf)
@@ -26,6 +31,27 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **Local anime-face detection** — **Detect Faces** finds anime-style faces (an LBP cascade
   trained for stylized/rendered faces, since detectors trained on real photos miss VRChat
   avatars) and shows a per-photo face count. Ships bundled with the app, no separate setup.
+- **Face tagging (Tag Faces)** — click a detected face box to tag who it is, or click-drag on
+  empty space to add a box the detector missed. Search by name across registered people, VRCX
+  friends, and everyone else VRCX has recorded (friends and gamelog history alike), tolerant of
+  stylized Unicode display names. People can be linked to a real VRC account or created as a
+  plain name with no linked account.
+  - **Previous names (aliases)** — VRCX rename history is captured automatically, and you can
+    add your own; searching an old name still finds the right person, shown in parentheses only
+    when that's what matched.
+  - **Duplicate-person merge prompts** — if someone was tagged by typed name before their VRC
+    account was found, Tag Faces flags the resulting duplicate and offers to merge it into the
+    real account with one click, combining their tags.
+  - **Suggest Faces** — suggests who's in each untagged face using CLIP embedding similarity
+    against a person's confirmed reference photos. Suggestions are never applied automatically;
+    review and confirm (or correct) them in Tag Faces.
+  - **Cross-reference Gamelog** — a fallback for photos with no VRCX player data at all (e.g.
+    taken by someone else nearby): infers who was likely present by matching the photo's
+    capture time against your own VRCX gamelog.
+  - **Sync VRC Players** — refreshes the local player cache and name-history aliases from
+    VRCX's friends list and gamelog. Tag Faces' search reads this cache instead of querying
+    VRCX live (which gets slow on a long play history), so run this occasionally to pick up
+    new friends, renames, or people you've recently played with.
 - **VRCX metadata capture** — Scan Library reads the author, world, and player list VRCX embeds
   directly into each screenshot's PNG metadata at capture time (both display names and stable
   VRChat user IDs), when VRCX was running to record it. Right-click a photo → **View
@@ -44,8 +70,8 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **Upload Selected / Remove from VRCDN** — upload picks resize to fit VRChat's image-loader
   limits before going up; Remove deletes selected, already-uploaded photos from VRCDN's storage
   (confirmed first — there's no undo except re-uploading).
-- **Settings screen** — configure where the WD14 model files live, with a one-click download
-  straight from Hugging Face (see [Local classifier setup](#local-classifier-setup)).
+- **Settings screen** — configure where the WD14 and CLIP model files live, each with a
+  one-click download straight from Hugging Face (see [Local model setup](#local-model-setup)).
 
 ## Requirements
 
@@ -55,6 +81,9 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (ships with
   Windows 11 by default; Windows 10 may need it installed separately)
 - A VRCDN account with panel access
+- [VRCX](https://github.com/vrcx-team/VRCX) installed and used to play, for player/friend
+  search, VRCX metadata capture, and the gamelog-based features — everything else works without
+  it, just with less player-identification data available
 
 ## Building & running
 
@@ -66,11 +95,17 @@ dotnet run
 On first run, click **Login** to authenticate via the embedded browser, then **Scan Library**
 to index a folder of photos.
 
-## Local classifier setup
+## Local model setup
 
-The nudity/content classifier (**Classify Photos**) needs two files from the
-[SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) model
-(or a compatible WD14-family model):
+Two optional local ONNX models add features; the app works without either, just with those
+specific buttons disabled at startup (with a status-bar message saying so). The anime-face
+detector needs no setup at all — it's bundled with the app.
+
+### WD14 (nudity/content classifier)
+
+Needed by **Classify Photos**. Two files from
+[SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) (or a
+compatible WD14-family model):
 
 ```
 model.onnx           (~378 MB)
@@ -89,9 +124,19 @@ wd14-model\model.onnx
 wd14-model\selected_tags.csv
 ```
 
-If neither is set up, **Classify Photos** is simply disabled at startup (with a status-bar
-message saying so) — everything else works normally, including the anime-face detector, which
-is bundled with the app and needs no separate download.
+### CLIP (face-match suggestions)
+
+Needed by **Suggest Faces**. One file from
+[laion/CLIP-ViT-L-14-laion2B-s32B-b82K](https://huggingface.co/laion/CLIP-ViT-L-14-laion2B-s32B-b82K)
+(image encoder only, ~1.2 GB):
+
+```
+model.onnx           (~1.2 GB)
+```
+
+Same as WD14: use **Settings** → **Download CLIP Model Files** to fetch it automatically into a
+folder of your choice, or download it yourself and point Settings at that folder. Unlike WD14,
+there's no bundled-default folder — a folder must be configured in Settings either way.
 
 ## Planned work
 
