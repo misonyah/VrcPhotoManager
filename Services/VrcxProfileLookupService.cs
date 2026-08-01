@@ -20,6 +20,7 @@ public class VrcxProfileLookupService
     private const string LocalAccountIdNoPrefix = "f9065286b1f24b7fa00815fc2a117546";
     private const string FeedAvatarTable = $"usr{LocalAccountIdNoPrefix}_feed_avatar";
     private const string FriendLogTable = $"usr{LocalAccountIdNoPrefix}_friend_log_current";
+    private const string FriendLogHistoryTable = $"usr{LocalAccountIdNoPrefix}_friend_log_history";
     private const string JoinLeaveTable = "gamelog_join_leave";
 
     private readonly string _vrcxDbPath;
@@ -147,6 +148,72 @@ public class VrcxProfileLookupService
                 SELECT user_id, display_name, MAX(created_at) FROM "{JoinLeaveTable}"
                 WHERE user_id IS NOT NULL AND user_id != ''
                 GROUP BY user_id
+                """;
+            using var reader = cmd.ExecuteReader();
+
+            var result = new List<(string, string)>();
+            while (reader.Read())
+            {
+                result.Add((reader.GetString(0), reader.GetString(1)));
+            }
+            return result;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Every explicit rename VRCX has recorded for a friend (previous_display_name from a
+    /// 'DisplayName'-type history event) - a candidate alias; the current name is already
+    /// covered by GetFriends. friend_log_history is friendship-scoped, so this only covers
+    /// people who are/were friends - GetGamelogNameHistory covers non-friends too.
+    /// </summary>
+    public List<(string UserId, string Alias)> GetFriendRenameHistory()
+    {
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT user_id, previous_display_name FROM "{FriendLogHistoryTable}"
+                WHERE type = 'DisplayName' AND previous_display_name IS NOT NULL AND previous_display_name != ''
+                """;
+            using var reader = cmd.ExecuteReader();
+
+            var result = new List<(string, string)>();
+            while (reader.Read())
+            {
+                result.Add((reader.GetString(0), reader.GetString(1)));
+            }
+            return result;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Every distinct display name gamelog_join_leave has ever recorded for a resolved user
+    /// id - broader than GetFriendRenameHistory (works for non-friends too), less precise
+    /// (just "different name strings logged for this id over time", not an explicit rename
+    /// event), but a user id genuinely identifies one person, so this carries no real false-
+    /// positive risk. Includes the current/latest name too - callers filter that out against
+    /// whatever they already treat as the primary name.
+    /// </summary>
+    public List<(string UserId, string Alias)> GetGamelogNameHistory()
+    {
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT DISTINCT user_id, display_name FROM "{JoinLeaveTable}"
+                WHERE user_id IS NOT NULL AND user_id != ''
                 """;
             using var reader = cmd.ExecuteReader();
 

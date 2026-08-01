@@ -26,10 +26,12 @@ public partial class TagFacesWindow : Window
     private List<(string UserId, string DisplayName)> _friends = [];
     private List<(string UserId, string DisplayName)> _gamelogSeenPlayers = [];
     private List<(string UserId, string DisplayName)> _knownVrcUsers = [];
+    private Dictionary<string, List<string>> _aliasesByUserId = [];
     private (string UserId, string DisplayName)? _self;
     private List<PickerItem> _staticPickerItems = [];
     private long _activeFaceId;
     private long? _renamingPersonId;
+    private string? _editingAliasesForUserId;
     private double _fitZoomScale = 1.0;
 
     private bool _isPanning;
@@ -47,14 +49,30 @@ public partial class TagFacesWindow : Window
     /// PersonPickerPopup_Closed deletes the box rather than leaving an orphaned untagged one.</summary>
     private long? _pendingManualFaceId;
 
-    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsNotAFace = false)
+    /// <summary>
+    /// RawName carries the actual primary name separate from DisplayText, which can have any
+    /// number of parenthetical decorations appended ("(VRCX friend)", an alias list, etc.) -
+    /// trying to recover the real name by string-Replace-ing every known suffix off DisplayText
+    /// got fragile fast (5+ Replace calls, one per suffix format) and would only get worse once
+    /// the alias list's content varies per item. EffectiveName is what callers should actually
+    /// use; RawName is null (falls back to DisplayText, which IS the raw name) for items that
+    /// were never given a suffix in the first place.
+    /// </summary>
+    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsNotAFace = false, string? RawName = null)
     {
+        public string EffectiveName => RawName ?? DisplayText;
+
         /// <summary>Rename (pencil) button only makes sense for an already-registered person
         /// with no linked VRC account - not the "confirm suggestion"/"&lt;unknown&gt;" pseudo-
         /// entries, not a bare VRCX player/friend row that hasn't been linked to a
         /// RegisteredPerson yet, and not a person who already has a known VRC username (their
         /// name comes from VRCX, so editing it here would just drift out of sync).</summary>
         public bool CanRename => ExistingPersonId is not null && VrcUserId is null && !IsConfirmSuggestion && !IsNotAFace;
+
+        /// <summary>The "+" alias button needs a real VRC user id to key aliases off of -
+        /// available much more broadly than CanRename (any friend/gamelog/cached/registered
+        /// entry with a VrcUserId, not just already-registered manual people).</summary>
+        public bool CanEditAliases => VrcUserId is not null && !IsConfirmSuggestion && !IsNotAFace;
     }
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
@@ -85,6 +103,24 @@ public partial class TagFacesWindow : Window
         // VRCX data that's since gone away (gamelog cleared, friend removed).
         _faces.UpsertKnownVrcUsers(_friends.Concat(_gamelogSeenPlayers));
         _knownVrcUsers = _faces.GetKnownVrcUsers();
+
+        // Automatic alias capture (see VrcUserAlias) - real rename history is a genuine
+        // supplement, but checked live it's NOT a substitute for manual entry: a real example
+        // had zero rename history anywhere in local VRCX data, since the renames predated
+        // VRCX ever observing that account. Filters out whatever's already the current/latest
+        // name for that user, so a person's own current name never shows up as its own alias.
+        if (_profileLookup is not null)
+        {
+            var currentNames = _friends.Concat(_gamelogSeenPlayers).Concat(_knownVrcUsers)
+                .GroupBy(p => p.UserId)
+                .ToDictionary(g => g.Key, g => g.First().DisplayName);
+            var historyCandidates = _profileLookup.GetFriendRenameHistory()
+                .Concat(_profileLookup.GetGamelogNameHistory())
+                .Where(c => !currentNames.TryGetValue(c.UserId, out var current)
+                    || !string.Equals(current, c.Alias, StringComparison.Ordinal));
+            _faces.CaptureAliasesFromHistory(historyCandidates);
+        }
+        _aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
 
         try
         {
@@ -508,7 +544,9 @@ public partial class TagFacesWindow : Window
     {
         _activeFaceId = detectedFaceId;
         _renamingPersonId = null;
+        _editingAliasesForUserId = null;
         RenameHintText.Visibility = Visibility.Collapsed;
+        AliasEditorPanel.Visibility = Visibility.Collapsed;
         _labelsByFaceId.TryGetValue(detectedFaceId, out var existing);
         bool alreadyTagged = existing is not null && existing.Confirmed && existing.PersonId is not null;
         ClearTagButton.Visibility = alreadyTagged ? Visibility.Visible : Visibility.Collapsed;
@@ -526,13 +564,13 @@ public partial class TagFacesWindow : Window
 
         foreach (var player in _photoPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", player.UserId, null));
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", player.UserId, null, RawName: player.DisplayName));
         }
         // Gamelog-inferred fallback (GamelogCorrelationService) - only ever populated when
         // _photoPlayers is empty, so there's no overlap/duplication risk between the two loops.
         foreach (var player in _gamelogPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", player.UserId, null));
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", player.UserId, null, RawName: player.DisplayName));
         }
         // Recently-tagged shortlist, not every registered person ever created - that list only
         // grows and became unusable (type-to-search below covers the rest; see
@@ -584,14 +622,8 @@ public partial class TagFacesWindow : Window
         RegisteredPerson person = item.ExistingPersonId is long existingId
             ? _personsById[existingId]
             : item.VrcUserId is string vrcUserId
-                ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.DisplayText
-                    .Replace(" (in this instance, per VRCX)", "")
-                    .Replace(" (in this instance, per log)", "")
-                    .Replace(" (VRCX friend)", "")
-                    .Replace(" (seen in VRCX)", "")
-                    .Replace(" (previously seen)", "")
-                    .Replace(" (you)", ""))
-                : _faces.CreatePerson(item.DisplayText);
+                ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.EffectiveName)
+                : _faces.CreatePerson(item.EffectiveName);
 
         bool isNewVrcLink = item.ExistingPersonId is null && item.VrcUserId is not null;
         ApplyTag(person);
@@ -615,6 +647,17 @@ public partial class TagFacesWindow : Window
         if (e.Key != Key.Enter) return;
         string name = NewPersonNameTextBox.Text.Trim();
         if (string.IsNullOrEmpty(name)) return;
+
+        if (_editingAliasesForUserId is string aliasUserId)
+        {
+            // Adding an alias doesn't resolve the active face's tag or close the popup - the
+            // editor panel stays open so multiple aliases can be added in a row.
+            _faces.AddAlias(aliasUserId, name);
+            _aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
+            NewPersonNameTextBox.Text = "";
+            RefreshAliasEditorList(aliasUserId);
+            return;
+        }
 
         if (_renamingPersonId is long personId)
         {
@@ -655,6 +698,7 @@ public partial class TagFacesWindow : Window
     private void NewPersonNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_renamingPersonId is not null) return; // renaming types the exact existing name
+        if (_editingAliasesForUserId is not null) return; // alias entry types a new alias, not a search
 
         string query = NewPersonNameTextBox.Text.Trim();
         if (query.Length < 2)
@@ -663,26 +707,55 @@ public partial class TagFacesWindow : Window
             return;
         }
 
+        // Checks the primary name first; only falls through to aliases (see VrcUserAlias) if
+        // that didn't match. AliasesToShow is non-null only when an alias is what matched, per
+        // the "only show the alias list in parens when the alias is what matched" call - a
+        // match on the primary name doesn't need explaining via aliases.
+        (bool Matches, List<string>? AliasesToShow) EvaluateMatch(string name, string? userId)
+        {
+            if (FuzzyNameSearch.Matches(name, query)) return (true, null);
+            if (userId is not null && _aliasesByUserId.TryGetValue(userId, out var aliases)
+                && aliases.Any(a => FuzzyNameSearch.Matches(a, query)))
+            {
+                return (true, aliases);
+            }
+            return (false, null);
+        }
+
+        string BuildLabel(string name, List<string>? aliasesToShow, string? sourceSuffix)
+        {
+            string aliasPart = aliasesToShow is { Count: > 0 } ? $" ({string.Join(", ", aliasesToShow)})" : "";
+            string sourcePart = sourceSuffix is not null ? $" ({sourceSuffix})" : "";
+            return $"{name}{aliasPart}{sourcePart}";
+        }
+
         var registeredVrcUserIds = _personsById.Values
             .Where(p => p.VrcUserId is not null)
             .Select(p => p.VrcUserId!)
             .ToHashSet();
 
         var personMatches = _personsById.Values
-            .Where(p => FuzzyNameSearch.Matches(p.Name, query))
-            .OrderBy(p => p.Name)
-            .Select(p => new PickerItem(p.Name, p.VrcUserId, p.Id));
+            .Select(p => (Person: p, Eval: EvaluateMatch(p.Name, p.VrcUserId)))
+            .Where(x => x.Eval.Matches)
+            .OrderBy(x => x.Person.Name)
+            .Select(x => new PickerItem(
+                BuildLabel(x.Person.Name, x.Eval.AliasesToShow, null), x.Person.VrcUserId, x.Person.Id, RawName: x.Person.Name));
 
         var friendMatches = _friends
-            .Where(f => FuzzyNameSearch.Matches(f.DisplayName, query) && !registeredVrcUserIds.Contains(f.UserId))
-            .Select(f => new PickerItem(
-                $"{f.DisplayName} ({(f.UserId == _self?.UserId ? "you" : "VRCX friend")})", f.UserId, null));
+            .Where(f => !registeredVrcUserIds.Contains(f.UserId))
+            .Select(f => (Friend: f, Eval: EvaluateMatch(f.DisplayName, f.UserId)))
+            .Where(x => x.Eval.Matches)
+            .Select(x => new PickerItem(
+                BuildLabel(x.Friend.DisplayName, x.Eval.AliasesToShow, x.Friend.UserId == _self?.UserId ? "you" : "VRCX friend"),
+                x.Friend.UserId, null, RawName: x.Friend.DisplayName));
 
         var friendIds = _friends.Select(f => f.UserId).ToHashSet();
         var gamelogMatches = _gamelogSeenPlayers
-            .Where(p => FuzzyNameSearch.Matches(p.DisplayName, query)
-                && !registeredVrcUserIds.Contains(p.UserId) && !friendIds.Contains(p.UserId))
-            .Select(p => new PickerItem($"{p.DisplayName} (seen in VRCX)", p.UserId, null));
+            .Where(p => !registeredVrcUserIds.Contains(p.UserId) && !friendIds.Contains(p.UserId))
+            .Select(p => (Player: p, Eval: EvaluateMatch(p.DisplayName, p.UserId)))
+            .Where(x => x.Eval.Matches)
+            .Select(x => new PickerItem(
+                BuildLabel(x.Player.DisplayName, x.Eval.AliasesToShow, "seen in VRCX"), x.Player.UserId, null, RawName: x.Player.DisplayName));
 
         // Fallback of last resort: the local KnownVrcUser cache, for anyone only findable via
         // VRCX data that's since gone away (gamelog cleared, friend removed). Already covered
@@ -690,9 +763,11 @@ public partial class TagFacesWindow : Window
         // surfaces someone the OTHER three missed.
         var gamelogIds = _gamelogSeenPlayers.Select(p => p.UserId).ToHashSet();
         var cachedMatches = _knownVrcUsers
-            .Where(u => FuzzyNameSearch.Matches(u.DisplayName, query) && !registeredVrcUserIds.Contains(u.UserId)
-                && !friendIds.Contains(u.UserId) && !gamelogIds.Contains(u.UserId))
-            .Select(u => new PickerItem($"{u.DisplayName} (previously seen)", u.UserId, null));
+            .Where(u => !registeredVrcUserIds.Contains(u.UserId) && !friendIds.Contains(u.UserId) && !gamelogIds.Contains(u.UserId))
+            .Select(u => (User: u, Eval: EvaluateMatch(u.DisplayName, u.UserId)))
+            .Where(x => x.Eval.Matches)
+            .Select(x => new PickerItem(
+                BuildLabel(x.User.DisplayName, x.Eval.AliasesToShow, "previously seen"), x.User.UserId, null, RawName: x.User.DisplayName));
 
         var matches = personMatches.Concat(friendMatches).Concat(gamelogMatches).Concat(cachedMatches).Take(20).ToList();
         SuggestionListBox.ItemsSource = matches.Count > 0 ? matches : _staticPickerItems;
@@ -704,11 +779,60 @@ public partial class TagFacesWindow : Window
         if ((sender as FrameworkElement)?.DataContext is not PickerItem item || item.ExistingPersonId is not long personId) return;
 
         _renamingPersonId = personId;
-        NewPersonNameTextBox.Text = item.DisplayText;
+        NewPersonNameTextBox.Text = item.EffectiveName;
         NewPersonNameTextBox.Focus();
         NewPersonNameTextBox.SelectAll();
-        RenameHintText.Text = $"Renaming \"{item.DisplayText}\" - press Enter to save";
+        RenameHintText.Text = $"Renaming \"{item.EffectiveName}\" - press Enter to save";
         RenameHintText.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// Switches the shared NewPersonNameTextBox into "add alias" mode (per the approved design:
+    /// extend the existing rename-pencil popup rather than build a separate dialog) - Enter in
+    /// NewPersonNameTextBox_KeyDown then adds an alias instead of renaming/creating a person
+    /// while _editingAliasesForUserId is set. Aliases are keyed by the raw VRC user_id, so this
+    /// button is only ever visible (CanEditAliases) for a picker row that actually has one.
+    /// </summary>
+    private void AddAliasButton_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if ((sender as FrameworkElement)?.DataContext is not PickerItem item || item.VrcUserId is not string userId) return;
+
+        _renamingPersonId = null;
+        RenameHintText.Visibility = Visibility.Collapsed;
+        _editingAliasesForUserId = userId;
+        AliasEditorHeaderText.Text = $"Aliases for \"{item.EffectiveName}\" - type a previous name and press Enter";
+        RefreshAliasEditorList(userId);
+        AliasEditorPanel.Visibility = Visibility.Visible;
+        NewPersonNameTextBox.Text = "";
+        NewPersonNameTextBox.Focus();
+    }
+
+    private void RemoveAliasButton_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (_editingAliasesForUserId is not string userId) return;
+        if ((sender as FrameworkElement)?.DataContext is not VrcUserAlias alias) return;
+
+        _faces.RemoveAlias(alias.Id);
+        _aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
+        RefreshAliasEditorList(userId);
+    }
+
+    private void AliasEditorDoneButton_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        _editingAliasesForUserId = null;
+        AliasEditorPanel.Visibility = Visibility.Collapsed;
+        NewPersonNameTextBox.Text = "";
+        NewPersonNameTextBox.Focus();
+    }
+
+    private void RefreshAliasEditorList(string userId)
+    {
+        var aliases = _faces.GetAliasesForUser(userId);
+        AliasListBox.ItemsSource = aliases;
+        NoAliasesText.Visibility = aliases.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ClearTagButton_Click(object sender, RoutedEventArgs e)

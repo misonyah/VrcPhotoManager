@@ -312,6 +312,107 @@ public class FaceRepository(string dbPath)
             .ToList();
     }
 
+    /// <summary>Cap enforced by AddOrCaptureAlias/CaptureAliasesFromHistory - see
+    /// VrcUserAlias for why Manual entries are never evicted but History ones are.</summary>
+    private const int MaxAliasesPerUser = 6;
+
+    public List<VrcUserAlias> GetAliasesForUser(string userId)
+    {
+        using var context = NewContext();
+        return context.VrcUserAliases.AsNoTracking().Where(a => a.UserId == userId).OrderBy(a => a.Alias).ToList();
+    }
+
+    /// <summary>All aliases, grouped by user id - loaded once per Tag Faces open (like
+    /// _friends/_gamelogSeenPlayers/_knownVrcUsers) so every keystroke in the search box can
+    /// check aliases without a DB round trip.</summary>
+    public Dictionary<string, List<string>> GetAllAliasesGroupedByUser()
+    {
+        using var context = NewContext();
+        return context.VrcUserAliases.AsNoTracking()
+            .Select(a => new { a.UserId, a.Alias })
+            .AsEnumerable()
+            .GroupBy(a => a.UserId)
+            .ToDictionary(g => g.Key, g => g.Select(a => a.Alias).ToList());
+    }
+
+    /// <summary>
+    /// Adds one alias (the manual "+" button path) - honors the per-user cap: at
+    /// MaxAliasesPerUser, evicts the oldest History-sourced alias to make room (Manual
+    /// entries are never evicted). If already at cap with nothing evictable (e.g. 6 manual
+    /// entries already), the add is silently skipped rather than surfaced as an error - a
+    /// rare edge case not worth a dedicated UI path. No-ops if this exact (UserId, Alias)
+    /// pair is already recorded.
+    /// </summary>
+    public void AddAlias(string userId, string alias)
+    {
+        using var context = NewContext();
+        var existing = context.VrcUserAliases.Where(a => a.UserId == userId).OrderBy(a => a.AddedAt).ToList();
+        if (existing.Any(a => a.Alias == alias)) return;
+
+        if (existing.Count >= MaxAliasesPerUser)
+        {
+            var oldestHistory = existing.FirstOrDefault(a => a.Source == VrcUserAliasSource.History);
+            if (oldestHistory is null) return;
+            context.VrcUserAliases.Remove(oldestHistory);
+        }
+
+        context.VrcUserAliases.Add(new VrcUserAlias { UserId = userId, Alias = alias, Source = VrcUserAliasSource.Manual });
+        context.SaveChanges();
+    }
+
+    public void RemoveAlias(long aliasId)
+    {
+        using var context = NewContext();
+        context.VrcUserAliases.Where(a => a.Id == aliasId).ExecuteDelete();
+    }
+
+    /// <summary>
+    /// Bulk automatic-capture pass (friend rename history + gamelog name history - see
+    /// TagFacesWindow's constructor for the callers) - one query for existing aliases across
+    /// every affected user, not one round trip per candidate, since this can run against
+    /// hundreds of candidates every time Tag Faces opens. Same cap/eviction rule as AddAlias,
+    /// applied in memory across the whole batch.
+    /// </summary>
+    public void CaptureAliasesFromHistory(IEnumerable<(string UserId, string Alias)> candidates)
+    {
+        using var context = NewContext();
+        var candidateList = candidates
+            .Where(c => !string.IsNullOrWhiteSpace(c.Alias))
+            .Distinct()
+            .ToList();
+        if (candidateList.Count == 0) return;
+
+        var affectedUserIds = candidateList.Select(c => c.UserId).ToHashSet();
+        var existingByUser = context.VrcUserAliases
+            .Where(a => affectedUserIds.Contains(a.UserId))
+            .ToList()
+            .GroupBy(a => a.UserId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(a => a.AddedAt).ToList());
+
+        foreach (var (userId, alias) in candidateList)
+        {
+            if (!existingByUser.TryGetValue(userId, out var existing))
+            {
+                existing = [];
+                existingByUser[userId] = existing;
+            }
+            if (existing.Any(a => a.Alias == alias)) continue;
+
+            if (existing.Count >= MaxAliasesPerUser)
+            {
+                var oldestHistory = existing.FirstOrDefault(a => a.Source == VrcUserAliasSource.History);
+                if (oldestHistory is null) continue;
+                context.VrcUserAliases.Remove(oldestHistory);
+                existing.Remove(oldestHistory);
+            }
+
+            var newAlias = new VrcUserAlias { UserId = userId, Alias = alias, Source = VrcUserAliasSource.History };
+            context.VrcUserAliases.Add(newAlias);
+            existing.Add(newAlias);
+        }
+        context.SaveChanges();
+    }
+
     /// <summary>
     /// Every VrcUserId with at least one confirmed visual face tag anywhere in the library -
     /// drives the player-filter dropdown's "(tagged)" annotation.

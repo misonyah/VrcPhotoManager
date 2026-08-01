@@ -14,6 +14,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<PhotoPlayer> PhotoPlayers => Set<PhotoPlayer>();
     public DbSet<GamelogInferredPlayer> GamelogInferredPlayers => Set<GamelogInferredPlayer>();
     public DbSet<KnownVrcUser> KnownVrcUsers => Set<KnownVrcUser>();
+    public DbSet<VrcUserAlias> VrcUserAliases => Set<VrcUserAlias>();
 
     private readonly string _dbPath;
 
@@ -162,6 +163,23 @@ public class VrcdnDbContext : DbContext
             entity.Property(u => u.UserId).HasColumnName("user_id");
             entity.Property(u => u.DisplayName).HasColumnName("display_name").IsRequired();
             entity.Property(u => u.LastSeenAt).HasColumnName("last_seen_at");
+        });
+
+        modelBuilder.Entity<VrcUserAlias>(entity =>
+        {
+            entity.ToTable("vrc_user_aliases");
+            entity.HasKey(a => a.Id);
+            entity.HasIndex(a => a.UserId);
+            // Prevents the same alias string being recorded twice for the same user - both
+            // the automatic-capture upsert and a manual add key off this to detect "already
+            // have it" without a separate lookup query.
+            entity.HasIndex(a => new { a.UserId, a.Alias }).IsUnique();
+
+            entity.Property(a => a.Id).HasColumnName("id");
+            entity.Property(a => a.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(a => a.Alias).HasColumnName("alias").IsRequired();
+            entity.Property(a => a.Source).HasColumnName("source").HasConversion<string>();
+            entity.Property(a => a.AddedAt).HasColumnName("added_at");
         });
     }
 }

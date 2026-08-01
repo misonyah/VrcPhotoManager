@@ -59,9 +59,14 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="{Binding DisplayText}" VerticalAlignment="Center" />
-                                    <Button Grid.Column="1" Content="&#xE70F;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                    <Button Grid.Column="1" Content="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                            Padding="4,0" Margin="4,0,0,0"
+                                            Visibility="{Binding CanEditAliases, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Click="AddAliasButton_Click" ToolTip="Manage aliases (previous names) for this person" />
+                                    <Button Grid.Column="2" Content="&#xE70F;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                                             Padding="4,0" Margin="4,0,0,0"
                                             Visibility="{Binding CanRename, Converter={StaticResource BoolToVisibilityConverter}}"
                                             Click="RenamePersonButton_Click" ToolTip="Rename this person" />
@@ -70,6 +75,29 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <Separator Margin="0,6,0,6" />
+                    <StackPanel x:Name="AliasEditorPanel" Visibility="Collapsed" Margin="0,0,0,6">
+                        <TextBlock x:Name="AliasEditorHeaderText" Foreground="White" FontSize="11" FontWeight="Bold"
+                                   TextWrapping="Wrap" Margin="0,0,0,4" />
+                        <ItemsControl x:Name="AliasListBox">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding Alias}" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                        <Button Grid.Column="1" Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                                                Padding="4,0" Margin="4,0,0,0"
+                                                Click="RemoveAliasButton_Click" ToolTip="Remove this alias" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock x:Name="NoAliasesText" Text="No aliases recorded yet." Foreground="Gray" FontSize="10"
+                                   FontStyle="Italic" Margin="0,0,0,4" />
+                        <Button Content="Done" Click="AliasEditorDoneButton_Click" HorizontalAlignment="Left" Padding="8,2" />
+                    </StackPanel>
                     <TextBlock x:Name="RenameHintText" Foreground="Orange" FontSize="10" TextWrapping="Wrap"
                                Margin="0,0,0,4" Visibility="Collapsed" />
                     <TextBox x:Name="NewPersonNameTextBox" Margin="0,0,0,4"
