@@ -24,6 +24,8 @@ public partial class TagFacesWindow : Window
     private List<PhotoPlayer> _photoPlayers = [];
     private List<GamelogInferredPlayer> _gamelogPlayers = [];
     private List<(string UserId, string DisplayName)> _friends = [];
+    private List<(string UserId, string DisplayName)> _gamelogSeenPlayers = [];
+    private List<(string UserId, string DisplayName)> _knownVrcUsers = [];
     private (string UserId, string DisplayName)? _self;
     private List<PickerItem> _staticPickerItems = [];
     private long _activeFaceId;
@@ -70,6 +72,7 @@ public partial class TagFacesWindow : Window
         _photo = photo;
         Title = $"Tag Faces - {photo.FileName}";
         _friends = profileLookup?.GetFriends() ?? [];
+        _gamelogSeenPlayers = profileLookup?.GetGamelogSeenPlayers() ?? [];
         _self = profileLookup?.GetSelf();
         // You're not your own VRCX friend, so the friends-list autocomplete would never
         // surface yourself - fold it into the same searchable list explicitly.
@@ -77,6 +80,11 @@ public partial class TagFacesWindow : Window
         {
             _friends.Insert(0, (selfId, selfName));
         }
+        // Refresh the permanent local cache with whatever VRCX returned this session (see
+        // KnownVrcUser), then load it for search - a fallback for anyone only findable via
+        // VRCX data that's since gone away (gamelog cleared, friend removed).
+        _faces.UpsertKnownVrcUsers(_friends.Concat(_gamelogSeenPlayers));
+        _knownVrcUsers = _faces.GetKnownVrcUsers();
 
         try
         {
@@ -580,6 +588,8 @@ public partial class TagFacesWindow : Window
                     .Replace(" (in this instance, per VRCX)", "")
                     .Replace(" (in this instance, per log)", "")
                     .Replace(" (VRCX friend)", "")
+                    .Replace(" (seen in VRCX)", "")
+                    .Replace(" (previously seen)", "")
                     .Replace(" (you)", ""))
                 : _faces.CreatePerson(item.DisplayText);
 
@@ -627,15 +637,20 @@ public partial class TagFacesWindow : Window
     }
 
     /// <summary>
-    /// Typing 2+ characters searches two sources instead of showing the static suggestion list:
-    /// every already-registered person (so re-selecting someone you've typed before - manual or
-    /// VRCX-linked - reuses them via ExistingPersonId instead of risking a duplicate; this is
-    /// what replaced dumping every registered person into the static list, which only grows) and
-    /// VRCX's friends list (VrcxProfileLookupService.GetFriends), so a not-yet-registered
-    /// friend's name/spelling comes straight from VRCX rather than being typed by hand. A friend
-    /// already linked to a registered person is skipped here - they already appear in the first
-    /// group. Picking any match goes through the normal path in SuggestionListBox_MouseUp.
-    /// Clearing the search restores the original static list.
+    /// Typing 2+ characters searches three sources instead of showing the static suggestion
+    /// list: every already-registered person (so re-selecting someone you've typed before -
+    /// manual or VRCX-linked - reuses them via ExistingPersonId instead of risking a duplicate;
+    /// this is what replaced dumping every registered person into the static list, which only
+    /// grows), VRCX's friends list (VrcxProfileLookupService.GetFriends), and everyone VRCX's
+    /// gamelog has ever recorded a resolved id for - not just friends (found via a real report:
+    /// a real person had a resolved id in the gamelog but was never a friend, so friends-only
+    /// search never found them). Each source is skipped for a user id already covered by an
+    /// earlier one, so nobody appears twice. Matching goes through FuzzyNameSearch, not a plain
+    /// Contains, so VRCX "fancy text" stylized names (small caps, fullwidth, Cyrillic/Greek
+    /// Latin-lookalikes) match what a human reads them as, not their literal codepoints (also a
+    /// real report - a friend's display name used Unicode small capitals). Picking any match
+    /// goes through the normal path in SuggestionListBox_MouseUp. Clearing the search restores
+    /// the original static list.
     /// </summary>
     private void NewPersonNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -654,17 +669,32 @@ public partial class TagFacesWindow : Window
             .ToHashSet();
 
         var personMatches = _personsById.Values
-            .Where(p => p.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Where(p => FuzzyNameSearch.Matches(p.Name, query))
             .OrderBy(p => p.Name)
             .Select(p => new PickerItem(p.Name, p.VrcUserId, p.Id));
 
         var friendMatches = _friends
-            .Where(f => f.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)
-                && !registeredVrcUserIds.Contains(f.UserId))
+            .Where(f => FuzzyNameSearch.Matches(f.DisplayName, query) && !registeredVrcUserIds.Contains(f.UserId))
             .Select(f => new PickerItem(
                 $"{f.DisplayName} ({(f.UserId == _self?.UserId ? "you" : "VRCX friend")})", f.UserId, null));
 
-        var matches = personMatches.Concat(friendMatches).Take(20).ToList();
+        var friendIds = _friends.Select(f => f.UserId).ToHashSet();
+        var gamelogMatches = _gamelogSeenPlayers
+            .Where(p => FuzzyNameSearch.Matches(p.DisplayName, query)
+                && !registeredVrcUserIds.Contains(p.UserId) && !friendIds.Contains(p.UserId))
+            .Select(p => new PickerItem($"{p.DisplayName} (seen in VRCX)", p.UserId, null));
+
+        // Fallback of last resort: the local KnownVrcUser cache, for anyone only findable via
+        // VRCX data that's since gone away (gamelog cleared, friend removed). Already covered
+        // by one of the live sources above whenever VRCX still has the data, so this only ever
+        // surfaces someone the OTHER three missed.
+        var gamelogIds = _gamelogSeenPlayers.Select(p => p.UserId).ToHashSet();
+        var cachedMatches = _knownVrcUsers
+            .Where(u => FuzzyNameSearch.Matches(u.DisplayName, query) && !registeredVrcUserIds.Contains(u.UserId)
+                && !friendIds.Contains(u.UserId) && !gamelogIds.Contains(u.UserId))
+            .Select(u => new PickerItem($"{u.DisplayName} (previously seen)", u.UserId, null));
+
+        var matches = personMatches.Concat(friendMatches).Concat(gamelogMatches).Concat(cachedMatches).Take(20).ToList();
         SuggestionListBox.ItemsSource = matches.Count > 0 ? matches : _staticPickerItems;
     }
 

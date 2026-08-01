@@ -127,6 +127,42 @@ public class VrcxProfileLookupService
         }
     }
 
+    /// <summary>
+    /// Every player this account's own gamelog has ever recorded a resolved user id for - any
+    /// instance ever joined, not just current friends. Expands the Tag Faces autocomplete
+    /// beyond "GetFriends" (found via a real report: "Lumiichu" had a resolved id in
+    /// gamelog_join_leave but was never a friend, so friends-only search never found them).
+    /// Deduped by user id via SQLite's "bare column alongside MAX() in the same GROUP BY picks
+    /// that row's value" behavior (a documented SQLite-specific extension, not standard SQL) -
+    /// keeps the most recently-seen display name per person, since people rename.
+    /// </summary>
+    public List<(string UserId, string DisplayName)> GetGamelogSeenPlayers()
+    {
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT user_id, display_name, MAX(created_at) FROM "{JoinLeaveTable}"
+                WHERE user_id IS NOT NULL AND user_id != ''
+                GROUP BY user_id
+                """;
+            using var reader = cmd.ExecuteReader();
+
+            var result = new List<(string, string)>();
+            while (reader.Read())
+            {
+                result.Add((reader.GetString(0), reader.GetString(1)));
+            }
+            return result;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     /// <summary>Opens VRCX's database read-only - safe to query while VRCX is running (WAL
     /// mode), never writes to a file that isn't ours. Any failure (table missing, no rows for
     /// this user, corrupt db) degrades to null rather than throwing.</summary>

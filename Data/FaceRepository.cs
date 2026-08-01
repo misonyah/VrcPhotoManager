@@ -268,6 +268,46 @@ public class FaceRepository(string dbPath)
     }
 
     /// <summary>
+    /// Inserts or refreshes local, permanent records of VRC users seen via VRCX (friends list
+    /// or gamelog) - see KnownVrcUser for why this exists (VRCX's own data can be cleared or a
+    /// friend removed, which would otherwise silently regress the Tag Faces autocomplete).
+    /// Called opportunistically every time Tag Faces opens with whatever VRCX returned that
+    /// session, so the cache only ever grows/refreshes, never shrinks on its own.
+    /// </summary>
+    public void UpsertKnownVrcUsers(IEnumerable<(string UserId, string DisplayName)> users)
+    {
+        using var context = NewContext();
+        var usersList = users.ToList();
+        var incomingIds = usersList.Select(u => u.UserId).ToHashSet();
+        var existing = context.KnownVrcUsers.Where(u => incomingIds.Contains(u.UserId)).ToDictionary(u => u.UserId);
+
+        var now = DateTime.UtcNow;
+        foreach (var (userId, displayName) in usersList)
+        {
+            if (existing.TryGetValue(userId, out var row))
+            {
+                row.DisplayName = displayName;
+                row.LastSeenAt = now;
+            }
+            else
+            {
+                context.KnownVrcUsers.Add(new KnownVrcUser { UserId = userId, DisplayName = displayName, LastSeenAt = now });
+            }
+        }
+        context.SaveChanges();
+    }
+
+    public List<(string UserId, string DisplayName)> GetKnownVrcUsers()
+    {
+        using var context = NewContext();
+        return context.KnownVrcUsers.AsNoTracking()
+            .Select(u => new { u.UserId, u.DisplayName })
+            .AsEnumerable()
+            .Select(u => (u.UserId, u.DisplayName))
+            .ToList();
+    }
+
+    /// <summary>
     /// Every VrcUserId with at least one confirmed visual face tag anywhere in the library -
     /// drives the player-filter dropdown's "(tagged)" annotation.
     /// </summary>

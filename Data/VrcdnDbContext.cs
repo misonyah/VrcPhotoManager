@@ -13,6 +13,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<FaceLabel> FaceLabels => Set<FaceLabel>();
     public DbSet<PhotoPlayer> PhotoPlayers => Set<PhotoPlayer>();
     public DbSet<GamelogInferredPlayer> GamelogInferredPlayers => Set<GamelogInferredPlayer>();
+    public DbSet<KnownVrcUser> KnownVrcUsers => Set<KnownVrcUser>();
 
     private readonly string _dbPath;
 
@@ -151,6 +152,16 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.PhotoId).HasColumnName("photo_id");
             entity.Property(p => p.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(p => p.DisplayName).HasColumnName("display_name").IsRequired();
+        });
+
+        modelBuilder.Entity<KnownVrcUser>(entity =>
+        {
+            entity.ToTable("known_vrc_users");
+            entity.HasKey(u => u.UserId);
+
+            entity.Property(u => u.UserId).HasColumnName("user_id");
+            entity.Property(u => u.DisplayName).HasColumnName("display_name").IsRequired();
+            entity.Property(u => u.LastSeenAt).HasColumnName("last_seen_at");
         });
     }
 }
