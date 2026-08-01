@@ -12,6 +12,7 @@ public partial class MainWindow : Window
 {
     private readonly DispatcherTimer _hoverTimer;
     private FrameworkElement? _hoverTarget;
+    private Views.TagFacesWindow? _openTagFacesWindow;
 
     public MainWindow()
     {
@@ -27,18 +28,21 @@ public partial class MainWindow : Window
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
     {
+        HidePreviewOverlay();
         new Views.AboutWindow().Show();
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
+        HidePreviewOverlay();
         new Views.SettingsWindow(vm.Repo).Show();
     }
 
     private void ViewMetadata_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
+        HidePreviewOverlay();
         new Views.MetadataWindow(photo).Show();
     }
 
@@ -95,16 +99,34 @@ public partial class MainWindow : Window
     /// the main window would just get shoved behind the still-owned dialog instead of bringing
     /// it forward. Trade-off: this window no longer auto-closes if the main window closes
     /// first, and it gets its own independent taskbar/Alt+Tab entry.
+    ///
+    /// Singleton by design: since the main window is now clickable while Tag Faces is open (the
+    /// whole point of the above), a second middle-click/context-menu action could otherwise
+    /// spawn a second Tag Faces window - two windows racing over the same underlying face data
+    /// isn't something the picker's local state (_pendingManualFaceId etc.) was ever designed
+    /// to handle safely. If one's already open, this just brings it to the front instead of
+    /// opening another (found via a real report of duplicate windows appearing).
     /// </summary>
     private void OpenTagFaces(MainViewModel vm, PhotoViewModel photo)
     {
+        if (_openTagFacesWindow is not null)
+        {
+            _openTagFacesWindow.Activate();
+            vm.StatusMessage = "A Tag Faces window is already open - close it before opening another.";
+            return;
+        }
+
+        HidePreviewOverlay();
         var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.ProfileLookup, photo.Model);
+        _openTagFacesWindow = window;
         window.Closed += (_, _) =>
         {
+            _openTagFacesWindow = null;
             vm.ApplyFaceCounts();
             vm.RefreshPlayerFilterOptions();
         };
         window.Show();
+        window.Activate();
     }
 
     private void PhotoGrid_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -119,7 +141,12 @@ public partial class MainWindow : Window
     private void PhotoItem_MouseEnter(object sender, MouseEventArgs e) => ResetHoverTimer(sender as FrameworkElement);
     private void PhotoItem_MouseMove(object sender, MouseEventArgs e) => ResetHoverTimer(sender as FrameworkElement);
 
-    private void PhotoItem_MouseLeave(object sender, MouseEventArgs e)
+    private void PhotoItem_MouseLeave(object sender, MouseEventArgs e) => HidePreviewOverlay();
+
+    /// <summary>Also called before opening any secondary window (About/Settings/Metadata/Tag
+    /// Faces) - those windows now open positioned near the cursor (DialogWindowBehavior.
+    /// OpenNearCursor), and popping up right on top of the hover preview looked cluttered.</summary>
+    private void HidePreviewOverlay()
     {
         _hoverTimer.Stop();
         _hoverTarget = null;

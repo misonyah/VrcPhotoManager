@@ -66,6 +66,20 @@ public class PhotoViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>VRCX-recorded world-instance player count (not detected-face count) - drives
+    /// the "People in world" filter.</summary>
+    private int _worldPlayerCount;
+    public int WorldPlayerCount
+    {
+        get => _worldPlayerCount;
+        set
+        {
+            if (_worldPlayerCount == value) return;
+            _worldPlayerCount = value;
+            OnPropertyChanged();
+        }
+    }
+
     private static readonly SolidColorBrush AllTaggedBadgeBrush = CreateFrozenBrush(0xCC, 0x1B, 0x5E, 0x20);
     private static readonly SolidColorBrush DefaultBadgeBrush = CreateFrozenBrush(0xCC, 0x00, 0x00, 0x00);
 

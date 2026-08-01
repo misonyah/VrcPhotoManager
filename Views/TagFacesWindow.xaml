@@ -1,7 +1,10 @@
 <Window x:Class="VrcPhotoManager.Views.TagFacesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Tag Faces" Height="700" Width="900">
+        Title="Tag Faces" Height="700" Width="900"
+        PreviewKeyDown="TagFacesWindow_PreviewKeyDown"
+        PreviewMouseRightButtonDown="TagFacesWindow_PreviewMouseRightButtonDown"
+        PreviewMouseRightButtonUp="TagFacesWindow_PreviewMouseRightButtonUp">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     </Window.Resources>

@@ -59,6 +59,10 @@
             <ComboBox ItemsSource="{Binding FaceCountFilterOptions}" SelectedItem="{Binding FaceCountFilter}" Width="70" Margin="0,0,16,0"
                       ToolTip="Filters by detected-face count (from Detect Faces)" />
 
+            <TextBlock Text="People in world:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox ItemsSource="{Binding PlayerCountFilterOptions}" SelectedItem="{Binding PlayerCountFilter}" Width="130" Margin="0,0,16,0"
+                      ToolTip="Filters by VRCX-recorded world-instance occupancy (from Scan Library) - not detected-face count" />
+
             <TextBlock Text="Min suggestion confidence:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <!-- Real stored confidence values are NOT 0-1: for the common case (2+ registered
                  people), it's the similarity margin over the runner-up candidate, which only

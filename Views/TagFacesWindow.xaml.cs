@@ -101,6 +101,48 @@ public partial class TagFacesWindow : Window
         // for the window's first layout pass (Loaded) to know the real viewport size, then set
         // an initial zoom that reproduces the old "fit to window" starting view.
         Loaded += (_, _) => InitializeZoom();
+        // Escape/right-click (below) can now close this window while the person-picker popup
+        // is still open (e.g. mid-tagging a freshly-drawn manual box) - explicitly close the
+        // popup first rather than trusting WPF to tear it down on its own, so
+        // PersonPickerPopup_Closed's abandoned-box cleanup reliably runs through the same
+        // path it always does, instead of assuming a Window closing cascades to an open
+        // Popup's Closed event.
+        Closing += (_, _) =>
+        {
+            if (PersonPickerPopup.IsOpen) PersonPickerPopup.IsOpen = false;
+        };
+    }
+
+    /// <summary>Escape closes the window outright - quicker than hunting for the X, and there's
+    /// no other use for either gesture anywhere in this window (no context menus, no
+    /// cancelable multi-step flow) to conflict with.</summary>
+    private void TagFacesWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        Close();
+    }
+
+    /// <summary>
+    /// Right-click anywhere in the window closes it too - same rationale as Escape above, and
+    /// closes on button-up rather than button-down deliberately: closing synchronously on
+    /// MouseRightButtonDown destroyed this window's HWND before the matching mouse-up (which is
+    /// what Windows actually shows a context menu from) had been delivered to it, so that
+    /// trailing up-event fell through to whatever window was newly exposed underneath - popping
+    /// the main photo grid's right-click context menu immediately after this window closed
+    /// (found via a real report). Marking Down as handled (without closing yet) still suppresses
+    /// any default down-triggered behavior on a child control; the close only happens once this
+    /// window has fully absorbed both halves of the gesture.
+    /// </summary>
+    private void TagFacesWindow_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+    }
+
+    private void TagFacesWindow_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        Close();
     }
 
     private void InitializeZoom()

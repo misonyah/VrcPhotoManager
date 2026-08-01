@@ -167,6 +167,19 @@ public class PhotoRepository
         return context.PhotoPlayers.AsNoTracking().Where(p => p.PhotoId == photoId).ToList();
     }
 
+    /// <summary>Player count per photo, from VRCX-recorded world-instance metadata (how many
+    /// people were in the instance when the screenshot was taken) - drives the "People in
+    /// world" filter. Distinct from FaceRepository's detected-face count, which counts faces
+    /// visible in the image itself, not instance occupancy.</summary>
+    public Dictionary<long, int> GetPlayerCountsByPhoto()
+    {
+        using var context = NewContext();
+        return context.PhotoPlayers
+            .GroupBy(p => p.PhotoId)
+            .Select(g => new { PhotoId = g.Key, Count = g.Count() })
+            .ToDictionary(x => x.PhotoId, x => x.Count);
+    }
+
     /// <summary>
     /// Every player VRCX has ever recorded, deduped by UserId (a person can be recorded under
     /// different DisplayNames over time if they rename - this keeps the most

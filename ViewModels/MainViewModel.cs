@@ -82,6 +82,21 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] FaceCountFilterOptions { get; } = ["Any", "0", "1+"];
 
+    /// <summary>VRCX-recorded world-instance occupancy, not detected-face count. Defaults to
+    /// "Any" (no filtering) - a numbered option like "1+ (per VRCX)" is a real filter, not a
+    /// no-op: a photo VRCX never got metadata for (0 players recorded) would be excluded.
+    /// "(per VRCX)" on every numbered option is a reminder this counts VRCX's recorded
+    /// world-instance occupancy, not detected faces.</summary>
+    private string _playerCountFilter = "Any";
+    public string PlayerCountFilter
+    {
+        get => _playerCountFilter;
+        set { _playerCountFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+    public string[] PlayerCountFilterOptions { get; } =
+        ["Any", "1+ (per VRCX)", "2+ (per VRCX)", "3+ (per VRCX)", "4+ (per VRCX)", "5+ (per VRCX)",
+         "6+ (per VRCX)", "7+ (per VRCX)", "8+ (per VRCX)", "9+ (per VRCX)", "10+ (per VRCX)"];
+
     /// <summary>0 means "off" (no confidence-based filtering) - real confidence values are
     /// always > 0 in practice, since only suggestions clearing FaceMatcher's own acceptance
     /// threshold ever get written at all, so 0 as a sentinel doesn't collide with real data.</summary>
@@ -222,6 +237,7 @@ public class MainViewModel : INotifyPropertyChanged
         RebuildRows();
         StatusMessage = $"{_allPhotos.Count} photos loaded.";
         ApplyFaceCounts();
+        ApplyPlayerCounts();
         RefreshPlayerFilterOptions();
 
         TryAutoLogin();
@@ -472,6 +488,7 @@ public class MainViewModel : INotifyPropertyChanged
             RebuildRows();
         }
 
+        ApplyPlayerCounts();
         StatusMessage = $"Scan complete: {files.Count} photos.";
     }
 
@@ -653,6 +670,17 @@ public class MainViewModel : INotifyPropertyChanged
             var (total, tagged) = counts.GetValueOrDefault(vm.Model.Id, (0, 0));
             vm.DetectedFaceCount = total;
             vm.TaggedFaceCount = tagged;
+        }
+    }
+
+    /// <summary>Pulls VRCX world-instance player counts in one bulk query - called after a
+    /// library scan and once at startup, mirroring ApplyFaceCounts.</summary>
+    private void ApplyPlayerCounts()
+    {
+        var counts = _repo.GetPlayerCountsByPhoto();
+        foreach (var vm in _allPhotos)
+        {
+            vm.WorldPlayerCount = counts.GetValueOrDefault(vm.Model.Id, 0);
         }
     }
 
@@ -912,6 +940,11 @@ public class MainViewModel : INotifyPropertyChanged
             "1+" => filtered.Where(p => p.DetectedFaceCount >= 1),
             _ => filtered,
         };
+        if (PlayerCountFilter != "Any")
+        {
+            int minWorldPlayers = int.Parse(PlayerCountFilter.Split('+')[0]);
+            filtered = filtered.Where(p => p.WorldPlayerCount >= minWorldPlayers);
+        }
         if (MinSuggestionConfidence > 0)
         {
             var suggestedPhotoIds = _faces.GetPhotoIdsWithSuggestionConfidenceAtLeast((float)MinSuggestionConfidence);

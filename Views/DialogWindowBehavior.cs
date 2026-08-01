@@ -88,37 +88,39 @@ internal static class DialogWindowBehavior
     }
 
     /// <summary>
-    /// Positions the window near the mouse cursor instead of the OS/WPF default (screen
-    /// center, or wherever Windows happens to cascade new windows) - these are quick, often-
-    /// reopened utility windows, so keeping them where the user's attention already is saves
-    /// eye/mouse travel. GetCursorPos is used instead of System.Windows.Forms.Cursor to avoid
-    /// pulling in a WinForms reference for one P/Invoke call.
+    /// Centers the window on the mouse cursor instead of the OS/WPF default (screen center, or
+    /// wherever Windows happens to cascade new windows) - these are quick, often-reopened
+    /// utility windows, so keeping them where the user's attention already is saves eye/mouse
+    /// travel. GetCursorPos is used instead of System.Windows.Forms.Cursor to avoid pulling in
+    /// a WinForms reference for one P/Invoke call.
     ///
-    /// Runs at SourceInitialized, not the constructor: VisualTreeHelper.GetDpi needs a live
-    /// HwndSource to know which monitor's DPI scale applies, and screen-pixel cursor
-    /// coordinates must be converted to WPF's device-independent units or the window lands in
-    /// the wrong place on any non-100% display. Anchors the window's top-left near the cursor
-    /// (a small offset so the title bar isn't exactly under the cursor tip) rather than
-    /// centering on it - centering would need the window's final size, which isn't known yet
-    /// at this point for SizeToContent windows.
+    /// Runs at Loaded, not SourceInitialized: true centering needs the window's final rendered
+    /// size (ActualWidth/ActualHeight), which for a SizeToContent window (like AboutWindow)
+    /// isn't known until at least one layout pass has run - Loaded is the first point that's
+    /// guaranteed. VisualTreeHelper.GetDpi also needs a live HwndSource to know which monitor's
+    /// DPI scale applies, and screen-pixel cursor coordinates must be converted to WPF's
+    /// device-independent units or the window lands in the wrong place on any non-100% display.
     /// </summary>
     public static void OpenNearCursor(Window window)
     {
         window.WindowStartupLocation = WindowStartupLocation.Manual;
-        window.SourceInitialized += (_, _) =>
+        window.Loaded += (_, _) =>
         {
             if (!GetCursorPos(out POINT cursor)) return;
             var dpi = VisualTreeHelper.GetDpi(window);
-            double left = cursor.X / dpi.DpiScaleX + 16;
-            double top = cursor.Y / dpi.DpiScaleY + 16;
+            double cursorLeft = cursor.X / dpi.DpiScaleX;
+            double cursorTop = cursor.Y / dpi.DpiScaleY;
 
-            // Basic on-primary-screen clamping - keeps the window from opening partly off the
-            // bottom/right edge when the cursor is near it. Doesn't account for secondary
-            // monitors with different work areas; good enough for the common case.
-            double maxLeft = SystemParameters.WorkArea.Right - window.Width;
-            double maxTop = SystemParameters.WorkArea.Bottom - (double.IsNaN(window.Height) ? 200 : window.Height);
-            window.Left = Math.Min(left, Math.Max(SystemParameters.WorkArea.Left, maxLeft));
-            window.Top = Math.Min(top, Math.Max(SystemParameters.WorkArea.Top, maxTop));
+            double left = cursorLeft - window.ActualWidth / 2;
+            double top = cursorTop - window.ActualHeight / 2;
+
+            // Basic on-primary-screen clamping - keeps the window from opening partly off any
+            // edge when the cursor is near it. Doesn't account for secondary monitors with
+            // different work areas; good enough for the common case.
+            double maxLeft = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Right - window.ActualWidth);
+            double maxTop = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Bottom - window.ActualHeight);
+            window.Left = Math.Clamp(left, SystemParameters.WorkArea.Left, maxLeft);
+            window.Top = Math.Clamp(top, SystemParameters.WorkArea.Top, maxTop);
         };
     }
 }
