@@ -16,6 +16,14 @@ public partial class MainWindow : Window
     private FrameworkElement? _hoverTarget;
     private Views.TagFacesWindow? _openTagFacesWindow;
 
+    /// <summary>The photo the preview overlay is currently showing, if any - MouseMove (not
+    /// just MouseEnter) restarts the hover-debounce timer so the preview keeps tracking small
+    /// cursor movements within the same thumbnail, which means the timer can tick again for a
+    /// photo it's already showing. Without this check, that replayed the whole grow-in
+    /// animation from scratch on every tick even though nothing actually changed (found via a
+    /// real report of the animation restarting mid-hover).</summary>
+    private PhotoViewModel? _currentPreviewPhoto;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -152,6 +160,7 @@ public partial class MainWindow : Window
     {
         _hoverTimer.Stop();
         _hoverTarget = null;
+        _currentPreviewPhoto = null;
         PreviewOverlay.Visibility = Visibility.Collapsed;
         // Clear any in-flight show animation so a rapid hover-away doesn't leave the overlay
         // stuck mid-grow the next time it appears - BeginAnimation(prop, null) reverts to the
@@ -192,6 +201,7 @@ public partial class MainWindow : Window
     {
         _hoverTimer.Stop();
         if (_hoverTarget?.DataContext is not PhotoViewModel photo) return;
+        if (photo == _currentPreviewPhoto) return; // already showing this one - nothing changed
 
         try
         {
@@ -206,6 +216,7 @@ public partial class MainWindow : Window
             PreviewImage.Source = bmp;
             PreviewPlayers.Text = photo.PlayersTooltip;
             AnimatePreviewOverlayIn();
+            _currentPreviewPhoto = photo;
 
             if (DataContext is MainViewModel vm && vm.AutoCopyUrlOnHover)
             {
