@@ -73,9 +73,10 @@
                     <TextBlock x:Name="RenameHintText" Foreground="Orange" FontSize="10" TextWrapping="Wrap"
                                Margin="0,0,0,4" Visibility="Collapsed" />
                     <TextBox x:Name="NewPersonNameTextBox" Margin="0,0,0,4"
-                             ToolTip="Type a name and press Enter to create a new person (no VRC id), or type 2+ characters to search your VRCX friends list"
+                             ToolTip="Type a name and press Enter to create a new person (no VRC id), or type 2+ characters to search registered people, VRCX friends, and everyone else VRCX has ever seen (tolerant of stylized Unicode names)"
                              KeyDown="NewPersonNameTextBox_KeyDown" TextChanged="NewPersonNameTextBox_TextChanged" />
-                    <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0" />
+                    <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0"
+                            ToolTip="Removes this face's confirmed tag, leaving it untagged (yellow) - the box itself stays, unlike Delete box" />
                     <Button Content="Delete box" Click="DeleteFaceButton_Click" Margin="0,4,0,0"
                             ToolTip="Hides this face box (e.g. a wrongly-placed manual box, or a too-small false-positive detection) - it isn't removed from the database, so this data stays available for reviewing detection quality later" />
                 </StackPanel>

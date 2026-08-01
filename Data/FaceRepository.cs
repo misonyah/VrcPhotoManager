@@ -277,7 +277,12 @@ public class FaceRepository(string dbPath)
     public void UpsertKnownVrcUsers(IEnumerable<(string UserId, string DisplayName)> users)
     {
         using var context = NewContext();
-        var usersList = users.ToList();
+        // Dedupe by UserId first - the same person can legitimately appear in both the friends
+        // list and gamelog-seen results (the common case: you've played with most of your
+        // friends), and Add()-ing the same not-yet-known UserId twice in one batch throws
+        // "cannot be tracked because another instance with the same key value ... is already
+        // being tracked" (found via a real crash report).
+        var usersList = users.GroupBy(u => u.UserId).Select(g => g.First()).ToList();
         var incomingIds = usersList.Select(u => u.UserId).ToHashSet();
         var existing = context.KnownVrcUsers.Where(u => incomingIds.Contains(u.UserId)).ToDictionary(u => u.UserId);
 

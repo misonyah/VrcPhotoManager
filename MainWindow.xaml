@@ -201,14 +201,18 @@
             <!-- Action buttons - all the same width via a fixed-width vertical StackPanel
                  (Button's default HorizontalAlignment is Stretch, so each fills it). -->
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
-                <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8" />
-                <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Logs in to VRCDN's web panel (panel.vrcdn.live) via an embedded browser - required before Upload Selected, Sync Metadata, or Remove from VRCDN" />
+                <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Scans your local VRChat screenshots folder for new or changed photos, reads VRCX's embedded world/author/player metadata, and generates thumbnails" />
                 <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
-                <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Matches your local photos against VRCDN's already-uploaded objects to correct their upload-status badge - despite the name, this is about VRCDN upload matching, not VRCX photo metadata (that's Scan Library)" />
                 <Button Content="Cross-reference Gamelog" Command="{Binding CrossReferenceGamelogCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Fallback for photos with no VRCX player data at all (e.g. taken by someone else in the same instance): infers who was present by cross-referencing your own VRCX gamelog against the photo's capture time" />
-                <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold" />
+                <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold"
+                        ToolTip="Uploads every selected, not-yet-uploaded photo to VRCDN" />
                 <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Deletes selected, already-uploaded photos from VRCDN's storage and marks them Not Uploaded locally" />
                 <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,0,8"
@@ -219,8 +223,10 @@
                         ToolTip="Suggests who's in each untagged detected face using CLIP embedding similarity against registered people's confirmed reference photos - review and confirm in Tag Faces, not fully automatic" />
 
                 <Separator Margin="0,0,0,8" />
-                <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8" />
-                <Button Content="About" Click="AboutButton_Click" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="WD14/CLIP model folders and other app preferences" />
+                <Button Content="About" Click="AboutButton_Click" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="What this app is, and its VRCDN disclaimer" />
 
                 <!-- Not a filter (doesn't change which photos show, just how big they render),
                      so it lives here instead of the filter bar. -->
