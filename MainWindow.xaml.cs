@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using VrcPhotoManager.ViewModels;
@@ -151,6 +153,31 @@ public partial class MainWindow : Window
         _hoverTimer.Stop();
         _hoverTarget = null;
         PreviewOverlay.Visibility = Visibility.Collapsed;
+        // Clear any in-flight show animation so a rapid hover-away doesn't leave the overlay
+        // stuck mid-grow the next time it appears - BeginAnimation(prop, null) reverts to the
+        // element's plain (non-animated) property value.
+        PreviewOverlay.BeginAnimation(UIElement.OpacityProperty, null);
+        PreviewScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        PreviewScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        PreviewTranslateTransform.BeginAnimation(TranslateTransform.YProperty, null);
+    }
+
+    private static readonly IEasingFunction PreviewEase = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+    private static readonly TimeSpan PreviewAnimDuration = TimeSpan.FromMilliseconds(180);
+
+    /// <summary>Grows in from 85% scale + a slight upward slide instead of popping in at full
+    /// size instantly - the instant version felt too sudden (found via direct feedback).</summary>
+    private void AnimatePreviewOverlayIn()
+    {
+        PreviewOverlay.Visibility = Visibility.Visible;
+        PreviewOverlay.BeginAnimation(UIElement.OpacityProperty,
+            new DoubleAnimation(0, 1, PreviewAnimDuration) { EasingFunction = PreviewEase });
+        PreviewScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(0.85, 1, PreviewAnimDuration) { EasingFunction = PreviewEase });
+        PreviewScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(0.85, 1, PreviewAnimDuration) { EasingFunction = PreviewEase });
+        PreviewTranslateTransform.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(20, 0, PreviewAnimDuration) { EasingFunction = PreviewEase });
     }
 
     private void ResetHoverTimer(FrameworkElement? element)
@@ -178,7 +205,7 @@ public partial class MainWindow : Window
 
             PreviewImage.Source = bmp;
             PreviewPlayers.Text = photo.PlayersTooltip;
-            PreviewOverlay.Visibility = Visibility.Visible;
+            AnimatePreviewOverlayIn();
 
             if (DataContext is MainViewModel vm && vm.AutoCopyUrlOnHover)
             {

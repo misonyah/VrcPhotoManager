@@ -246,9 +246,19 @@
              not OS window z-order) no matter where the overlay visually sits. Position is now
              fixed (bottom-left) instead of following the hovered item, since correctness no
              longer depends on avoiding the cursor. -->
+        <!-- RenderTransformOrigin="0,1" (bottom-left) matches the Border's own anchor
+             (HorizontalAlignment=Left, VerticalAlignment=Bottom), so the grow animation
+             expands outward from the same corner it's pinned to, instead of visibly shifting
+             position as it scales. -->
         <Border x:Name="PreviewOverlay" Grid.Row="1" HorizontalAlignment="Left" VerticalAlignment="Bottom"
                 Margin="16" Background="Black" BorderBrush="White" BorderThickness="1" Padding="4"
-                IsHitTestVisible="False" Visibility="Collapsed">
+                IsHitTestVisible="False" Visibility="Collapsed" RenderTransformOrigin="0,1">
+            <Border.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="PreviewScaleTransform" ScaleX="1" ScaleY="1" />
+                    <TranslateTransform x:Name="PreviewTranslateTransform" Y="0" />
+                </TransformGroup>
+            </Border.RenderTransform>
             <StackPanel>
                 <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />
                 <TextBlock x:Name="PreviewPlayers" Foreground="White" FontSize="11" Margin="4" TextWrapping="Wrap" MaxWidth="800" />

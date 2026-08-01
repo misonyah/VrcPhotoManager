@@ -516,9 +516,19 @@ public partial class TagFacesWindow : Window
         {
             items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", player.UserId, null));
         }
-        foreach (var person in _personsById.Values.OrderBy(p => p.Name))
+        // Recently-tagged shortlist, not every registered person ever created - that list only
+        // grows and became unusable (type-to-search below covers the rest; see
+        // NewPersonNameTextBox_TextChanged). Capped at 10 by GetRecentlyTaggedPersons.
+        foreach (var person in _faces.GetRecentlyTaggedPersons())
         {
-            if (_photoPlayers.Any(p => p.UserId == person.VrcUserId)) continue; // already listed above
+            // person.VrcUserId is null for a manually-created person (no linked VRC account) -
+            // and so is PhotoPlayer.UserId for a player VRCX couldn't resolve an id for (common
+            // for hidden/private users). Comparing those two nulls as if they were the same
+            // "already listed above" match silently hid EVERY manual person whenever the photo
+            // had any unresolved player - confirmed live: this created two separate "Lumiichu"
+            // person records because the first was invisible when the second was typed. Only
+            // treat it as a real duplicate when both sides have an actual, non-null id.
+            if (person.VrcUserId is not null && _photoPlayers.Any(p => p.UserId == person.VrcUserId)) continue;
             items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id));
         }
 
@@ -605,11 +615,15 @@ public partial class TagFacesWindow : Window
     }
 
     /// <summary>
-    /// Typing 2+ characters searches VRCX's friends list (see VrcxProfileLookupService.
-    /// GetFriends) instead of the static suggestion list, so the display name and correct
-    /// spelling come straight from VRCX rather than being typed by hand - picking a match
-    /// still goes through the normal FindOrCreatePersonByVrcUserId path in
-    /// SuggestionListBox_MouseUp. Clearing the search restores the original static list.
+    /// Typing 2+ characters searches two sources instead of showing the static suggestion list:
+    /// every already-registered person (so re-selecting someone you've typed before - manual or
+    /// VRCX-linked - reuses them via ExistingPersonId instead of risking a duplicate; this is
+    /// what replaced dumping every registered person into the static list, which only grows) and
+    /// VRCX's friends list (VrcxProfileLookupService.GetFriends), so a not-yet-registered
+    /// friend's name/spelling comes straight from VRCX rather than being typed by hand. A friend
+    /// already linked to a registered person is skipped here - they already appear in the first
+    /// group. Picking any match goes through the normal path in SuggestionListBox_MouseUp.
+    /// Clearing the search restores the original static list.
     /// </summary>
     private void NewPersonNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -622,12 +636,23 @@ public partial class TagFacesWindow : Window
             return;
         }
 
-        var matches = _friends
-            .Where(f => f.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .Take(20)
+        var registeredVrcUserIds = _personsById.Values
+            .Where(p => p.VrcUserId is not null)
+            .Select(p => p.VrcUserId!)
+            .ToHashSet();
+
+        var personMatches = _personsById.Values
+            .Where(p => p.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.Name)
+            .Select(p => new PickerItem(p.Name, p.VrcUserId, p.Id));
+
+        var friendMatches = _friends
+            .Where(f => f.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                && !registeredVrcUserIds.Contains(f.UserId))
             .Select(f => new PickerItem(
-                $"{f.DisplayName} ({(f.UserId == _self?.UserId ? "you" : "VRCX friend")})", f.UserId, null))
-            .ToList();
+                $"{f.DisplayName} ({(f.UserId == _self?.UserId ? "you" : "VRCX friend")})", f.UserId, null));
+
+        var matches = personMatches.Concat(friendMatches).Take(20).ToList();
         SuggestionListBox.ItemsSource = matches.Count > 0 ? matches : _staticPickerItems;
     }
 

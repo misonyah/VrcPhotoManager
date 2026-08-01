@@ -239,6 +239,35 @@ public class FaceRepository(string dbPath)
     }
 
     /// <summary>
+    /// The most recently confirmed-tagged people, newest first and deduped - powers the Tag
+    /// Faces picker's quick shortlist, so frequently-tagged people don't require typing or
+    /// scrolling a list that only grows with every person ever registered (that used to be the
+    /// whole "registered people" section - see OpenPicker in TagFacesWindow.xaml.cs).
+    /// Deduping happens client-side (not via SQL DISTINCT) so "most recent occurrence wins" is
+    /// guaranteed rather than left to an unspecified SQL tie-break; the initial 200-row cap
+    /// keeps that in-memory work bounded while comfortably covering enough history to find
+    /// `limit` distinct people in practice.
+    /// </summary>
+    public List<RegisteredPerson> GetRecentlyTaggedPersons(int limit = 10)
+    {
+        using var context = NewContext();
+        var recentPersonIds = context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId != null)
+            .OrderByDescending(l => l.CreatedAt)
+            .Select(l => l.PersonId!.Value)
+            .Take(200)
+            .AsEnumerable()
+            .Distinct()
+            .Take(limit)
+            .ToList();
+
+        var personsById = context.RegisteredPeople
+            .Where(p => recentPersonIds.Contains(p.Id))
+            .ToDictionary(p => p.Id);
+        return recentPersonIds.Where(personsById.ContainsKey).Select(id => personsById[id]).ToList();
+    }
+
+    /// <summary>
     /// Every VrcUserId with at least one confirmed visual face tag anywhere in the library -
     /// drives the player-filter dropdown's "(tagged)" annotation.
     /// </summary>
