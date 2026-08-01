@@ -120,7 +120,11 @@ public class MainViewModel : INotifyPropertyChanged
         get => _sortOption;
         set { _sortOption = value; OnPropertyChanged(); RebuildRows(); }
     }
-    public string[] SortOptions { get; } = ["Filename (A-Z)", "Date (Newest First)", "Date (Oldest First)"];
+    public string[] SortOptions { get; } =
+    [
+        "Filename (A-Z)", "Date (Newest First)", "Date (Oldest First)",
+        "Untagged Faces (Most First)", "People in World (Most First)",
+    ];
 
     /// <summary>
     /// A player filter entry is keyed by exactly one of VrcUserId (VRCX-observed player - the
@@ -693,6 +697,25 @@ public class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Powers the Player filter's autocomplete box (MainWindow code-behind) - same matching
+    /// behavior as the Tag Faces person picker: FuzzyNameSearch tolerates VRCX's stylized
+    /// Unicode display names, and a match via a recorded alias (see VrcUserAlias) finds
+    /// someone under a name they no longer go by, not just their current one. An empty query
+    /// returns the full option list, matching a plain dropdown's "click to browse everything".
+    /// </summary>
+    public List<PlayerFilterOption> SearchPlayerFilterOptions(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return PlayerFilterOptions;
+
+        var aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
+        return PlayerFilterOptions.Where(o =>
+            FuzzyNameSearch.Matches(o.DisplayText, query)
+            || (o.VrcUserId is not null && aliasesByUserId.TryGetValue(o.VrcUserId, out var aliases)
+                && aliases.Any(a => FuzzyNameSearch.Matches(a, query))))
+            .ToList();
+    }
+
+    /// <summary>
     /// VRChat display names are full of decorative symbols, emoji, and stylized brackets
     /// (zero-width joiners, "★Aiko", "『Name』") - sorting on the raw string puts them in
     /// unicode-codepoint order, not where a human expects. Stripping everything but letters/
@@ -1003,6 +1026,10 @@ public class MainViewModel : INotifyPropertyChanged
         {
             "Date (Newest First)" => filtered.OrderByDescending(p => p.Model.Mtime),
             "Date (Oldest First)" => filtered.OrderBy(p => p.Model.Mtime),
+            // "Untagged" = detected but not yet confirmed - lets a person work through the
+            // biggest tagging backlogs first instead of hunting for them in filename order.
+            "Untagged Faces (Most First)" => filtered.OrderByDescending(p => p.DetectedFaceCount - p.TaggedFaceCount),
+            "People in World (Most First)" => filtered.OrderByDescending(p => p.WorldPlayerCount),
             _ => filtered.OrderBy(p => p.Model.LocalPath),
         };
 

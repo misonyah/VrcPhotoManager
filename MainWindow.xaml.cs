@@ -29,6 +29,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         var viewModel = new MainViewModel();
         DataContext = viewModel;
+        SetPlayerFilterText(TextBoxTextFor(viewModel.SelectedPlayerFilter));
 
         _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.25) };
         _hoverTimer.Tick += HoverTimer_Tick;
@@ -134,9 +135,88 @@ public partial class MainWindow : Window
             _openTagFacesWindow = null;
             vm.ApplyFaceCounts();
             vm.RefreshPlayerFilterOptions();
+            // The selected filter's DisplayText (e.g. a "(tagged)" suffix) can change as a
+            // result of tagging - resync the box so it doesn't show stale text for the
+            // still-active selection.
+            SetPlayerFilterText(TextBoxTextFor(vm.SelectedPlayerFilter));
         };
         window.Show();
         window.Activate();
+    }
+
+    /// <summary>
+    /// Player filter autocomplete - same search-as-you-type shape as Tag Faces' person picker
+    /// (MainViewModel.SearchPlayerFilterOptions does the alias-aware fuzzy matching), but for a
+    /// filter selection rather than a tag action: clicking a match commits it via
+    /// SelectedPlayerFilter, and losing focus without picking anything reverts the box back to
+    /// whatever filter is still actually active - a plain ComboBox with ~1800 players in
+    /// alphabetical order was unusable for finding one specific person by name (found via a
+    /// real report).
+    /// </summary>
+    private void PlayerFilterTextBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        PlayerFilterListBox.ItemsSource = vm.SearchPlayerFilterOptions(PlayerFilterTextBox.Text);
+        PlayerFilterPopup.IsOpen = true;
+        PlayerFilterTextBox.SelectAll();
+    }
+
+    /// <summary>"(all players)" is a real, clickable row in the dropdown (so typing "all"
+    /// still finds it), but showing that literal text in the closed box read as if a player
+    /// named "(all players)" were selected - blank (with the "All players" gray placeholder
+    /// text behind it) reads as "no filter" the way an empty search box normally would.</summary>
+    private static string TextBoxTextFor(MainViewModel.PlayerFilterOption option) =>
+        option.VrcUserId is null && option.PersonId is null ? "" : option.DisplayText;
+
+    private void SetPlayerFilterText(string text)
+    {
+        PlayerFilterTextBox.Text = text;
+        PlayerFilterPlaceholder.Visibility = text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Deferred to the dispatcher's Background priority so a click that's selecting an item in
+    /// PlayerFilterListBox - which also fires this LostFocus, since the popup is a separate
+    /// hwnd - gets to run its own MouseUp handler first. By the time this runs,
+    /// SelectedPlayerFilter (and this box's Text) already reflects any new choice, so
+    /// reapplying it here is a harmless no-op in that case; it only actually changes anything
+    /// when the user typed a search and then clicked away without picking a result, where it
+    /// correctly reverts the stray typed text back to the filter that's still really active.
+    /// </summary>
+    private void PlayerFilterTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (DataContext is not MainViewModel vm) return;
+            PlayerFilterPopup.IsOpen = false;
+            SetPlayerFilterText(TextBoxTextFor(vm.SelectedPlayerFilter));
+        });
+    }
+
+    private void PlayerFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        PlayerFilterPlaceholder.Visibility = PlayerFilterTextBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        PlayerFilterListBox.ItemsSource = vm.SearchPlayerFilterOptions(PlayerFilterTextBox.Text);
+        PlayerFilterPopup.IsOpen = true;
+    }
+
+    private void PlayerFilterTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        if (DataContext is not MainViewModel vm) return;
+        e.Handled = true;
+        PlayerFilterPopup.IsOpen = false;
+        SetPlayerFilterText(TextBoxTextFor(vm.SelectedPlayerFilter));
+    }
+
+    private void PlayerFilterListBox_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        if (PlayerFilterListBox.SelectedItem is not MainViewModel.PlayerFilterOption option) return;
+        vm.SelectedPlayerFilter = option;
+        SetPlayerFilterText(TextBoxTextFor(option));
+        PlayerFilterPopup.IsOpen = false;
     }
 
     private void PhotoGrid_SizeChanged(object sender, SizeChangedEventArgs e)

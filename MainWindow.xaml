@@ -38,19 +38,39 @@
             <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0" />
 
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox ItemsSource="{Binding PlayerFilterOptions}" DisplayMemberPath="DisplayText"
-                      SelectedItem="{Binding SelectedPlayerFilter}" Width="170" Margin="0,0,8,0"
-                      ToolTip="Filters by VRCX-recorded player identity - '(tagged)' means at least one confirmed face tag exists for that person. '(manual)' entries have no linked VRC account yet.">
-                <ComboBox.ItemContainerStyle>
-                    <Style TargetType="ComboBoxItem">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsManual}" Value="True">
-                                <Setter Property="Foreground" Value="DarkOrange" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </ComboBox.ItemContainerStyle>
-            </ComboBox>
+            <Grid Width="170" Margin="0,0,8,0">
+                <TextBox x:Name="PlayerFilterTextBox"
+                         GotFocus="PlayerFilterTextBox_GotFocus" LostFocus="PlayerFilterTextBox_LostFocus"
+                         TextChanged="PlayerFilterTextBox_TextChanged" PreviewKeyDown="PlayerFilterTextBox_PreviewKeyDown"
+                         ToolTip="Filters by VRCX-recorded player identity - type to search (also matches recorded aliases/previous names, tolerant of stylized Unicode names). '(tagged)' means at least one confirmed face tag exists for that person. '(manual)' entries have no linked VRC account yet." />
+                <!-- Shown only while the box is empty (i.e. no specific player selected) -
+                     "(all players)" is still a real, clickable entry in the dropdown below, it
+                     just isn't what the closed box displays for that state. -->
+                <TextBlock x:Name="PlayerFilterPlaceholder" Text="All players" Foreground="Gray"
+                           Margin="6,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+            </Grid>
+            <Popup x:Name="PlayerFilterPopup" PlacementTarget="{Binding ElementName=PlayerFilterTextBox}"
+                   Placement="Bottom" Width="260" StaysOpen="False" AllowsTransparency="True">
+                <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1">
+                    <ListBox x:Name="PlayerFilterListBox" MaxHeight="240" MouseUp="PlayerFilterListBox_MouseUp">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="4,2" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsManual}" Value="True">
+                                        <Setter Property="Foreground" Value="DarkOrange" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayText}" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </Popup>
             <CheckBox Content="Tagged only" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Show photos with an actual confirmed face tag for this person, regardless of VRCX metadata presence (unchecked shows VRCX-recorded presence instead)" />

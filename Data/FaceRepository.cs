@@ -490,6 +490,51 @@ public class FaceRepository(string dbPath)
             .ToHashSet();
     }
 
+    /// <summary>
+    /// Links a manually-created person (no VrcUserId) to a real VRC account - powers Tag
+    /// Faces' "this looks like someone VRCX already knows" merge prompt (found via a real
+    /// report: tagging someone by typed name before their VRC identity was known, then VRCX
+    /// search later turning up the same person under their real account, left two separate
+    /// person rows - "Lumiichu" and "Lumiichu (manual)" - for the same human). If nobody else
+    /// is linked to that VrcUserId yet, this is a simple relink: the manual person's existing
+    /// FaceLabels/PersonReferencePhotos need no changes since they still point at the same
+    /// PersonId. If another RegisteredPerson row is ALREADY linked to that VrcUserId (a true
+    /// duplicate), everything pointing at the manual person is reassigned onto the existing
+    /// linked person instead, and the now-empty manual row is deleted.
+    /// </summary>
+    public void LinkManualPersonToVrcUser(long manualPersonId, string vrcUserId)
+    {
+        using var context = NewContext();
+        var manualPerson = context.RegisteredPeople.FirstOrDefault(p => p.Id == manualPersonId);
+        if (manualPerson is null || manualPerson.VrcUserId is not null) return;
+
+        var existingLinked = context.RegisteredPeople.FirstOrDefault(p => p.VrcUserId == vrcUserId);
+        if (existingLinked is null)
+        {
+            manualPerson.VrcUserId = vrcUserId;
+            context.SaveChanges();
+            return;
+        }
+
+        context.FaceLabels.Where(l => l.PersonId == manualPersonId)
+            .ExecuteUpdate(s => s.SetProperty(l => l.PersonId, existingLinked.Id));
+
+        // A (PersonId, PhotoId) pair can already exist on the target person - reassigning
+        // every row as-is would violate that unique index, so a colliding manual reference
+        // photo is just dropped (the target already has one for that photo) rather than
+        // reassigned.
+        var targetPhotoIds = context.PersonReferencePhotos
+            .Where(r => r.PersonId == existingLinked.Id).Select(r => r.PhotoId).ToHashSet();
+        foreach (var r in context.PersonReferencePhotos.Where(r => r.PersonId == manualPersonId).ToList())
+        {
+            if (targetPhotoIds.Contains(r.PhotoId)) context.PersonReferencePhotos.Remove(r);
+            else r.PersonId = existingLinked.Id;
+        }
+
+        context.RegisteredPeople.Remove(manualPerson);
+        context.SaveChanges();
+    }
+
     public List<DetectedFace> GetDetectedFacesWithoutEmbedding()
     {
         using var context = NewContext();

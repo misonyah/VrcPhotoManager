@@ -10,16 +10,38 @@
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+
+        <!-- One row per manual-person/VRC-account match (FindManualPersonMergeSuggestions) -
+             empty and takes no space when there's nothing to suggest. -->
+        <ItemsControl x:Name="MergeSuggestionsList" Grid.Row="0" Margin="8,8,8,0">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="#FF3A3000" BorderBrush="Goldenrod" BorderThickness="1" CornerRadius="3"
+                            Padding="8,4" Margin="0,0,0,4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Foreground="White" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="560">
+                                <Run Text="{Binding ManualName}" FontWeight="Bold" /><Run Text=" (manual) looks like the VRC account " /><Run Text="{Binding VrcDisplayName}" FontWeight="Bold" /><Run Text=" - merge them?" />
+                            </TextBlock>
+                            <Button Content="Merge" Margin="8,0,0,0" Padding="8,2" Click="MergeSuggestion_Click"
+                                    ToolTip="Links the manual entry to this VRC account - if that account is already linked to a different person record, their tags are combined and the manual one is removed" />
+                            <Button Content="Dismiss" Margin="4,0,0,0" Padding="8,2" Click="DismissMergeSuggestion_Click"
+                                    ToolTip="Not the same person - hide this suggestion for now" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
 
         <!-- LayoutTransform (not RenderTransform) on the shared Image+Canvas container: it
              affects the layout pass, so the ScrollViewer correctly grows its scrollable extent
              as you zoom in, and it applies to the whole container as one visual unit - the face
              boxes on FaceCanvas are positioned using PhotoImage's own (pre-transform) ActualWidth/
              Height, so they stay correctly aligned at any zoom level without extra math. -->
-        <ScrollViewer x:Name="ImageScrollViewer" Grid.Row="0"
+        <ScrollViewer x:Name="ImageScrollViewer" Grid.Row="1"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                       PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
                       PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
@@ -42,7 +64,7 @@
             </Grid>
         </ScrollViewer>
 
-        <TextBlock Grid.Row="1"
+        <TextBlock Grid.Row="2"
                    Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;. Click-drag empty space to add a missed face. Scroll to zoom, middle-drag to pan."
                    Margin="8" Foreground="Gray" />
 

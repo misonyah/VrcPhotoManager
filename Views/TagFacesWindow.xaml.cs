@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,6 +28,7 @@ public partial class TagFacesWindow : Window
     private List<(string UserId, string DisplayName)> _gamelogSeenPlayers = [];
     private List<(string UserId, string DisplayName)> _knownVrcUsers = [];
     private Dictionary<string, List<string>> _aliasesByUserId = [];
+    private ObservableCollection<ManualPersonMergeSuggestion> _mergeSuggestions = [];
     private (string UserId, string DisplayName)? _self;
     private List<PickerItem> _staticPickerItems = [];
     private long _activeFaceId;
@@ -74,6 +76,8 @@ public partial class TagFacesWindow : Window
         /// entry with a VrcUserId, not just already-registered manual people).</summary>
         public bool CanEditAliases => VrcUserId is not null && !IsConfirmSuggestion && !IsNotAFace;
     }
+
+    private record ManualPersonMergeSuggestion(long ManualPersonId, string ManualName, string VrcUserId, string VrcDisplayName);
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
     {
@@ -139,6 +143,11 @@ public partial class TagFacesWindow : Window
         }
 
         LoadFaceData();
+        // Reads _personsById, which LoadFaceData just populated - computed here (not earlier,
+        // where it originally sat and silently iterated an empty dictionary every time,
+        // never once surfacing a real match) deliberately after that call.
+        _mergeSuggestions = new ObservableCollection<ManualPersonMergeSuggestion>(FindManualPersonMergeSuggestions());
+        MergeSuggestionsList.ItemsSource = _mergeSuggestions;
         RedrawBoxes();
         // ScrollViewer gives its content infinite measure space on both axes (needed so it
         // can scroll once zoomed past the viewport), which means Stretch="Uniform" no longer
@@ -286,6 +295,53 @@ public partial class TagFacesWindow : Window
         _isPanning = false;
         ImageScrollViewer.Cursor = Cursors.Arrow;
         ImageScrollViewer.ReleaseMouseCapture();
+    }
+
+    /// <summary>
+    /// Flags a manually-created person (typed by name before their VRC identity was known)
+    /// whose name matches someone VRCX already knows, so Tag Faces can offer to merge them
+    /// instead of leaving two separate person rows for the same human floating around forever
+    /// (found via a real report: "Lumiichu" and "Lumiichu (manual)" both showing up). Uses
+    /// exact match after FuzzyNameSearch.Normalize (stylized-Unicode-tolerant, but NOT loose
+    /// substring containment like the search box's own matching) deliberately - a false-
+    /// positive merge suggestion accepted by the user would actually corrupt data by fusing
+    /// two different people's tags together, so this only proposes matches that are safe to
+    /// approve at a glance. Checked once per Tag Faces open, same cost shape as alias capture.
+    /// </summary>
+    private List<ManualPersonMergeSuggestion> FindManualPersonMergeSuggestions()
+    {
+        var candidates = _friends.Concat(_gamelogSeenPlayers).Concat(_knownVrcUsers)
+            .GroupBy(c => c.UserId).Select(g => g.First()).ToList();
+
+        var suggestions = new List<ManualPersonMergeSuggestion>();
+        foreach (var manual in _personsById.Values.Where(p => p.VrcUserId is null))
+        {
+            string normalizedManualName = FuzzyNameSearch.Normalize(manual.Name);
+            var match = candidates.FirstOrDefault(c =>
+                FuzzyNameSearch.Normalize(c.DisplayName).Equals(normalizedManualName, StringComparison.OrdinalIgnoreCase)
+                || (_aliasesByUserId.TryGetValue(c.UserId, out var aliases)
+                    && aliases.Any(a => FuzzyNameSearch.Normalize(a).Equals(normalizedManualName, StringComparison.OrdinalIgnoreCase))));
+            if (match.UserId is not null)
+            {
+                suggestions.Add(new ManualPersonMergeSuggestion(manual.Id, manual.Name, match.UserId, match.DisplayName));
+            }
+        }
+        return suggestions;
+    }
+
+    private void MergeSuggestion_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ManualPersonMergeSuggestion suggestion) return;
+        _faces.LinkManualPersonToVrcUser(suggestion.ManualPersonId, suggestion.VrcUserId);
+        _mergeSuggestions.Remove(suggestion);
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void DismissMergeSuggestion_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ManualPersonMergeSuggestion suggestion) return;
+        _mergeSuggestions.Remove(suggestion);
     }
 
     private void LoadFaceData()
