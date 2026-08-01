@@ -57,6 +57,12 @@ public partial class TagFacesWindow : Window
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
     {
         InitializeComponent();
+        DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
+        // The person-picker Popup is a transparent, separately-hwnd'd child window - it taking
+        // keyboard focus (e.g. typing a new name) can itself trigger Deactivated on this window
+        // even though the user never clicked away, so skip the close while it's open.
+        DialogWindowBehavior.CloseOnDeactivated(this, stillOpenGuard: () => PersonPickerPopup.IsOpen);
+        DialogWindowBehavior.OpenNearCursor(this);
         _faces = faces;
         _photos = photos;
         _profileLookup = profileLookup;

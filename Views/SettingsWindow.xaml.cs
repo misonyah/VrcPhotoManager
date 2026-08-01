@@ -14,6 +14,9 @@ public partial class SettingsWindow : Window
     public SettingsWindow(PhotoRepository repo)
     {
         InitializeComponent();
+        DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
+        DialogWindowBehavior.CloseOnDeactivated(this);
+        DialogWindowBehavior.OpenNearCursor(this);
         _repo = repo;
         ModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.WdModelDir) ?? "";
         ClipModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.ClipModelDir) ?? "";

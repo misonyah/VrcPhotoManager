@@ -8,6 +8,9 @@ public partial class MetadataWindow : Window
     public MetadataWindow(PhotoViewModel photo)
     {
         InitializeComponent();
+        DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
+        DialogWindowBehavior.CloseOnDeactivated(this);
+        DialogWindowBehavior.OpenNearCursor(this);
         var m = photo.Model;
         MetadataText.Text = string.Join("\n", new[]
         {
