@@ -107,6 +107,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(f => f.Height).HasColumnName("height");
             entity.Property(f => f.Embedding).HasColumnName("embedding");
             entity.Property(f => f.DetectedAt).HasColumnName("detected_at");
+            entity.Property(f => f.Deleted).HasColumnName("deleted").HasDefaultValue(false);
         });
 
         modelBuilder.Entity<FaceLabel>(entity =>

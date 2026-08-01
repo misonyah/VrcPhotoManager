@@ -9,15 +9,30 @@ public class FaceRepository(string dbPath)
     private VrcdnDbContext NewContext() => new(dbPath);
 
     /// <summary>
-    /// Replaces this photo's previously-detected faces (re-scanning shouldn't accumulate
-    /// duplicates - a photo re-scanned twice should still have exactly one row per real face).
+    /// Replaces this photo's previously-detected faces - but only the ones nobody has reviewed
+    /// yet. A face with ANY label (confirmed tag, &lt;unknown&gt;, or an unconfirmed suggestion) is
+    /// preserved untouched, whether the detector or a manually-drawn box created it: there's no
+    /// IsManual flag on DetectedFace, so the old "delete everything, reinsert fresh" approach
+    /// silently destroyed manual tags on every re-scan (found via a real question - "does Scan
+    /// Faces create a new box for already manual tagged faces?" - the actual answer was worse:
+    /// it deleted the manual box/tag outright and left the FaceLabel row dangling, since there's
+    /// no FK cascade from face_labels to detected_faces). A fresh detection that overlaps a
+    /// preserved face is skipped rather than inserted, so re-scanning an already-reviewed photo
+    /// doesn't stack a duplicate untagged box directly on top of it.
     /// </summary>
     public void InsertDetectedFaces(long photoId, IEnumerable<FaceBox> faces)
     {
         using var context = NewContext();
-        context.DetectedFaces.Where(f => f.PhotoId == photoId).ExecuteDelete();
+        var labeledFaceIds = context.FaceLabels.Select(l => l.DetectedFaceId).ToHashSet();
+        var existing = context.DetectedFaces.Where(f => f.PhotoId == photoId).ToList();
+        // Deleted rows are preserved (never resurrected/overwritten) just like labeled ones -
+        // deleting a box is as deliberate a review decision as marking it <unknown>.
+        var preserved = existing.Where(f => labeledFaceIds.Contains(f.Id) || f.Deleted).ToList();
+        context.DetectedFaces.RemoveRange(existing.Where(f => !labeledFaceIds.Contains(f.Id) && !f.Deleted));
+
         foreach (var f in faces)
         {
+            if (preserved.Any(p => Overlaps(p, f))) continue;
             context.DetectedFaces.Add(new DetectedFace
             {
                 PhotoId = photoId,
@@ -28,6 +43,20 @@ public class FaceRepository(string dbPath)
             });
         }
         context.SaveChanges();
+    }
+
+    /// <summary>IoU (intersection over union) > 0.3 counts as "the same face" for re-scan
+    /// dedup purposes - loose on purpose, since the detector rarely lands pixel-identical boxes
+    /// across separate runs on the same photo.</summary>
+    private static bool Overlaps(DetectedFace a, FaceBox b)
+    {
+        int ix1 = Math.Max(a.X, b.X), iy1 = Math.Max(a.Y, b.Y);
+        int ix2 = Math.Min(a.X + a.Width, b.X + b.Width), iy2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
+        int iw = Math.Max(0, ix2 - ix1), ih = Math.Max(0, iy2 - iy1);
+        int intersection = iw * ih;
+        if (intersection == 0) return false;
+        int union = a.Width * a.Height + b.Width * b.Height - intersection;
+        return union > 0 && (double)intersection / union > 0.3;
     }
 
     /// <summary>
@@ -48,7 +77,7 @@ public class FaceRepository(string dbPath)
             .Select(l => l.DetectedFaceId);
 
         var rows = context.DetectedFaces
-            .Where(f => !notAFaceIds.Contains(f.Id))
+            .Where(f => !f.Deleted && !notAFaceIds.Contains(f.Id))
             .Select(f => new { f.PhotoId, IsTagged = taggedFaceIds.Contains(f.Id) })
             .ToList();
 
@@ -78,13 +107,14 @@ public class FaceRepository(string dbPath)
     public List<DetectedFace> GetDetectedFaces(long photoId)
     {
         using var context = NewContext();
-        return context.DetectedFaces.AsNoTracking().Where(f => f.PhotoId == photoId).OrderBy(f => f.Id).ToList();
+        return context.DetectedFaces.AsNoTracking()
+            .Where(f => f.PhotoId == photoId && !f.Deleted).OrderBy(f => f.Id).ToList();
     }
 
     public Dictionary<long, FaceLabel> GetFaceLabelsByPhoto(long photoId)
     {
         using var context = NewContext();
-        var faceIds = context.DetectedFaces.Where(f => f.PhotoId == photoId).Select(f => f.Id);
+        var faceIds = context.DetectedFaces.Where(f => f.PhotoId == photoId && !f.Deleted).Select(f => f.Id);
         return context.FaceLabels.AsNoTracking()
             .Where(l => faceIds.Contains(l.DetectedFaceId))
             .ToDictionary(l => l.DetectedFaceId, l => l);
@@ -125,9 +155,15 @@ public class FaceRepository(string dbPath)
         PruneIfOrphanedManualPerson(context, personId);
     }
 
-    /// <summary>Permanently removes a detected face box (and any label on it) - used to
-    /// discard a manually-drawn box the user backed out of tagging, or to correct a
-    /// wrongly-placed box (manual or auto-detected).</summary>
+    /// <summary>
+    /// Soft-deletes a detected face box - used to discard a manually-drawn box the user backed
+    /// out of tagging, or to dismiss a wrongly-placed/false-positive box (manual or
+    /// auto-detected). The row (and any label on it) is kept, not removed: a dismissed
+    /// false-positive detection is exactly the labeled data needed to later review or tune
+    /// detection quality (e.g. "these were all too small to be real faces"), and every read
+    /// query in this class already excludes Deleted rows, so it's invisible everywhere it
+    /// matters without losing the data.
+    /// </summary>
     public void DeleteDetectedFace(long detectedFaceId)
     {
         using var context = NewContext();
@@ -135,8 +171,8 @@ public class FaceRepository(string dbPath)
             .Where(l => l.DetectedFaceId == detectedFaceId)
             .Select(l => l.PersonId)
             .FirstOrDefault();
-        context.FaceLabels.Where(l => l.DetectedFaceId == detectedFaceId).ExecuteDelete();
-        context.DetectedFaces.Where(f => f.Id == detectedFaceId).ExecuteDelete();
+        context.DetectedFaces.Where(f => f.Id == detectedFaceId)
+            .ExecuteUpdate(s => s.SetProperty(f => f.Deleted, true));
         PruneIfOrphanedManualPerson(context, personId);
     }
 
@@ -150,7 +186,11 @@ public class FaceRepository(string dbPath)
     private static void PruneIfOrphanedManualPerson(VrcdnDbContext context, long? personId)
     {
         if (personId is not long id) return;
-        bool stillTagged = context.FaceLabels.Any(l => l.Confirmed && l.PersonId == id);
+        // A label surviving only on a now-deleted face box doesn't count as "still tagged" -
+        // deleting the box is equivalent to un-identifying the person in that photo.
+        var activeFaceIds = context.DetectedFaces.Where(f => !f.Deleted).Select(f => f.Id);
+        bool stillTagged = context.FaceLabels
+            .Any(l => l.Confirmed && l.PersonId == id && activeFaceIds.Contains(l.DetectedFaceId));
         if (stillTagged) return;
 
         var person = context.RegisteredPeople.FirstOrDefault(p => p.Id == id);
@@ -205,8 +245,9 @@ public class FaceRepository(string dbPath)
     public HashSet<string> GetTaggedUserIds()
     {
         using var context = NewContext();
+        var activeFaceIds = context.DetectedFaces.Where(f => !f.Deleted).Select(f => f.Id);
         return context.FaceLabels.AsNoTracking()
-            .Where(l => l.Confirmed && l.PersonId != null)
+            .Where(l => l.Confirmed && l.PersonId != null && activeFaceIds.Contains(l.DetectedFaceId))
             .Join(context.RegisteredPeople, l => l.PersonId, p => p.Id, (l, p) => p.VrcUserId)
             .Where(id => id != null)
             .Select(id => id!)
@@ -227,7 +268,7 @@ public class FaceRepository(string dbPath)
             .Where(l => l.Confirmed && l.PersonId != null && personIds.Contains(l.PersonId!.Value))
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces
-            .Where(f => faceIds.Contains(f.Id))
+            .Where(f => !f.Deleted && faceIds.Contains(f.Id))
             .Select(f => f.PhotoId)
             .ToHashSet();
     }
@@ -245,7 +286,7 @@ public class FaceRepository(string dbPath)
             .Where(l => l.Confirmed && l.PersonId == personId)
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces
-            .Where(f => faceIds.Contains(f.Id))
+            .Where(f => !f.Deleted && faceIds.Contains(f.Id))
             .Select(f => f.PhotoId)
             .ToHashSet();
     }
@@ -269,7 +310,7 @@ public class FaceRepository(string dbPath)
             .Where(l => !l.Confirmed && l.Source == FaceLabelSource.EmbeddingMatch && l.Confidence >= minConfidence)
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces
-            .Where(f => faceIds.Contains(f.Id))
+            .Where(f => !f.Deleted && faceIds.Contains(f.Id))
             .Select(f => f.PhotoId)
             .ToHashSet();
     }
@@ -277,7 +318,7 @@ public class FaceRepository(string dbPath)
     public List<DetectedFace> GetDetectedFacesWithoutEmbedding()
     {
         using var context = NewContext();
-        return context.DetectedFaces.AsNoTracking().Where(f => f.Embedding == null).ToList();
+        return context.DetectedFaces.AsNoTracking().Where(f => !f.Deleted && f.Embedding == null).ToList();
     }
 
     public void SetEmbedding(long detectedFaceId, byte[] embedding)
@@ -298,7 +339,7 @@ public class FaceRepository(string dbPath)
         using var context = NewContext();
         return context.FaceLabels
             .Where(l => l.Confirmed && l.PersonId == personId)
-            .Join(context.DetectedFaces, l => l.DetectedFaceId, f => f.Id, (l, f) => f.Embedding)
+            .Join(context.DetectedFaces.Where(f => !f.Deleted), l => l.DetectedFaceId, f => f.Id, (l, f) => f.Embedding)
             .Where(e => e != null)
             .Select(e => e!)
             .ToList();
@@ -317,7 +358,7 @@ public class FaceRepository(string dbPath)
             .Where(l => l.Confirmed || l.Source != FaceLabelSource.EmbeddingMatch)
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces.AsNoTracking()
-            .Where(f => f.Embedding != null && !settledFaceIds.Contains(f.Id))
+            .Where(f => !f.Deleted && f.Embedding != null && !settledFaceIds.Contains(f.Id))
             .ToList();
     }
 }

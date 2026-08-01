@@ -74,7 +74,7 @@
                              KeyDown="NewPersonNameTextBox_KeyDown" TextChanged="NewPersonNameTextBox_TextChanged" />
                     <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0" />
                     <Button Content="Delete box" Click="DeleteFaceButton_Click" Margin="0,4,0,0"
-                            ToolTip="Permanently remove this face box (e.g. a wrongly-placed manual box)" />
+                            ToolTip="Hides this face box (e.g. a wrongly-placed manual box, or a too-small false-positive detection) - it isn't removed from the database, so this data stays available for reviewing detection quality later" />
                 </StackPanel>
             </Border>
         </Popup>

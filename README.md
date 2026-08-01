@@ -23,7 +23,7 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **Local nudity/content classifier** — runs the open [WD14 tagger](https://huggingface.co/SmilingWolf)
   model in-process via ONNX Runtime (DirectML-accelerated), entirely on-device. No photos or
   classification results leave your machine for this step.
-- **Local anime-face detection** — **Scan Faces** finds anime-style faces (an LBP cascade
+- **Local anime-face detection** — **Detect Faces** finds anime-style faces (an LBP cascade
   trained for stylized/rendered faces, since detectors trained on real photos miss VRChat
   avatars) and shows a per-photo face count. Ships bundled with the app, no separate setup.
 - **VRCX metadata capture** — Scan Library reads the author, world, and player list VRCX embeds
