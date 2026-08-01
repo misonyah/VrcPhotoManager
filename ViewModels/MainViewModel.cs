@@ -178,6 +178,7 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand ClassifyPhotosCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
+    public ICommand CrossReferenceGamelogCommand { get; }
     public RelayCommand UploadSelectedCommand { get; }
     public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
@@ -219,6 +220,7 @@ public class MainViewModel : INotifyPropertyChanged
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
+        CrossReferenceGamelogCommand = new RelayCommand(CrossReferenceGamelogAsync);
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync, CanUploadSelected);
         RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
         CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
@@ -525,6 +527,52 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyFaceCounts();
         StatusMessage = $"Face scan complete: {totalFaces} faces found across {photos.Count} photos.";
+    }
+
+    /// <summary>
+    /// Fallback for photos with zero VRCX-embedded player data (e.g. taken by someone else in
+    /// the same instance) - cross-references the local VRCX account's own gamelog instead. See
+    /// GamelogCorrelationService and docs/superpowers/specs/2026-08-01-gamelog-player-inference-design.md.
+    /// Deliberately opt-in via its own button rather than folded into Scan Library: it depends
+    /// on this account's gamelog actually covering the photo's capture time, which won't always
+    /// be true (VRCX closed, a gap in the log, a photo from before this account's gamelog
+    /// starts), so it shouldn't run silently as part of the normal scan.
+    /// </summary>
+    private async Task CrossReferenceGamelogAsync()
+    {
+        using var gamelog = GamelogCorrelationService.TryCreate(out string? gamelogError);
+        if (gamelog is null)
+        {
+            StatusMessage = $"Gamelog cross-reference unavailable: {gamelogError}";
+            return;
+        }
+
+        var missingIds = _repo.GetPhotoIdsMissingPlayerData();
+        var candidates = _allPhotos.Where(p => missingIds.Contains(p.Model.Id)).ToList();
+
+        StatusMessage = "Cross-referencing gamelog...";
+        int processed = 0, matched = 0;
+        foreach (var vm in candidates)
+        {
+            if (GamelogCorrelationService.TryParseCaptureTime(vm.Model.LocalPath) is DateTime time)
+            {
+                var players = await Task.Run(() => gamelog.FindPresentPlayers(time));
+                if (players is { Count: > 0 })
+                {
+                    _repo.InsertGamelogInferredPlayers(vm.Model.Id, players);
+                    matched++;
+                }
+            }
+
+            processed++;
+            if (processed % 25 == 0 || processed == candidates.Count)
+            {
+                StatusMessage = $"Cross-referencing gamelog... {processed}/{candidates.Count} photos, {matched} matched so far";
+            }
+        }
+
+        ApplyPlayerCounts();
+        StatusMessage = $"Gamelog cross-reference done: {matched}/{candidates.Count} photos matched (of {candidates.Count} with no VRCX player data).";
     }
 
     private async Task SuggestFacesAsync()

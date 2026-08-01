@@ -206,6 +206,8 @@
                 <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
                 <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8" />
+                <Button Content="Cross-reference Gamelog" Command="{Binding CrossReferenceGamelogCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Fallback for photos with no VRCX player data at all (e.g. taken by someone else in the same instance): infers who was present by cross-referencing your own VRCX gamelog against the photo's capture time" />
                 <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold" />
                 <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Deletes selected, already-uploaded photos from VRCDN's storage and marks them Not Uploaded locally" />

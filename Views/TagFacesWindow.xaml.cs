@@ -22,6 +22,7 @@ public partial class TagFacesWindow : Window
     private Dictionary<long, FaceLabel> _labelsByFaceId = [];
     private Dictionary<long, RegisteredPerson> _personsById = [];
     private List<PhotoPlayer> _photoPlayers = [];
+    private List<GamelogInferredPlayer> _gamelogPlayers = [];
     private List<(string UserId, string DisplayName)> _friends = [];
     private (string UserId, string DisplayName)? _self;
     private List<PickerItem> _staticPickerItems = [];
@@ -249,6 +250,9 @@ public partial class TagFacesWindow : Window
         _labelsByFaceId = _faces.GetFaceLabelsByPhoto(_photo.Id);
         _personsById = _faces.GetAllPersons().ToDictionary(p => p.Id);
         _photoPlayers = _photos.GetPlayersForPhoto(_photo.Id);
+        // Gamelog-inferred fallback only ever has rows when there's no real VRCX player data
+        // for this photo (GamelogCorrelationService's scope), so only bother loading it then.
+        _gamelogPlayers = _photoPlayers.Count == 0 ? _photos.GetGamelogInferredPlayersForPhoto(_photo.Id) : [];
     }
 
     private void PhotoImage_SizeChanged(object sender, SizeChangedEventArgs e) => RedrawBoxes();
@@ -516,6 +520,12 @@ public partial class TagFacesWindow : Window
         {
             items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", player.UserId, null));
         }
+        // Gamelog-inferred fallback (GamelogCorrelationService) - only ever populated when
+        // _photoPlayers is empty, so there's no overlap/duplication risk between the two loops.
+        foreach (var player in _gamelogPlayers)
+        {
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", player.UserId, null));
+        }
         // Recently-tagged shortlist, not every registered person ever created - that list only
         // grows and became unusable (type-to-search below covers the rest; see
         // NewPersonNameTextBox_TextChanged). Capped at 10 by GetRecentlyTaggedPersons.
@@ -528,7 +538,8 @@ public partial class TagFacesWindow : Window
             // had any unresolved player - confirmed live: this created two separate "Lumiichu"
             // person records because the first was invisible when the second was typed. Only
             // treat it as a real duplicate when both sides have an actual, non-null id.
-            if (person.VrcUserId is not null && _photoPlayers.Any(p => p.UserId == person.VrcUserId)) continue;
+            if (person.VrcUserId is not null && (_photoPlayers.Any(p => p.UserId == person.VrcUserId)
+                || _gamelogPlayers.Any(p => p.UserId == person.VrcUserId))) continue;
             items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id));
         }
 
@@ -567,6 +578,7 @@ public partial class TagFacesWindow : Window
             : item.VrcUserId is string vrcUserId
                 ? _faces.FindOrCreatePersonByVrcUserId(vrcUserId, item.DisplayText
                     .Replace(" (in this instance, per VRCX)", "")
+                    .Replace(" (in this instance, per log)", "")
                     .Replace(" (VRCX friend)", "")
                     .Replace(" (you)", ""))
                 : _faces.CreatePerson(item.DisplayText);

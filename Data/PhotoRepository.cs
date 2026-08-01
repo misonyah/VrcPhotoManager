@@ -167,17 +167,66 @@ public class PhotoRepository
         return context.PhotoPlayers.AsNoTracking().Where(p => p.PhotoId == photoId).ToList();
     }
 
+    /// <summary>The gamelog-inferred fallback for a photo with no real PhotoPlayer rows - see
+    /// GamelogCorrelationService. Never has rows for a photo that also has real PhotoPlayer
+    /// rows (InsertGamelogInferredPlayers only ever targets photos missing player data).</summary>
+    public List<GamelogInferredPlayer> GetGamelogInferredPlayersForPhoto(long photoId)
+    {
+        using var context = NewContext();
+        return context.GamelogInferredPlayers.AsNoTracking().Where(p => p.PhotoId == photoId).ToList();
+    }
+
     /// <summary>Player count per photo, from VRCX-recorded world-instance metadata (how many
     /// people were in the instance when the screenshot was taken) - drives the "People in
     /// world" filter. Distinct from FaceRepository's detected-face count, which counts faces
-    /// visible in the image itself, not instance occupancy.</summary>
+    /// visible in the image itself, not instance occupancy. Unions in gamelog-inferred counts
+    /// for photos with no real PhotoPlayer rows - a given photo only ever has one source or the
+    /// other (see GetPhotoIdsMissingPlayerData/InsertGamelogInferredPlayers), so there's no
+    /// double-counting risk.</summary>
     public Dictionary<long, int> GetPlayerCountsByPhoto()
     {
         using var context = NewContext();
-        return context.PhotoPlayers
+        var counts = context.PhotoPlayers
             .GroupBy(p => p.PhotoId)
             .Select(g => new { PhotoId = g.Key, Count = g.Count() })
             .ToDictionary(x => x.PhotoId, x => x.Count);
+
+        var inferredCounts = context.GamelogInferredPlayers
+            .GroupBy(p => p.PhotoId)
+            .Select(g => new { PhotoId = g.Key, Count = g.Count() });
+        foreach (var row in inferredCounts)
+        {
+            counts[row.PhotoId] = row.Count;
+        }
+        return counts;
+    }
+
+    /// <summary>Photo ids with zero PhotoPlayer rows - the eligible set for "Cross-reference
+    /// Gamelog" (GamelogCorrelationService), which only ever fills in a fallback, never
+    /// overwrites/supplements real VRCX-embedded data.</summary>
+    public HashSet<long> GetPhotoIdsMissingPlayerData()
+    {
+        using var context = NewContext();
+        var withPlayers = context.PhotoPlayers.Select(p => p.PhotoId).ToHashSet();
+        return context.Photos.Select(p => p.Id).AsEnumerable().Where(id => !withPlayers.Contains(id)).ToHashSet();
+    }
+
+    /// <summary>Replaces this photo's gamelog-inferred players (re-running the cross-reference
+    /// shouldn't accumulate duplicates), same idempotency idiom as InsertDetectedFaces.</summary>
+    public void InsertGamelogInferredPlayers(long photoId, IEnumerable<(string UserId, string DisplayName)> players)
+    {
+        using var context = NewContext();
+        context.GamelogInferredPlayers.Where(p => p.PhotoId == photoId).ExecuteDelete();
+        foreach (var (userId, displayName) in players)
+        {
+            context.GamelogInferredPlayers.Add(new GamelogInferredPlayer
+            {
+                PhotoId = photoId,
+                UserId = userId,
+                DisplayName = displayName,
+            });
+        }
+        context.SaveChanges();
     }
 
     /// <summary>

@@ -12,6 +12,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<DetectedFace> DetectedFaces => Set<DetectedFace>();
     public DbSet<FaceLabel> FaceLabels => Set<FaceLabel>();
     public DbSet<PhotoPlayer> PhotoPlayers => Set<PhotoPlayer>();
+    public DbSet<GamelogInferredPlayer> GamelogInferredPlayers => Set<GamelogInferredPlayer>();
 
     private readonly string _dbPath;
 
@@ -129,6 +130,19 @@ public class VrcdnDbContext : DbContext
         modelBuilder.Entity<PhotoPlayer>(entity =>
         {
             entity.ToTable("photo_players");
+            entity.HasKey(p => p.Id);
+            entity.HasIndex(p => p.PhotoId);
+            entity.HasIndex(p => p.UserId);
+
+            entity.Property(p => p.Id).HasColumnName("id");
+            entity.Property(p => p.PhotoId).HasColumnName("photo_id");
+            entity.Property(p => p.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(p => p.DisplayName).HasColumnName("display_name").IsRequired();
+        });
+
+        modelBuilder.Entity<GamelogInferredPlayer>(entity =>
+        {
+            entity.ToTable("gamelog_inferred_players");
             entity.HasKey(p => p.Id);
             entity.HasIndex(p => p.PhotoId);
             entity.HasIndex(p => p.UserId);
