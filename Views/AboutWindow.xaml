@@ -9,16 +9,18 @@
 
         <Border Background="#332B1B" BorderBrush="#8A6D1E" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
             <TextBlock TextWrapping="Wrap" FontWeight="SemiBold" Foreground="#FFDFA3">
-                This project is <Run FontWeight="Bold">not affiliated with, endorsed by, or connected to VRCDN</Run> in any way.
-                It talks to VRCDN's own panel via a reverse-engineered API discovered through
-                normal browser inspection - not a published integration. VRCDN could change or
-                break it at any time without notice.
+                This project is <Run FontWeight="Bold">not affiliated with, endorsed by, or connected to VRChat Inc. or VRCDN</Run> in any way.
+                It reads photos and data from your own local VRChat/VRCX installation, and talks
+                to VRCDN's own panel via a reverse-engineered API discovered through normal
+                browser inspection - not a published integration. Either could change or break
+                it at any time without notice.
             </TextBlock>
         </Border>
 
         <TextBlock TextWrapping="Wrap" Margin="0,0,0,12">
-            "VRCDN" is a trademark of its respective owner. This tool's icon is an original
-            design and does not use VRCDN's logo or branding.
+            "VRChat" is a trademark of VRChat Inc. "VRCDN" is a trademark of its respective
+            owner. This tool's icon is an original design and does not use either party's logo
+            or branding.
         </TextBlock>
 
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11">

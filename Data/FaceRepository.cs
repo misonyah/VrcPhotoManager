@@ -271,10 +271,26 @@ public class FaceRepository(string dbPath)
     /// Inserts or refreshes local, permanent records of VRC users seen via VRCX (friends list
     /// or gamelog) - see KnownVrcUser for why this exists (VRCX's own data can be cleared or a
     /// friend removed, which would otherwise silently regress the Tag Faces autocomplete).
-    /// Called opportunistically every time Tag Faces opens with whatever VRCX returned that
-    /// session, so the cache only ever grows/refreshes, never shrinks on its own.
+    /// Originally called automatically every time Tag Faces opened; moved to an explicit "Sync
+    /// VRC Players" action (MainViewModel.SyncVrcPlayerDataAsync) after a real slowness report
+    /// traced most of a ~1s Tag Faces open time to VRCX's own gamelog table, which only grows
+    /// and has no natural bound - Tag Faces now just reads whatever this cache already has
+    /// (GetKnownVrcUsers) instead of paying to refresh it on every single open.
+    ///
+    /// Also collapses what used to be two separate calls (an upsert followed by a full re-
+    /// read) into one - that pair measured ~785ms combined on a real ~8300-row cache. The
+    /// upsert half used to filter existing rows via `WHERE UserId IN (...)` against the
+    /// incoming batch - fine at dozens of ids, but this account's gamelog-seen set alone runs
+    /// into the thousands, and EF Core/SQLite do not handle an IN-clause that large well.
+    /// Reading the whole table once (no IN-clause at all) is both the fix and, since the
+    /// second call immediately re-read the same table right after anyway, a free elimination
+    /// of a fully redundant second full scan. A matched existing row is only actually written
+    /// when its DisplayName changed (a real rename) - LastSeenAt used to be unconditionally
+    /// stamped to "now" on every match, and since "now" is by definition always different from
+    /// whatever was stored, that guaranteed a real UPDATE for every one of the ~8300 rows on
+    /// every call, even though nothing anywhere in the app actually reads LastSeenAt back.
     /// </summary>
-    public void UpsertKnownVrcUsers(IEnumerable<(string UserId, string DisplayName)> users)
+    public List<(string UserId, string DisplayName)> UpsertKnownVrcUsersAndGetAll(IEnumerable<(string UserId, string DisplayName)> users)
     {
         using var context = NewContext();
         // Dedupe by UserId first - the same person can legitimately appear in both the friends
@@ -283,25 +299,29 @@ public class FaceRepository(string dbPath)
         // "cannot be tracked because another instance with the same key value ... is already
         // being tracked" (found via a real crash report).
         var usersList = users.GroupBy(u => u.UserId).Select(g => g.First()).ToList();
-        var incomingIds = usersList.Select(u => u.UserId).ToHashSet();
-        var existing = context.KnownVrcUsers.Where(u => incomingIds.Contains(u.UserId)).ToDictionary(u => u.UserId);
+        var existing = context.KnownVrcUsers.ToDictionary(u => u.UserId);
 
-        var now = DateTime.UtcNow;
         foreach (var (userId, displayName) in usersList)
         {
             if (existing.TryGetValue(userId, out var row))
             {
-                row.DisplayName = displayName;
-                row.LastSeenAt = now;
+                if (row.DisplayName != displayName) row.DisplayName = displayName;
             }
             else
             {
-                context.KnownVrcUsers.Add(new KnownVrcUser { UserId = userId, DisplayName = displayName, LastSeenAt = now });
+                var newRow = new KnownVrcUser { UserId = userId, DisplayName = displayName, LastSeenAt = DateTime.UtcNow };
+                context.KnownVrcUsers.Add(newRow);
+                existing[userId] = newRow;
             }
         }
         context.SaveChanges();
+        return existing.Values.Select(u => (u.UserId, u.DisplayName)).ToList();
     }
 
+    /// <summary>Local-only read of the permanent known-VRC-user cache - no VRCX query, no
+    /// upsert, just whatever's already in our own (small, fast) SQLite file. What Tag Faces
+    /// itself now reads on every open; UpsertKnownVrcUsersAndGetAll is only for the explicit
+    /// sync action that actually refreshes this cache from VRCX.</summary>
     public List<(string UserId, string DisplayName)> GetKnownVrcUsers()
     {
         using var context = NewContext();
@@ -323,8 +343,8 @@ public class FaceRepository(string dbPath)
     }
 
     /// <summary>All aliases, grouped by user id - loaded once per Tag Faces open (like
-    /// _friends/_gamelogSeenPlayers/_knownVrcUsers) so every keystroke in the search box can
-    /// check aliases without a DB round trip.</summary>
+    /// _friends/_knownVrcUsers) so every keystroke in the search box can check aliases without
+    /// a DB round trip.</summary>
     public Dictionary<string, List<string>> GetAllAliasesGroupedByUser()
     {
         using var context = NewContext();

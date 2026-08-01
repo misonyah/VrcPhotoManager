@@ -183,6 +183,7 @@ public class MainViewModel : INotifyPropertyChanged
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
     public ICommand CrossReferenceGamelogCommand { get; }
+    public ICommand SyncVrcPlayerDataCommand { get; }
     public RelayCommand UploadSelectedCommand { get; }
     public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
@@ -225,6 +226,7 @@ public class MainViewModel : INotifyPropertyChanged
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
         CrossReferenceGamelogCommand = new RelayCommand(CrossReferenceGamelogAsync);
+        SyncVrcPlayerDataCommand = new RelayCommand(SyncVrcPlayerDataAsync);
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync, CanUploadSelected);
         RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
         CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
@@ -577,6 +579,55 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyPlayerCounts();
         StatusMessage = $"Gamelog cross-reference done: {matched}/{candidates.Count} photos matched (of {candidates.Count} with no VRCX player data).";
+    }
+
+    /// <summary>
+    /// Refreshes the permanent known-VRC-user cache (see KnownVrcUser) from VRCX's friends
+    /// list and gamelog history, and captures any new name-history aliases (see VrcUserAlias) -
+    /// both used to be done automatically every time Tag Faces opened, which a real slowness
+    /// report traced to VRCX's gamelog table: it only grows, has no natural size bound, and
+    /// this account's has reached thousands of distinct players, making that automatic refresh
+    /// the single biggest chunk of a ~1s Tag Faces open time. Moved here as an explicit action
+    /// instead - Tag Faces itself now just reads whatever this cache already has, so its
+    /// freshness depends on running this periodically rather than being guaranteed current
+    /// every time. Runs the DB/VRCX work off the UI thread, same shape as
+    /// CrossReferenceGamelogAsync above.
+    /// </summary>
+    private async Task SyncVrcPlayerDataAsync()
+    {
+        if (_profileLookup is null)
+        {
+            StatusMessage = "VRC player sync unavailable - VRCX not found.";
+            return;
+        }
+
+        StatusMessage = "Syncing VRC player data from VRCX...";
+        int knownUserCount = await Task.Run(() =>
+        {
+            var friends = _profileLookup.GetFriends();
+            var gamelogSeen = _profileLookup.GetGamelogSeenPlayers();
+            if (_profileLookup.GetSelf() is (string selfId, string selfName))
+            {
+                friends.Insert(0, (selfId, selfName));
+            }
+            var knownUsers = _faces.UpsertKnownVrcUsersAndGetAll(friends.Concat(gamelogSeen));
+
+            // Same alias auto-capture this used to do inline in TagFacesWindow's constructor -
+            // filters out whatever's already the current/latest name for that user, so a
+            // person's own current name never shows up as its own alias.
+            var currentNames = friends.Concat(gamelogSeen).Concat(knownUsers)
+                .GroupBy(p => p.UserId)
+                .ToDictionary(g => g.Key, g => g.First().DisplayName);
+            var historyCandidates = _profileLookup.GetFriendRenameHistory()
+                .Concat(_profileLookup.GetGamelogNameHistory())
+                .Where(c => !currentNames.TryGetValue(c.UserId, out var current)
+                    || !string.Equals(current, c.Alias, StringComparison.Ordinal));
+            _faces.CaptureAliasesFromHistory(historyCandidates);
+
+            return knownUsers.Count;
+        });
+
+        StatusMessage = $"VRC player data synced: {knownUserCount} known players cached.";
     }
 
     private async Task SuggestFacesAsync()

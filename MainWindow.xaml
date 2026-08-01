@@ -42,7 +42,7 @@
                 <TextBox x:Name="PlayerFilterTextBox"
                          GotFocus="PlayerFilterTextBox_GotFocus" LostFocus="PlayerFilterTextBox_LostFocus"
                          TextChanged="PlayerFilterTextBox_TextChanged" PreviewKeyDown="PlayerFilterTextBox_PreviewKeyDown"
-                         ToolTip="Filters by VRCX-recorded player identity - type to search (also matches recorded aliases/previous names, tolerant of stylized Unicode names). '(tagged)' means at least one confirmed face tag exists for that person. '(manual)' entries have no linked VRC account yet." />
+                         ToolTip="Search for a player to filter the photo list.&#10;Also matches old names and stylized usernames.&#10;&#10;'(tagged)' = you've confirmed a face tag for them.&#10;'(manual)' = added by name, not yet linked to a VRC account." />
                 <!-- Shown only while the box is empty (i.e. no specific player selected) -
                      "(all players)" is still a real, clickable entry in the dropdown below, it
                      just isn't what the closed box displays for that state. -->
@@ -73,15 +73,15 @@
             </Popup>
             <CheckBox Content="Tagged only" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
-                      ToolTip="Show photos with an actual confirmed face tag for this person, regardless of VRCX metadata presence (unchecked shows VRCX-recorded presence instead)" />
+                      ToolTip="Only show photos where you've confirmed a face tag for this person.&#10;Turn off to also include photos where VRCX just recorded them as present." />
 
             <TextBlock Text="Faces:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding FaceCountFilterOptions}" SelectedItem="{Binding FaceCountFilter}" Width="70" Margin="0,0,16,0"
-                      ToolTip="Filters by detected-face count (from Detect Faces)" />
+                      ToolTip="Show only photos with (or without) a detected face.&#10;Run Detect Faces first to populate this." />
 
             <TextBlock Text="People in world:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding PlayerCountFilterOptions}" SelectedItem="{Binding PlayerCountFilter}" Width="130" Margin="0,0,16,0"
-                      ToolTip="Filters by VRCX-recorded world-instance occupancy (from Scan Library) - not detected-face count" />
+                      ToolTip="Filter by how many people VRCX recorded in the instance when the photo was taken.&#10;This is VRCX's headcount, not the number of detected faces." />
 
             <TextBlock Text="Min suggestion confidence:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <!-- Real stored confidence values are NOT 0-1: for the common case (2+ registered
@@ -90,7 +90,7 @@
                  for a clean match (see FaceMatcher.DifferentialMarginThreshold). A 0-1 slider
                  made almost its entire range show zero results. -->
             <Slider Minimum="0" Maximum="0.5" Value="{Binding MinSuggestionConfidence}" Width="120" VerticalAlignment="Center"
-                    ToolTip="Left = off. Suggestion confidence is a match-quality margin, not a percentage - most real matches score between ~0.15 (the acceptance floor) and ~0.5, so the slider is scaled to that range." />
+                    ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most good matches fall between about 0.15 and 0.5, so the slider is scaled to that range." />
             <TextBlock Text="{Binding MinSuggestionConfidenceLabel}" VerticalAlignment="Center" Width="32" Margin="4,0,16,0" />
 
             <TextBlock Text="Sort:" VerticalAlignment="Center" Margin="0,0,4,0" />
@@ -194,7 +194,7 @@
                                                 Margin="4" Padding="4,1" CornerRadius="3"
                                                 Background="{Binding FaceCountBadgeBrush}"
                                                 Visibility="{Binding DetectedFaceCount, Converter={StaticResource FaceCountToVisibilityConverter}}"
-                                                ToolTip="Detected faces (tagged/total)">
+                                                ToolTip="Detected faces (tagged / total)">
                                             <TextBlock Text="{Binding FaceCountDisplay}" FontSize="10" Foreground="White" />
                                         </Border>
                                         <!-- People icon: VRCX embedded author/world/player metadata for this photo.
@@ -205,7 +205,7 @@
                                                 Margin="4" Width="16" Height="16" CornerRadius="8"
                                                 Background="#CC000000"
                                                 Visibility="{Binding HasVrcxMetadata, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                ToolTip="Has VRCX player metadata">
+                                                ToolTip="This photo has VRCX player metadata">
                                             <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                                                        Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
@@ -222,31 +222,33 @@
                  (Button's default HorizontalAlignment is Stretch, so each fills it). -->
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
                 <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Logs in to VRCDN's web panel (panel.vrcdn.live) via an embedded browser - required before Upload Selected, Sync Metadata, or Remove from VRCDN" />
+                        ToolTip="Sign in to panel.vrcdn.live in an embedded browser.&#10;Needed before you can upload, sync, or remove photos on VRCDN." />
                 <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Scans your local VRChat screenshots folder for new or changed photos, reads VRCX's embedded world/author/player metadata, and generates thumbnails" />
+                        ToolTip="Look for new or changed photos in your VRChat screenshots folder.&#10;Reads world/author/player info from VRCX and builds thumbnails." />
                 <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Runs the WD14 nudity classifier locally for any photo without a rating yet" />
+                        ToolTip="Rate any unrated photo using a local WD14 classifier." />
                 <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Matches your local photos against VRCDN's already-uploaded objects to correct their upload-status badge - despite the name, this is about VRCDN upload matching, not VRCX photo metadata (that's Scan Library)" />
+                        ToolTip="Check which photos are already uploaded to VRCDN and fix their status badge.&#10;Despite the name, this isn't about VRCX metadata - that's Scan Library." />
                 <Button Content="Cross-reference Gamelog" Command="{Binding CrossReferenceGamelogCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Fallback for photos with no VRCX player data at all (e.g. taken by someone else in the same instance): infers who was present by cross-referencing your own VRCX gamelog against the photo's capture time" />
+                        ToolTip="For photos with no VRCX player data at all, e.g. taken by someone else nearby.&#10;Guesses who was present by matching the photo's timestamp against your own VRCX gamelog." />
+                <Button Content="Sync VRC Players" Command="{Binding SyncVrcPlayerDataCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Refresh the player cache from VRCX's friends list and gamelog history.&#10;Tag Faces search uses this cache instead of querying VRCX live, since that got slow with a large gamelog.&#10;Run this occasionally to pick up new friends, renames, or people you've recently played with." />
                 <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold"
-                        ToolTip="Uploads every selected, not-yet-uploaded photo to VRCDN" />
+                        ToolTip="Upload all selected photos that aren't already on VRCDN." />
                 <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Deletes selected, already-uploaded photos from VRCDN's storage and marks them Not Uploaded locally" />
+                        ToolTip="Delete selected photos from VRCDN's storage and mark them Not Uploaded here." />
                 <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="For selected photos in VRChat's 2048x1440 Print format: crops the white border off (leaving the original untouched) and adds the 1920x1080 result to the library" />
+                        ToolTip="For selected Print-format (2048x1440) photos: crop off the white border and add the 1920x1080 result to your library.&#10;The original is left untouched." />
                 <Button Content="Detect Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Detects anime-style faces in every photo (OpenCvSharp + lbpcascade_animeface) and shows a count badge on each thumbnail" />
+                        ToolTip="Detect anime-style faces in every photo and show a count badge on each thumbnail." />
                 <Button Content="Suggest Faces" Command="{Binding SuggestFacesCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Suggests who's in each untagged detected face using CLIP embedding similarity against registered people's confirmed reference photos - review and confirm in Tag Faces, not fully automatic" />
+                        ToolTip="Suggest who's in each untagged face by comparing it to people's confirmed reference photos.&#10;Suggestions aren't automatic - review and confirm them in Tag Faces." />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="WD14/CLIP model folders and other app preferences" />
+                        ToolTip="App preferences, including the WD14 and CLIP model folders." />
                 <Button Content="About" Click="AboutButton_Click" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="What this app is, and its VRCDN disclaimer" />
+                        ToolTip="About this app, and its VRChat/VRCDN disclaimer." />
 
                 <!-- Not a filter (doesn't change which photos show, just how big they render),
                      so it lives here instead of the filter bar. -->

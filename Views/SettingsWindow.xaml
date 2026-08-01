@@ -17,7 +17,7 @@
 
         <Button x:Name="DownloadButton" Content="Download Model Files" HorizontalAlignment="Left"
                 Padding="8,4" Margin="0,0,0,8" Click="DownloadModel_Click"
-                ToolTip="Downloads model.onnx (~378 MB) and selected_tags.csv into the folder above" />
+                ToolTip="Download the WD14 model (~378 MB) and tag list into the folder above." />
         <TextBlock x:Name="DownloadStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
         <TextBlock Text="CLIP Face-Matching Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
@@ -34,13 +34,13 @@
 
         <Button x:Name="DownloadClipButton" Content="Download CLIP Model Files" HorizontalAlignment="Left"
                 Padding="8,4" Margin="0,0,0,8" Click="DownloadClipModel_Click"
-                ToolTip="Downloads model.onnx (~1.2 GB) into the folder above" />
+                ToolTip="Download the CLIP model (~1.2 GB) into the folder above." />
         <TextBlock x:Name="DownloadClipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
         <TextBlock Text="General" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
         <CheckBox x:Name="AutoCopyUrlCheckBox" Content="Automatically copy VRCDN URL to clipboard when hovering a photo"
                   Margin="0,0,0,12"
-                  ToolTip="Copies the photo's VRCDN URL (or clears the clipboard if it isn't uploaded) every time the hover preview appears" />
+                  ToolTip="Automatically copy the photo's VRCDN URL to your clipboard whenever you hover over it.&#10;Clears the clipboard instead if the photo isn't uploaded yet." />
 
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
             Changes take effect the next time you start VRC Photo Manager.

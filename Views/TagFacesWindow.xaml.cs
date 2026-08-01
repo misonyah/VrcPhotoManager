@@ -25,7 +25,6 @@ public partial class TagFacesWindow : Window
     private List<PhotoPlayer> _photoPlayers = [];
     private List<GamelogInferredPlayer> _gamelogPlayers = [];
     private List<(string UserId, string DisplayName)> _friends = [];
-    private List<(string UserId, string DisplayName)> _gamelogSeenPlayers = [];
     private List<(string UserId, string DisplayName)> _knownVrcUsers = [];
     private Dictionary<string, List<string>> _aliasesByUserId = [];
     private ObservableCollection<ManualPersonMergeSuggestion> _mergeSuggestions = [];
@@ -93,8 +92,16 @@ public partial class TagFacesWindow : Window
         _profileLookup = profileLookup;
         _photo = photo;
         Title = $"Tag Faces - {photo.FileName}";
+        // Friends + self are cheap (a small VRCX table + two trivial lookups), so still read
+        // live. The rest of what search/merge-suggestions need - the known-VRC-user cache and
+        // recorded aliases - now come from OUR OWN local tables only, no VRCX gamelog query
+        // here: that used to run (and refresh the cache + capture aliases) on every single Tag
+        // Faces open, which a real slowness report traced to VRCX's own gamelog table having
+        // no natural size bound (thousands of distinct players on a long-lived account). See
+        // MainViewModel.SyncVrcPlayerDataAsync ("Sync VRC Players" button) for the explicit
+        // action that actually refreshes these two caches - Tag Faces just reads whatever they
+        // already have.
         _friends = profileLookup?.GetFriends() ?? [];
-        _gamelogSeenPlayers = profileLookup?.GetGamelogSeenPlayers() ?? [];
         _self = profileLookup?.GetSelf();
         // You're not your own VRCX friend, so the friends-list autocomplete would never
         // surface yourself - fold it into the same searchable list explicitly.
@@ -102,28 +109,7 @@ public partial class TagFacesWindow : Window
         {
             _friends.Insert(0, (selfId, selfName));
         }
-        // Refresh the permanent local cache with whatever VRCX returned this session (see
-        // KnownVrcUser), then load it for search - a fallback for anyone only findable via
-        // VRCX data that's since gone away (gamelog cleared, friend removed).
-        _faces.UpsertKnownVrcUsers(_friends.Concat(_gamelogSeenPlayers));
         _knownVrcUsers = _faces.GetKnownVrcUsers();
-
-        // Automatic alias capture (see VrcUserAlias) - real rename history is a genuine
-        // supplement, but checked live it's NOT a substitute for manual entry: a real example
-        // had zero rename history anywhere in local VRCX data, since the renames predated
-        // VRCX ever observing that account. Filters out whatever's already the current/latest
-        // name for that user, so a person's own current name never shows up as its own alias.
-        if (_profileLookup is not null)
-        {
-            var currentNames = _friends.Concat(_gamelogSeenPlayers).Concat(_knownVrcUsers)
-                .GroupBy(p => p.UserId)
-                .ToDictionary(g => g.Key, g => g.First().DisplayName);
-            var historyCandidates = _profileLookup.GetFriendRenameHistory()
-                .Concat(_profileLookup.GetGamelogNameHistory())
-                .Where(c => !currentNames.TryGetValue(c.UserId, out var current)
-                    || !string.Equals(current, c.Alias, StringComparison.Ordinal));
-            _faces.CaptureAliasesFromHistory(historyCandidates);
-        }
         _aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
 
         try
@@ -310,7 +296,7 @@ public partial class TagFacesWindow : Window
     /// </summary>
     private List<ManualPersonMergeSuggestion> FindManualPersonMergeSuggestions()
     {
-        var candidates = _friends.Concat(_gamelogSeenPlayers).Concat(_knownVrcUsers)
+        var candidates = _friends.Concat(_knownVrcUsers)
             .GroupBy(c => c.UserId).Select(g => g.First()).ToList();
 
         var suggestions = new List<ManualPersonMergeSuggestion>();
@@ -740,16 +726,20 @@ public partial class TagFacesWindow : Window
     /// list: every already-registered person (so re-selecting someone you've typed before -
     /// manual or VRCX-linked - reuses them via ExistingPersonId instead of risking a duplicate;
     /// this is what replaced dumping every registered person into the static list, which only
-    /// grows), VRCX's friends list (VrcxProfileLookupService.GetFriends), and everyone VRCX's
-    /// gamelog has ever recorded a resolved id for - not just friends (found via a real report:
-    /// a real person had a resolved id in the gamelog but was never a friend, so friends-only
-    /// search never found them). Each source is skipped for a user id already covered by an
-    /// earlier one, so nobody appears twice. Matching goes through FuzzyNameSearch, not a plain
-    /// Contains, so VRCX "fancy text" stylized names (small caps, fullwidth, Cyrillic/Greek
-    /// Latin-lookalikes) match what a human reads them as, not their literal codepoints (also a
-    /// real report - a friend's display name used Unicode small capitals). Picking any match
-    /// goes through the normal path in SuggestionListBox_MouseUp. Clearing the search restores
-    /// the original static list.
+    /// grows), VRCX's live friends list (VrcxProfileLookupService.GetFriends, cheap enough to
+    /// query on every open), and the local known-VRC-user cache - everyone VRCX has EVER
+    /// reported (friends or gamelog) as of the last "Sync VRC Players" run, not just current
+    /// friends (found via a real report: a real person had a resolved id in the gamelog but was
+    /// never a friend, so friends-only search never found them). That cache is local-only, not
+    /// a live gamelog query - see MainViewModel.SyncVrcPlayerDataAsync for why (a live gamelog
+    /// scan on every Tag Faces open got slow once this account's gamelog history grew large),
+    /// so it can lag behind VRCX until the next sync. Each source is skipped for a user id
+    /// already covered by an earlier one, so nobody appears twice. Matching goes through
+    /// FuzzyNameSearch, not a plain Contains, so VRCX "fancy text" stylized names (small caps,
+    /// fullwidth, Cyrillic/Greek Latin-lookalikes) match what a human reads them as, not their
+    /// literal codepoints (also a real report - a friend's display name used Unicode small
+    /// capitals). Picking any match goes through the normal path in SuggestionListBox_MouseUp.
+    /// Clearing the search restores the original static list.
     /// </summary>
     private void NewPersonNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -805,27 +795,18 @@ public partial class TagFacesWindow : Window
                 BuildLabel(x.Friend.DisplayName, x.Eval.AliasesToShow, x.Friend.UserId == _self?.UserId ? "you" : "VRCX friend"),
                 x.Friend.UserId, null, RawName: x.Friend.DisplayName));
 
+        // Everyone VRCX has ever reported (friends or gamelog) as of the last "Sync VRC
+        // Players" run (MainViewModel.SyncVrcPlayerDataAsync) - a local-only read, not a live
+        // VRCX query, so this can lag behind reality until the next sync (see KnownVrcUser).
         var friendIds = _friends.Select(f => f.UserId).ToHashSet();
-        var gamelogMatches = _gamelogSeenPlayers
-            .Where(p => !registeredVrcUserIds.Contains(p.UserId) && !friendIds.Contains(p.UserId))
-            .Select(p => (Player: p, Eval: EvaluateMatch(p.DisplayName, p.UserId)))
-            .Where(x => x.Eval.Matches)
-            .Select(x => new PickerItem(
-                BuildLabel(x.Player.DisplayName, x.Eval.AliasesToShow, "seen in VRCX"), x.Player.UserId, null, RawName: x.Player.DisplayName));
-
-        // Fallback of last resort: the local KnownVrcUser cache, for anyone only findable via
-        // VRCX data that's since gone away (gamelog cleared, friend removed). Already covered
-        // by one of the live sources above whenever VRCX still has the data, so this only ever
-        // surfaces someone the OTHER three missed.
-        var gamelogIds = _gamelogSeenPlayers.Select(p => p.UserId).ToHashSet();
         var cachedMatches = _knownVrcUsers
-            .Where(u => !registeredVrcUserIds.Contains(u.UserId) && !friendIds.Contains(u.UserId) && !gamelogIds.Contains(u.UserId))
+            .Where(u => !registeredVrcUserIds.Contains(u.UserId) && !friendIds.Contains(u.UserId))
             .Select(u => (User: u, Eval: EvaluateMatch(u.DisplayName, u.UserId)))
             .Where(x => x.Eval.Matches)
             .Select(x => new PickerItem(
                 BuildLabel(x.User.DisplayName, x.Eval.AliasesToShow, "previously seen"), x.User.UserId, null, RawName: x.User.DisplayName));
 
-        var matches = personMatches.Concat(friendMatches).Concat(gamelogMatches).Concat(cachedMatches).Take(20).ToList();
+        var matches = personMatches.Concat(friendMatches).Concat(cachedMatches).Take(20).ToList();
         SuggestionListBox.ItemsSource = matches.Count > 0 ? matches : _staticPickerItems;
     }
 

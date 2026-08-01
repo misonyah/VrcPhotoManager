@@ -27,9 +27,9 @@
                                 <Run Text="{Binding ManualName}" FontWeight="Bold" /><Run Text=" (manual) looks like the VRC account " /><Run Text="{Binding VrcDisplayName}" FontWeight="Bold" /><Run Text=" - merge them?" />
                             </TextBlock>
                             <Button Content="Merge" Margin="8,0,0,0" Padding="8,2" Click="MergeSuggestion_Click"
-                                    ToolTip="Links the manual entry to this VRC account - if that account is already linked to a different person record, their tags are combined and the manual one is removed" />
+                                    ToolTip="Link this manual entry to the VRC account.&#10;If that account is already linked elsewhere, both records' tags are combined." />
                             <Button Content="Dismiss" Margin="4,0,0,0" Padding="8,2" Click="DismissMergeSuggestion_Click"
-                                    ToolTip="Not the same person - hide this suggestion for now" />
+                                    ToolTip="Not the same person - dismiss this suggestion." />
                         </StackPanel>
                     </Border>
                 </DataTemplate>
@@ -87,7 +87,7 @@
                                     <Button Grid.Column="1" Content="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                                             Padding="4,0" Margin="4,0,0,0"
                                             Visibility="{Binding CanEditAliases, Converter={StaticResource BoolToVisibilityConverter}}"
-                                            Click="AddAliasButton_Click" ToolTip="Manage aliases (previous names) for this person" />
+                                            Click="AddAliasButton_Click" ToolTip="Manage this person's previous names (aliases)." />
                                     <Button Grid.Column="2" Content="&#xE70F;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                                             Padding="4,0" Margin="4,0,0,0"
                                             Visibility="{Binding CanRename, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -123,12 +123,12 @@
                     <TextBlock x:Name="RenameHintText" Foreground="Orange" FontSize="10" TextWrapping="Wrap"
                                Margin="0,0,0,4" Visibility="Collapsed" />
                     <TextBox x:Name="NewPersonNameTextBox" Margin="0,0,0,4"
-                             ToolTip="Type a name and press Enter to create a new person (no VRC id), or type 2+ characters to search registered people, VRCX friends, and everyone else VRCX has ever seen (tolerant of stylized Unicode names)"
+                             ToolTip="Type a name and press Enter to add a new person (no VRC account linked).&#10;Or type 2+ letters to search registered people, VRCX friends, and everyone else VRCX has seen."
                              KeyDown="NewPersonNameTextBox_KeyDown" TextChanged="NewPersonNameTextBox_TextChanged" />
                     <Button x:Name="ClearTagButton" Content="Clear tag" Click="ClearTagButton_Click" Margin="0,4,0,0"
-                            ToolTip="Removes this face's confirmed tag, leaving it untagged (yellow) - the box itself stays, unlike Delete box" />
+                            ToolTip="Remove this face's tag, leaving it untagged (yellow).&#10;The box itself stays - use Delete box to remove it instead." />
                     <Button Content="Delete box" Click="DeleteFaceButton_Click" Margin="0,4,0,0"
-                            ToolTip="Hides this face box (e.g. a wrongly-placed manual box, or a too-small false-positive detection) - it isn't removed from the database, so this data stays available for reviewing detection quality later" />
+                            ToolTip="Hide this face box, e.g. a misplaced manual box or a false detection.&#10;It's kept in the database for reviewing detection quality later, just hidden from view." />
                 </StackPanel>
             </Border>
         </Popup>
