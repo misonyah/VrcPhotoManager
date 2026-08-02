@@ -22,6 +22,8 @@ public class VrcxProfileLookupService
     private const string FriendLogTable = $"usr{LocalAccountIdNoPrefix}_friend_log_current";
     private const string FriendLogHistoryTable = $"usr{LocalAccountIdNoPrefix}_friend_log_history";
     private const string JoinLeaveTable = "gamelog_join_leave";
+    private const string NotesTable = $"usr{LocalAccountIdNoPrefix}_notes";
+    private const string FeedBioTable = $"usr{LocalAccountIdNoPrefix}_feed_bio";
 
     private readonly string _vrcxDbPath;
     private readonly HttpClient _http;
@@ -222,6 +224,77 @@ public class VrcxProfileLookupService
             {
                 result.Add((reader.GetString(0), reader.GetString(1)));
             }
+            return result;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public record NoteAndBio(string? Note, string? Bio);
+
+    /// <summary>
+    /// Batched lookup of VRCX's own per-friend note (usr..._notes, user-authored inside VRCX)
+    /// and latest bio (usr..._feed_bio, a change-history log - this takes the single most
+    /// recent row per user id). Neither is imported/stored anywhere in VrcPhotoManager: both
+    /// are edited/observed exclusively on the VRCX side, so persisting a copy here would just
+    /// be a second, staleness-prone source of truth with no write path back to correct it.
+    /// Callers pass exactly the VrcUserIds already about to be shown (e.g. one popup's worth
+    /// of suggestions) - same "cheap enough to query live" reasoning as GetFriends. Degrades
+    /// to an empty dictionary on any failure, same as every other lookup in this class.
+    /// </summary>
+    public Dictionary<string, NoteAndBio> GetNotesAndBios(IEnumerable<string> vrcUserIds)
+    {
+        var ids = vrcUserIds.Distinct().ToList();
+        if (ids.Count == 0) return [];
+
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
+            conn.Open();
+
+            string placeholders = string.Join(",", ids.Select((_, i) => $"@id{i}"));
+            var result = new Dictionary<string, NoteAndBio>();
+
+            using (var noteCmd = conn.CreateCommand())
+            {
+                noteCmd.CommandText = $"""
+                    SELECT user_id, note FROM "{NotesTable}" WHERE user_id IN ({placeholders})
+                    """;
+                for (int i = 0; i < ids.Count; i++) noteCmd.Parameters.AddWithValue($"@id{i}", ids[i]);
+                using var reader = noteCmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    string userId = reader.GetString(0);
+                    string? note = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    result[userId] = new NoteAndBio(note, null);
+                }
+            }
+
+            using (var bioCmd = conn.CreateCommand())
+            {
+                // ROW_NUMBER() picks the single most-recent feed_bio row per user_id (bio
+                // history has many rows per person - one per change VRCX observed).
+                bioCmd.CommandText = $"""
+                    SELECT user_id, bio FROM (
+                        SELECT user_id, bio,
+                               ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+                        FROM "{FeedBioTable}" WHERE user_id IN ({placeholders})
+                    ) WHERE rn = 1
+                    """;
+                for (int i = 0; i < ids.Count; i++) bioCmd.Parameters.AddWithValue($"@id{i}", ids[i]);
+                using var reader = bioCmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    string userId = reader.GetString(0);
+                    string? bio = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    result[userId] = result.TryGetValue(userId, out var existing)
+                        ? existing with { Bio = bio }
+                        : new NoteAndBio(null, bio);
+                }
+            }
+
             return result;
         }
         catch
