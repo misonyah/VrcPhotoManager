@@ -74,6 +74,37 @@ public partial class TagFacesWindow : Window
         /// available much more broadly than CanRename (any friend/gamelog/cached/registered
         /// entry with a VrcUserId, not just already-registered manual people).</summary>
         public bool CanEditAliases => VrcUserId is not null && !IsConfirmSuggestion && !IsNotAFace;
+
+        /// <summary>Populated after construction (see WithNoteTooltips) from a live,
+        /// per-popup VRCX lookup - not a constructor parameter, since none of the 8 call
+        /// sites that build PickerItems know about notes/bios individually. Null (no
+        /// tooltip shown - WPF suppresses a null ToolTip binding) when VrcUserId is null or
+        /// VRCX has neither a note nor a bio for this person.</summary>
+        public string? NoteTooltip { get; init; }
+    }
+
+    /// <summary>Single point where a built PickerItem list gets its NoteTooltip filled in -
+    /// called from both places a suggestion list is assembled (OpenPicker's static list,
+    /// NewPersonNameTextBox_TextChanged's search results) so the live VRCX lookup only ever
+    /// needs to know about "whatever VrcUserIds are in this list", not which of the 8
+    /// construction sites they came from.</summary>
+    private List<PickerItem> WithNoteTooltips(List<PickerItem> items)
+    {
+        if (_profileLookup is null) return items;
+        var ids = items.Where(i => i.VrcUserId is not null).Select(i => i.VrcUserId!).Distinct().ToList();
+        if (ids.Count == 0) return items;
+
+        var lookup = _profileLookup.GetNotesAndBios(ids);
+        if (lookup.Count == 0) return items;
+
+        return items.Select(i =>
+        {
+            if (i.VrcUserId is not string userId || !lookup.TryGetValue(userId, out var nb)) return i;
+            var lines = new List<string>();
+            if (!string.IsNullOrWhiteSpace(nb.Note)) lines.Add($"Note: {nb.Note}");
+            if (!string.IsNullOrWhiteSpace(nb.Bio)) lines.Add($"Bio: {nb.Bio}");
+            return lines.Count == 0 ? i : i with { NoteTooltip = string.Join("\n", lines) };
+        }).ToList();
     }
 
     private record ManualPersonMergeSuggestion(long ManualPersonId, string ManualName, string VrcUserId, string VrcDisplayName);
@@ -631,6 +662,7 @@ public partial class TagFacesWindow : Window
             items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id));
         }
 
+        items = WithNoteTooltips(items);
         _staticPickerItems = items;
         SuggestionListBox.ItemsSource = items;
         NewPersonNameTextBox.Text = "";
@@ -806,7 +838,7 @@ public partial class TagFacesWindow : Window
             .Select(x => new PickerItem(
                 BuildLabel(x.User.DisplayName, x.Eval.AliasesToShow, "previously seen"), x.User.UserId, null, RawName: x.User.DisplayName));
 
-        var matches = personMatches.Concat(friendMatches).Concat(cachedMatches).Take(20).ToList();
+        var matches = WithNoteTooltips(personMatches.Concat(friendMatches).Concat(cachedMatches).Take(20).ToList());
         SuggestionListBox.ItemsSource = matches.Count > 0 ? matches : _staticPickerItems;
     }
 

@@ -83,7 +83,7 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{Binding DisplayText}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="0" Text="{Binding DisplayText}" ToolTip="{Binding NoteTooltip}" VerticalAlignment="Center" />
                                     <Button Grid.Column="1" Content="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                                             Padding="4,0" Margin="4,0,0,0"
                                             Visibility="{Binding CanEditAliases, Converter={StaticResource BoolToVisibilityConverter}}"
