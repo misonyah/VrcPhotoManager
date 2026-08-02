@@ -9,3 +9,6 @@ obj/
 # The WD14 classifier model files are large and not part of this repo - see README.md.
 wd14-model/
 wd14-index.db
+
+# Subagent-driven-development scratch (ledger, briefs, review packages) - not repo content.
+.superpowers/
