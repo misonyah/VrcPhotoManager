@@ -35,6 +35,7 @@ public class PhotoViewModel : INotifyPropertyChanged
 
     public string FileName => Model.FileName;
     public string? Rating => Model.Rating;
+    public string? AvatarType => Model.AvatarType;
     public RemoteStatus RemoteStatus => Model.RemoteStatus;
     public string? RemoteUrl => Model.RemoteUrl;
     public string? AuthorDisplayName => Model.AuthorDisplayName;
@@ -163,6 +164,8 @@ public class PhotoViewModel : INotifyPropertyChanged
     }
 
     public void NotifyRatingChanged() => OnPropertyChanged(nameof(Rating));
+
+    public void NotifyAvatarTypeChanged() => OnPropertyChanged(nameof(AvatarType));
 
     public void NotifyMetadataChanged()
     {

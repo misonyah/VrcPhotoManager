@@ -12,6 +12,7 @@
         <views:StatusToBrushConverter x:Key="StatusToBrushConverter" />
         <views:RatingToBrushConverter x:Key="RatingToBrushConverter" />
         <views:FaceCountToVisibilityConverter x:Key="FaceCountToVisibilityConverter" />
+        <views:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="PhotoItemStyle" TargetType="Border">
             <Setter Property="Margin" Value="4" />
@@ -197,6 +198,11 @@
                                                 ToolTip="Detected faces (tagged / total)">
                                             <TextBlock Text="{Binding FaceCountDisplay}" FontSize="10" Foreground="White" />
                                         </Border>
+                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="4,4,4,20"
+                                                Padding="4,1" CornerRadius="3" Background="#CC1B3A5E"
+                                                Visibility="{Binding AvatarType, Converter={StaticResource NullToVisibilityConverter}}">
+                                            <TextBlock Text="{Binding AvatarType}" FontSize="10" Foreground="White" />
+                                        </Border>
                                         <!-- People icon: VRCX embedded author/world/player metadata for this photo.
                                              Single color for now - a second color tier for "everyone in the photo
                                              has been identified" needs Phase 2+'s person-labeling data, which
@@ -243,6 +249,8 @@
                         ToolTip="Detect anime-style faces in every photo and show a count badge on each thumbnail." />
                 <Button Content="Suggest Faces" Command="{Binding SuggestFacesCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="Suggest who's in each untagged face by comparing it to people's confirmed reference photos.&#10;Suggestions aren't automatic - review and confirm them in Tag Faces." />
+                <Button Content="Classify Avatars" Command="{Binding ClassifyAvatarsCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Detect the avatar base worn in each unclassified photo using the downloaded avatar classifier model." />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
