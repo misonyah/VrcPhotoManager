@@ -274,6 +274,37 @@ public class PhotoRepository
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s.SetProperty(p => p.Rating, rating));
     }
 
+    public void SetAvatarType(long id, string? avatarType, float confidence)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s
+            .SetProperty(p => p.AvatarType, avatarType)
+            .SetProperty(p => p.AvatarTypeConfidence, confidence));
+    }
+
+    /// <summary>Distinct avatar types currently present in the library, for the Avatar
+    /// filter dropdown - excludes null (unclassified/no-confident-match) since those are
+    /// represented as separate fixed filter options, not real class names.</summary>
+    public List<string> GetDistinctAvatarTypes()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.AvatarType != null)
+            .Select(p => p.AvatarType!)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
+    }
+
+    public HashSet<long> GetPhotoIdsMissingAvatarType()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.AvatarTypeConfidence == null)
+            .Select(p => p.Id)
+            .ToHashSet();
+    }
+
     public void SetRatingByFileName(string fileName, string rating)
     {
         using var context = NewContext();

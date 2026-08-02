@@ -44,6 +44,8 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.FileHash).HasColumnName("file_hash");
             entity.Property(p => p.Thumbnail).HasColumnName("thumbnail");
             entity.Property(p => p.Rating).HasColumnName("rating");
+            entity.Property(p => p.AvatarType).HasColumnName("avatar_type");
+            entity.Property(p => p.AvatarTypeConfidence).HasColumnName("avatar_type_confidence");
             entity.Property(p => p.MetadataScanned).HasColumnName("metadata_scanned");
             entity.Property(p => p.AuthorId).HasColumnName("author_id");
             entity.Property(p => p.AuthorDisplayName).HasColumnName("author_display_name");

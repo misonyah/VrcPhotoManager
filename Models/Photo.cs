@@ -30,6 +30,8 @@ public class Photo
 
     public byte[]? Thumbnail { get; set; }
     public string? Rating { get; set; }
+    public string? AvatarType { get; set; }
+    public float? AvatarTypeConfidence { get; set; }
 
     /// <summary>
     /// VRCX embeds author/world/player info directly into the photo's PNG metadata at
