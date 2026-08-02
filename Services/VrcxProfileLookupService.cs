@@ -249,16 +249,23 @@ public class VrcxProfileLookupService
         var ids = vrcUserIds.Distinct().ToList();
         if (ids.Count == 0) return [];
 
+        var result = new Dictionary<string, NoteAndBio>();
+
         try
         {
             using var conn = new SqliteConnection($"Data Source={_vrcxDbPath};Mode=ReadOnly");
             conn.Open();
 
             string placeholders = string.Join(",", ids.Select((_, i) => $"@id{i}"));
-            var result = new Dictionary<string, NoteAndBio>();
 
-            using (var noteCmd = conn.CreateCommand())
+            // Notes and bios are queried against two different, independently-fallible VRCX
+            // tables - each block gets its own try/catch (rather than one shared around both)
+            // so a bio-query failure (e.g. usr..._feed_bio missing on some VRCX version) can
+            // never discard notes already read, and vice versa. See class doc comment: a user
+            // id present in only one source should still get an entry with the other field null.
+            try
             {
+                using var noteCmd = conn.CreateCommand();
                 noteCmd.CommandText = $"""
                     SELECT user_id, note FROM "{NotesTable}" WHERE user_id IN ({placeholders})
                     """;
@@ -271,15 +278,20 @@ public class VrcxProfileLookupService
                     result[userId] = new NoteAndBio(note, null);
                 }
             }
-
-            using (var bioCmd = conn.CreateCommand())
+            catch
             {
+                // Degrade to "no notes" - bios below still get a chance to populate result.
+            }
+
+            try
+            {
+                using var bioCmd = conn.CreateCommand();
                 // ROW_NUMBER() picks the single most-recent feed_bio row per user_id (bio
                 // history has many rows per person - one per change VRCX observed).
                 bioCmd.CommandText = $"""
                     SELECT user_id, bio FROM (
                         SELECT user_id, bio,
-                               ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+                               ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) AS rn
                         FROM "{FeedBioTable}" WHERE user_id IN ({placeholders})
                     ) WHERE rn = 1
                     """;
@@ -294,12 +306,16 @@ public class VrcxProfileLookupService
                         : new NoteAndBio(null, bio);
                 }
             }
+            catch
+            {
+                // Degrade to "no bios" - notes already read above are kept.
+            }
 
             return result;
         }
         catch
         {
-            return [];
+            return result;
         }
     }
 

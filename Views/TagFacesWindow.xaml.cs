@@ -50,6 +50,15 @@ public partial class TagFacesWindow : Window
     /// PersonPickerPopup_Closed deletes the box rather than leaving an orphaned untagged one.</summary>
     private long? _pendingManualFaceId;
 
+    /// <summary>Accumulates GetNotesAndBios results across keystrokes within one open person
+    /// picker popup - re-querying VRCX's uncindexed, potentially huge _feed_bio table on every
+    /// keystroke of NewPersonNameTextBox_TextChanged was a real, confirmed full-table-scan-per-
+    /// keystroke perf problem (873 MB table, no index on user_id). Cleared in
+    /// PersonPickerPopup_Closed - the picker is per-photo, so caching across different photos'
+    /// pickers isn't wanted, but caching across keystrokes within one open popup is exactly the
+    /// win.</summary>
+    private Dictionary<string, VrcxProfileLookupService.NoteAndBio> _noteBioCache = [];
+
     /// <summary>
     /// RawName carries the actual primary name separate from DisplayText, which can have any
     /// number of parenthetical decorations appended ("(VRCX friend)", an alias list, etc.) -
@@ -94,12 +103,20 @@ public partial class TagFacesWindow : Window
         var ids = items.Where(i => i.VrcUserId is not null).Select(i => i.VrcUserId!).Distinct().ToList();
         if (ids.Count == 0) return items;
 
-        var lookup = _profileLookup.GetNotesAndBios(ids);
-        if (lookup.Count == 0) return items;
+        // Only query VRCX for ids this popup hasn't already looked up - see _noteBioCache.
+        var uncachedIds = ids.Where(id => !_noteBioCache.ContainsKey(id)).ToList();
+        if (uncachedIds.Count > 0)
+        {
+            var fresh = _profileLookup.GetNotesAndBios(uncachedIds);
+            foreach (var (userId, nb) in fresh)
+            {
+                _noteBioCache[userId] = nb;
+            }
+        }
 
         return items.Select(i =>
         {
-            if (i.VrcUserId is not string userId || !lookup.TryGetValue(userId, out var nb)) return i;
+            if (i.VrcUserId is not string userId || !_noteBioCache.TryGetValue(userId, out var nb)) return i;
             var lines = new List<string>();
             if (!string.IsNullOrWhiteSpace(nb.Note)) lines.Add($"Note: {nb.Note}");
             if (!string.IsNullOrWhiteSpace(nb.Bio)) lines.Add($"Bio: {nb.Bio}");
@@ -606,6 +623,10 @@ public partial class TagFacesWindow : Window
     /// that reliably catches "user backed out without tagging the box they just drew".</summary>
     private void PersonPickerPopup_Closed(object? sender, EventArgs e)
     {
+        // The picker is per-photo, so caching notes/bios across different photos' pickers isn't
+        // wanted - only across keystrokes within one open popup (see _noteBioCache).
+        _noteBioCache.Clear();
+
         if (_pendingManualFaceId is not long pendingId) return;
         _pendingManualFaceId = null;
         _faces.DeleteDetectedFace(pendingId);
