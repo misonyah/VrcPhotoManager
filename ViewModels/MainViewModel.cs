@@ -24,6 +24,7 @@ public class MainViewModel : INotifyPropertyChanged
     private VrcxProfileLookupService? _profileLookup;
     private ClipEmbeddingService? _clipEmbedder;
     private WdTaggerService? _tagger;
+    private AvatarTypeService? _avatarClassifier;
     private VrcdnApiClient? _api;
 
     /// <summary>Cancelled when the window closes, so a long-running background scan stops
@@ -180,6 +181,7 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand ScanFacesCommand { get; }
     public RelayCommand SuggestFacesCommand { get; }
     public RelayCommand ClassifyPhotosCommand { get; }
+    public RelayCommand ClassifyAvatarsCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
     public ICommand CrossReferenceGamelogCommand { get; }
@@ -223,6 +225,7 @@ public class MainViewModel : INotifyPropertyChanged
         ScanFacesCommand = new RelayCommand(ScanFacesAsync, () => _faceDetector is not null);
         SuggestFacesCommand = new RelayCommand(SuggestFacesAsync, () => _clipEmbedder is not null);
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
+        ClassifyAvatarsCommand = new RelayCommand(ClassifyAvatarsAsync, () => _avatarClassifier is not null);
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
         CrossReferenceGamelogCommand = new RelayCommand(CrossReferenceGamelogAsync);
@@ -261,6 +264,22 @@ public class MainViewModel : INotifyPropertyChanged
             StatusMessage = $"WD14 classifier unavailable: {taggerError}";
         }
         ClassifyPhotosCommand.RaiseCanExecuteChanged();
+
+        string? avatarModelDir = ResolveAvatarModelDir();
+        if (avatarModelDir is not null)
+        {
+            var (avatarClassifier, avatarError) = await Task.Run(() =>
+            {
+                var s = AvatarTypeService.TryCreate(avatarModelDir, out string? error);
+                return (s, error);
+            });
+            _avatarClassifier = avatarClassifier;
+            if (_avatarClassifier is null)
+            {
+                StatusMessage = $"Avatar classifier unavailable: {avatarError}";
+            }
+        }
+        ClassifyAvatarsCommand.RaiseCanExecuteChanged();
 
         var (faceDetector, faceDetectorError) = await Task.Run(() =>
         {
@@ -820,6 +839,12 @@ public class MainViewModel : INotifyPropertyChanged
         return Directory.Exists(local) ? local : @"D:\AI-Tools\wd14-tagger\model";
     }
 
+    private string? ResolveAvatarModelDir()
+    {
+        string? configured = _repo.GetStringSetting(SettingsKeys.AvatarModelDir);
+        return configured is not null && Directory.Exists(configured) ? configured : null;
+    }
+
     /// <summary>
     /// Runs the WD14 classifier in-process for any photo that still has no rating.
     /// </summary>
@@ -853,6 +878,45 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Classified {done} photos.";
+        RebuildRows();
+    }
+
+    /// <summary>Runs the avatar-type classifier in-process for any photo not yet
+    /// classified (AvatarTypeConfidence is null) - re-running after a model update only
+    /// touches those, same "already has a value, skip it" idiom as ClassifyPhotosAsync.</summary>
+    private async Task ClassifyAvatarsAsync()
+    {
+        if (_avatarClassifier is null) { StatusMessage = "Avatar classifier not available."; return; }
+
+        var missingIds = _repo.GetPhotoIdsMissingAvatarType();
+        var toClassify = _allPhotos.Where(p => missingIds.Contains(p.Model.Id)).ToList();
+        if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has an avatar-type result."; return; }
+
+        int done = 0;
+        foreach (var vm in toClassify)
+        {
+            try
+            {
+                var (label, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
+                vm.Model.AvatarType = label;
+                vm.Model.AvatarTypeConfidence = confidence;
+                _repo.SetAvatarType(vm.Model.Id, label, confidence);
+                vm.NotifyAvatarTypeChanged();
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Avatar classification failed for {vm.FileName}: {ex.Message}";
+            }
+
+            done++;
+            if (done % 20 == 0 || done == toClassify.Count)
+            {
+                StatusMessage = $"Classifying avatars... {done}/{toClassify.Count}";
+            }
+        }
+
+        StatusMessage = $"Classified {done} photos' avatar types.";
+        RefreshAvatarTypeFilterOptions();
         RebuildRows();
     }
 
