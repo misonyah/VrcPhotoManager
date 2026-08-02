@@ -14,6 +14,7 @@ public class ModelDownloadService
 {
     private const string ModelRepoBaseUrl = "https://huggingface.co/SmilingWolf/wd-vit-tagger-v3/resolve/main";
     private const string ClipModelRepoBaseUrl = "https://huggingface.co/immich-app/ViT-L-14__laion2b-s32b-b82k/resolve/main/visual";
+    private const string AvatarModelRepoBaseUrl = "https://huggingface.co/misonyah/vrc-avatar-classifier/resolve/main";
 
     public async Task DownloadWdTaggerModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
     {
@@ -29,6 +30,14 @@ public class ModelDownloadService
         Directory.CreateDirectory(targetDir);
         using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         await DownloadFileAsync(http, $"{ClipModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
+    }
+
+    public async Task DownloadAvatarModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(targetDir);
+        using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        await DownloadFileAsync(http, $"{AvatarModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
+        await DownloadFileAsync(http, $"{AvatarModelRepoBaseUrl}/labels.txt", Path.Combine(targetDir, "labels.txt"), "labels.txt", progress, ct);
     }
 
     private static async Task DownloadFileAsync(

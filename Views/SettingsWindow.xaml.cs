@@ -20,6 +20,7 @@ public partial class SettingsWindow : Window
         _repo = repo;
         ModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.WdModelDir) ?? "";
         ClipModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.ClipModelDir) ?? "";
+        AvatarModelDirTextBox.Text = _repo.GetStringSetting(SettingsKeys.AvatarModelDir) ?? "";
         AutoCopyUrlCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
     }
 
@@ -103,6 +104,46 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void BrowseAvatarModelDir_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select avatar classifier model folder" };
+        if (dialog.ShowDialog() == true)
+        {
+            AvatarModelDirTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private async void DownloadAvatarModel_Click(object sender, RoutedEventArgs e)
+    {
+        string targetDir = AvatarModelDirTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(targetDir))
+        {
+            MessageBox.Show(this, "Enter or browse to a model folder first (it will be created if it doesn't exist).",
+                "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        DownloadAvatarButton.IsEnabled = false;
+        _downloadCts = new CancellationTokenSource();
+        var progress = new Progress<string>(msg => DownloadAvatarStatusText.Text = msg);
+        try
+        {
+            await _downloader.DownloadAvatarModelAsync(targetDir, progress, _downloadCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            DownloadAvatarStatusText.Text = "Download cancelled.";
+        }
+        catch (Exception ex)
+        {
+            DownloadAvatarStatusText.Text = $"Download failed: {ex.Message}";
+        }
+        finally
+        {
+            DownloadAvatarButton.IsEnabled = true;
+        }
+    }
+
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         if (!string.IsNullOrWhiteSpace(ModelDirTextBox.Text))
@@ -112,6 +153,10 @@ public partial class SettingsWindow : Window
         if (!string.IsNullOrWhiteSpace(ClipModelDirTextBox.Text))
         {
             _repo.SetStringSetting(SettingsKeys.ClipModelDir, ClipModelDirTextBox.Text.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(AvatarModelDirTextBox.Text))
+        {
+            _repo.SetStringSetting(SettingsKeys.AvatarModelDir, AvatarModelDirTextBox.Text.Trim());
         }
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         DialogResult = true;
