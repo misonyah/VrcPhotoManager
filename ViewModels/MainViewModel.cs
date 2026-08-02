@@ -67,6 +67,31 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string[] RatingFilterOptions { get; } = ["All", "general", "sensitive", "questionable", "explicit", "(none)"];
 
+    private string _avatarTypeFilter = "Any";
+    public string AvatarTypeFilter
+    {
+        get => _avatarTypeFilter;
+        set { _avatarTypeFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+
+    private List<string> _avatarTypeFilterOptions = ["Any", "Unclassified", "No confident match"];
+    public List<string> AvatarTypeFilterOptions
+    {
+        get => _avatarTypeFilterOptions;
+        private set { _avatarTypeFilterOptions = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Rebuilds the avatar-type filter dropdown from the current library state -
+    /// called once at startup and again after Classify Avatars runs, so newly-classified
+    /// avatar types show up without needing a full app restart (same pattern as
+    /// RefreshPlayerFilterOptions).</summary>
+    public void RefreshAvatarTypeFilterOptions()
+    {
+        var options = new List<string> { "Any", "Unclassified", "No confident match" };
+        options.AddRange(_repo.GetDistinctAvatarTypes());
+        AvatarTypeFilterOptions = options;
+    }
+
     private string _statusFilter = "All";
     public string StatusFilter
     {
@@ -250,6 +275,7 @@ public class MainViewModel : INotifyPropertyChanged
         ApplyFaceCounts();
         ApplyPlayerCounts();
         RefreshPlayerFilterOptions();
+        RefreshAvatarTypeFilterOptions();
 
         TryAutoLogin();
 
@@ -1100,6 +1126,15 @@ public class MainViewModel : INotifyPropertyChanged
         if (StatusFilter != "All")
         {
             filtered = filtered.Where(p => p.RemoteStatus.ToString() == StatusFilter);
+        }
+        if (AvatarTypeFilter != "Any")
+        {
+            filtered = AvatarTypeFilter switch
+            {
+                "Unclassified" => filtered.Where(p => p.Model.AvatarTypeConfidence is null),
+                "No confident match" => filtered.Where(p => p.Model.AvatarTypeConfidence is not null && p.AvatarType is null),
+                _ => filtered.Where(p => p.AvatarType == AvatarTypeFilter),
+            };
         }
         if (SelectedPlayerFilter.VrcUserId is string userId)
         {

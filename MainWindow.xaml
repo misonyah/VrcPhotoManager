@@ -38,6 +38,10 @@
             <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0" />
 
+            <TextBlock Text="Avatar:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox ItemsSource="{Binding AvatarTypeFilterOptions}" SelectedItem="{Binding AvatarTypeFilter}" Width="140" Margin="0,0,16,0"
+                      ToolTip="Filter by detected avatar base. 'Unclassified' means Classify Avatars hasn't run on it yet; 'No confident match' means it ran but wasn't confident enough to guess." />
+
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Grid Width="170" Margin="0,0,8,0">
                 <TextBox x:Name="PlayerFilterTextBox"
