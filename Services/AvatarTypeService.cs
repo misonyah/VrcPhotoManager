@@ -19,6 +19,13 @@ public class AvatarTypeService : IDisposable
 {
     private const int InputSize = 224;
     private const float AcceptanceThreshold = 0.5f;
+
+    /// <summary>Plan A's (tools/avatar-scraper) deliberate negative/"none of the above" class -
+    /// see its README "Negative/unknown class" section. A confident match against this class
+    /// means "this is not a recognized avatar", not a real avatar name, so Classify() treats it
+    /// the same as a below-threshold result.</summary>
+    private const string NegativeClassLabel = "unknown-manual";
+
     private static readonly float[] ImageNetMean = [0.485f, 0.456f, 0.406f];
     private static readonly float[] ImageNetStd = [0.229f, 0.224f, 0.225f];
 
@@ -49,7 +56,25 @@ public class AvatarTypeService : IDisposable
             catch { /* fall back to CPU EP silently if DirectML isn't available */ }
 
             var session = new InferenceSession(modelPath, sessionOptions);
-            string[] labels = File.ReadAllLines(labelsPath).Where(l => l.Length > 0).ToArray();
+
+            // Only trim a trailing blank line (export_onnx.py's write_text can leave one) -
+            // do NOT filter blank lines anywhere else in the list. Dropping an interior blank
+            // line would silently shift every subsequent label's index relative to the
+            // model's actual class indices, corrupting predictions with no error at all.
+            string[] labels = File.ReadAllLines(labelsPath);
+            if (labels.Length > 0 && labels[^1].Length == 0)
+            {
+                labels = labels[..^1];
+            }
+
+            int outputClasses = session.OutputMetadata.Values.First().Dimensions[1];
+            if (labels.Length != outputClasses)
+            {
+                error = $"labels.txt has {labels.Length} labels but model.onnx outputs {outputClasses} classes - mismatched model/labels pair.";
+                session.Dispose();
+                return null;
+            }
+
             return new AvatarTypeService(session, labels);
         }
         catch (Exception ex)
@@ -77,7 +102,8 @@ public class AvatarTypeService : IDisposable
         }
 
         float confidence = probabilities[bestIndex];
-        string? label = confidence >= AcceptanceThreshold ? _labels[bestIndex] : null;
+        bool isConfidentRealClass = confidence >= AcceptanceThreshold && _labels[bestIndex] != NegativeClassLabel;
+        string? label = isConfidentRealClass ? _labels[bestIndex] : null;
         return (label, confidence);
     }
 

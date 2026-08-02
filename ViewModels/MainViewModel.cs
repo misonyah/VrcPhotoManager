@@ -71,7 +71,12 @@ public class MainViewModel : INotifyPropertyChanged
     public string AvatarTypeFilter
     {
         get => _avatarTypeFilter;
-        set { _avatarTypeFilter = value; OnPropertyChanged(); RebuildRows(); }
+        // Coerce null back to "Any" - WPF's Selector can clear SelectedItem when the ComboBox's
+        // ItemsSource is swapped for a new list instance (see RefreshAvatarTypeFilterOptions),
+        // and that null propagates back through the TwoWay SelectedItem binding into this setter.
+        // Without coercion, RebuildRows()'s switch falls into its "_ =>" arm and filters to
+        // p.AvatarType == null instead of showing everything.
+        set { _avatarTypeFilter = value ?? "Any"; OnPropertyChanged(); RebuildRows(); }
     }
 
     private List<string> _avatarTypeFilterOptions = ["Any", "Unclassified", "No confident match"];
@@ -291,21 +296,19 @@ public class MainViewModel : INotifyPropertyChanged
         }
         ClassifyPhotosCommand.RaiseCanExecuteChanged();
 
-        string? avatarModelDir = ResolveAvatarModelDir();
-        if (avatarModelDir is not null)
+        var (avatarClassifier, avatarError) = await Task.Run(() =>
         {
-            var (avatarClassifier, avatarError) = await Task.Run(() =>
-            {
-                var s = AvatarTypeService.TryCreate(avatarModelDir, out string? error);
-                return (s, error);
-            });
-            _avatarClassifier = avatarClassifier;
-            if (_avatarClassifier is null)
-            {
-                StatusMessage = $"Avatar classifier unavailable: {avatarError}";
-            }
-        }
+            string? modelDir = ResolveAvatarModelDir();
+            if (modelDir is null) return (null, "Avatar model directory not configured (set it via Settings).");
+            var s = AvatarTypeService.TryCreate(modelDir, out string? error);
+            return (s, error);
+        });
+        _avatarClassifier = avatarClassifier;
         ClassifyAvatarsCommand.RaiseCanExecuteChanged();
+        if (_avatarClassifier is null)
+        {
+            StatusMessage = $"Avatar classifier unavailable: {avatarError}";
+        }
 
         var (faceDetector, faceDetectorError) = await Task.Run(() =>
         {
@@ -907,18 +910,22 @@ public class MainViewModel : INotifyPropertyChanged
         RebuildRows();
     }
 
-    /// <summary>Runs the avatar-type classifier in-process for any photo not yet
-    /// classified (AvatarTypeConfidence is null) - re-running after a model update only
-    /// touches those, same "already has a value, skip it" idiom as ClassifyPhotosAsync.</summary>
+    /// <summary>Runs the avatar-type classifier in-process for any photo not yet classified
+    /// (AvatarTypeConfidence is null) PLUS any photo previously scored "no confident match"
+    /// (AvatarTypeConfidence set, AvatarType null) - Plan A's label set grows over time as its
+    /// pipeline is re-run and republished, so a photo that missed against today's model is
+    /// worth retrying once a bigger model is downloaded, not permanently skipped like
+    /// ClassifyPhotosAsync's "already has a value" photos.</summary>
     private async Task ClassifyAvatarsAsync()
     {
         if (_avatarClassifier is null) { StatusMessage = "Avatar classifier not available."; return; }
 
         var missingIds = _repo.GetPhotoIdsMissingAvatarType();
-        var toClassify = _allPhotos.Where(p => missingIds.Contains(p.Model.Id)).ToList();
+        var retryIds = _repo.GetPhotoIdsWithNoConfidentMatch();
+        var toClassify = _allPhotos.Where(p => missingIds.Contains(p.Model.Id) || retryIds.Contains(p.Model.Id)).ToList();
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has an avatar-type result."; return; }
 
-        int done = 0;
+        int done = 0, failed = 0;
         foreach (var vm in toClassify)
         {
             try
@@ -931,6 +938,7 @@ public class MainViewModel : INotifyPropertyChanged
             }
             catch (Exception ex)
             {
+                failed++;
                 StatusMessage = $"Avatar classification failed for {vm.FileName}: {ex.Message}";
             }
 
@@ -941,7 +949,9 @@ public class MainViewModel : INotifyPropertyChanged
             }
         }
 
-        StatusMessage = $"Classified {done} photos' avatar types.";
+        StatusMessage = failed > 0
+            ? $"Classified {done - failed} photos' avatar types ({failed} failed)."
+            : $"Classified {done} photos' avatar types.";
         RefreshAvatarTypeFilterOptions();
         RebuildRows();
     }

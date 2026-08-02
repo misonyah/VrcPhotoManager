@@ -305,6 +305,19 @@ public class PhotoRepository
             .ToHashSet();
     }
 
+    /// <summary>Photos that were already classified but scored "no confident match"
+    /// (AvatarTypeConfidence set, AvatarType null) - the retry set for ClassifyAvatarsAsync
+    /// once a bigger/better model is downloaded, since Plan A's label set grows over time and
+    /// today's model won't recognize most of the library on the first pass.</summary>
+    public HashSet<long> GetPhotoIdsWithNoConfidentMatch()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.AvatarTypeConfidence != null && p.AvatarType == null)
+            .Select(p => p.Id)
+            .ToHashSet();
+    }
+
     public void SetRatingByFileName(string fileName, string rating)
     {
         using var context = NewContext();

@@ -39,8 +39,18 @@
             <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0" />
 
             <TextBlock Text="Avatar:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox ItemsSource="{Binding AvatarTypeFilterOptions}" SelectedItem="{Binding AvatarTypeFilter}" Width="140" Margin="0,0,16,0"
-                      ToolTip="Filter by detected avatar base. 'Unclassified' means Classify Avatars hasn't run on it yet; 'No confident match' means it ran but wasn't confident enough to guess." />
+            <!-- Real Plan A labels are raw Booth listing titles (some ~53 chars of Japanese
+                 text) sharing long common prefixes, so entries are visually indistinguishable
+                 at a narrow width even after widening - the ItemContainerStyle tooltip is what
+                 actually makes each entry identifiable on hover. -->
+            <ComboBox ItemsSource="{Binding AvatarTypeFilterOptions}" SelectedItem="{Binding AvatarTypeFilter}" Width="180" Margin="0,0,16,0"
+                      ToolTip="Filter by detected avatar base. 'Unclassified' means Classify Avatars hasn't run on it yet; 'No confident match' means it ran but wasn't confident enough to guess.">
+                <ComboBox.ItemContainerStyle>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="ToolTip" Value="{Binding}" />
+                    </Style>
+                </ComboBox.ItemContainerStyle>
+            </ComboBox>
 
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Grid Width="170" Margin="0,0,8,0">
@@ -202,10 +212,18 @@
                                                 ToolTip="Detected faces (tagged / total)">
                                             <TextBlock Text="{Binding FaceCountDisplay}" FontSize="10" Foreground="White" />
                                         </Border>
+                                        <!-- MaxWidth matches the same DataContext.ThumbnailSize binding used by the
+                                             outer photo Border's own Width/Height above, so a long/CJK avatar label
+                                             (Plan A labels are raw Booth listing titles, some ~53 characters of
+                                             Japanese text) can't render wider than the thumbnail and overlap
+                                             neighboring photos. TextTrimming + ToolTip keep the full name discoverable
+                                             on hover instead of just cutting it off silently. -->
                                         <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="4,4,4,20"
                                                 Padding="4,1" CornerRadius="3" Background="#CC1B3A5E"
+                                                MaxWidth="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                ToolTip="{Binding AvatarType}"
                                                 Visibility="{Binding AvatarType, Converter={StaticResource NullToVisibilityConverter}}">
-                                            <TextBlock Text="{Binding AvatarType}" FontSize="10" Foreground="White" />
+                                            <TextBlock Text="{Binding AvatarType}" FontSize="10" Foreground="White" TextTrimming="CharacterEllipsis" />
                                         </Border>
                                         <!-- People icon: VRCX embedded author/world/player metadata for this photo.
                                              Single color for now - a second color tier for "everyone in the photo
@@ -258,7 +276,7 @@
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="App preferences, including the WD14 and CLIP model folders." />
+                        ToolTip="App preferences, including the WD14, CLIP, and avatar-classifier model folders." />
                 <Button Content="About" Click="AboutButton_Click" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="About this app, and its VRChat/VRCDN disclaimer." />
 
