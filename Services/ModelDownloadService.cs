@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 
 namespace VrcPhotoManager.Services;
@@ -38,6 +39,46 @@ public class ModelDownloadService
         using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         await DownloadFileAsync(http, $"{AvatarModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
         await DownloadFileAsync(http, $"{AvatarModelRepoBaseUrl}/labels.txt", Path.Combine(targetDir, "labels.txt"), "labels.txt", progress, ct);
+    }
+
+    public Task<string?> GetRemoteWdTaggerModelETagAsync(CancellationToken ct = default) =>
+        GetRemoteETagAsync($"{ModelRepoBaseUrl}/model.onnx", ct);
+
+    public Task<string?> GetRemoteClipModelETagAsync(CancellationToken ct = default) =>
+        GetRemoteETagAsync($"{ClipModelRepoBaseUrl}/model.onnx", ct);
+
+    public Task<string?> GetRemoteAvatarModelETagAsync(CancellationToken ct = default) =>
+        GetRemoteETagAsync($"{AvatarModelRepoBaseUrl}/model.onnx", ct);
+
+    /// <summary>Cheap version check for a model: a HEAD request against the given
+    /// "resolve/main" file URL with redirects disabled, reading the content-hash ETag
+    /// Hugging Face returns on the redirect response itself (verified against a real
+    /// fetch: both an LFS-tracked model.onnx and a plain-text labels.txt return an
+    /// "X-Linked-Etag" header on the 302/307 response, before it's followed to the
+    /// actual CDN URL - no need to download anything to get it). Falls back to the
+    /// standard ETag header if that's ever absent. Returns null if neither header is
+    /// present or the request fails - callers should treat that as "can't tell,
+    /// download anyway" rather than an error. Each of the three model files is
+    /// published together in one run, so checking the primary model.onnx alone is
+    /// representative of the whole set.</summary>
+    private static async Task<string?> GetRemoteETagAsync(string fileUrl, CancellationToken ct)
+    {
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var http = new HttpClient(handler);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head, fileUrl);
+            using var response = await http.SendAsync(request, ct);
+            if (response.Headers.TryGetValues("X-Linked-Etag", out var linkedValues))
+            {
+                return linkedValues.FirstOrDefault();
+            }
+            return response.Headers.ETag?.Tag;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     private static async Task DownloadFileAsync(

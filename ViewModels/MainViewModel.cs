@@ -335,7 +335,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         var (clipEmbedder, clipError) = await Task.Run(() =>
         {
-            string? modelDir = _repo.GetStringSetting(SettingsKeys.ClipModelDir);
+            string? modelDir = ResolveClipModelDir();
             if (modelDir is null) return (null, "CLIP model directory not configured (set it via Settings).");
             var s = ClipEmbeddingService.TryCreate(modelDir, out string? error);
             return (s, error);
@@ -856,8 +856,9 @@ public class MainViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Checks the path configured via the Settings window first, then a folder next to the
-    /// exe (so a public build works for anyone who drops the model there), falling back to
-    /// the dev machine's path this was built against.
+    /// exe (so a public build works for anyone who drops the model there), then the stable
+    /// %LOCALAPPDATA% default (see DefaultModelPaths - works across app updates/packaging),
+    /// falling back to the dev machine's path this was built against.
     /// </summary>
     private string ResolveWdTaggerModelDir()
     {
@@ -865,13 +866,25 @@ public class MainViewModel : INotifyPropertyChanged
         if (configured is not null && Directory.Exists(configured)) return configured;
 
         string local = Path.Combine(AppContext.BaseDirectory, "wd14-model");
-        return Directory.Exists(local) ? local : @"D:\AI-Tools\wd14-tagger\model";
+        if (Directory.Exists(local)) return local;
+
+        if (Directory.Exists(DefaultModelPaths.WdTagger)) return DefaultModelPaths.WdTagger;
+
+        return @"D:\AI-Tools\wd14-tagger\model";
+    }
+
+    private string? ResolveClipModelDir()
+    {
+        string? configured = _repo.GetStringSetting(SettingsKeys.ClipModelDir);
+        if (configured is not null && Directory.Exists(configured)) return configured;
+        return Directory.Exists(DefaultModelPaths.Clip) ? DefaultModelPaths.Clip : null;
     }
 
     private string? ResolveAvatarModelDir()
     {
         string? configured = _repo.GetStringSetting(SettingsKeys.AvatarModelDir);
-        return configured is not null && Directory.Exists(configured) ? configured : null;
+        if (configured is not null && Directory.Exists(configured)) return configured;
+        return Directory.Exists(DefaultModelPaths.Avatar) ? DefaultModelPaths.Avatar : null;
     }
 
     /// <summary>

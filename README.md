@@ -28,6 +28,11 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **Local nudity/content classifier** — runs the open [WD14 tagger](https://huggingface.co/SmilingWolf)
   model in-process via ONNX Runtime (DirectML-accelerated), entirely on-device. No photos or
   classification results leave your machine for this step.
+- **Local avatar-base classifier** — **Classify Avatars** identifies which VRChat avatar base
+  (e.g. "Manuka", "Rusk") is worn in each photo, via a locally-run ONNX model trained on
+  Booth.pm avatar listings (see [Local model setup](#local-model-setup)). Shown as a thumbnail
+  badge and filterable via the Avatar dropdown; below-confidence results are tracked separately
+  from never-classified ones so a later, more complete model can be re-run against just those.
 - **Local anime-face detection** — **Detect Faces** finds anime-style faces (an LBP cascade
   trained for stylized/rendered faces, since detectors trained on real photos miss VRChat
   avatars) and shows a per-photo face count. Ships bundled with the app, no separate setup.
@@ -70,8 +75,10 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **Upload Selected / Remove from VRCDN** — upload picks resize to fit VRChat's image-loader
   limits before going up; Remove deletes selected, already-uploaded photos from VRCDN's storage
   (confirmed first — there's no undo except re-uploading).
-- **Settings screen** — configure where the WD14 and CLIP model files live, each with a
-  one-click download straight from Hugging Face (see [Local model setup](#local-model-setup)).
+- **Settings screen** — configure where each local model's files live, with a one-click
+  download straight from Hugging Face that checks the current version first and skips
+  re-downloading if you already have it, and shows whether/when each model was last downloaded
+  (see [Local model setup](#local-model-setup)).
 
 ## Requirements
 
@@ -97,9 +104,22 @@ to index a folder of photos.
 
 ## Local model setup
 
-Two optional local ONNX models add features; the app works without either, just with those
-specific buttons disabled at startup (with a status-bar message saying so). The anime-face
-detector needs no setup at all — it's bundled with the app.
+Three optional local ONNX models add features; the app works without any of them, just with
+those specific buttons disabled at startup (with a status-bar message saying so). The
+anime-face detector needs no setup at all — it's bundled with the app.
+
+If a model folder isn't configured, it defaults to
+`%LOCALAPPDATA%\VrcPhotoManager\Models\<WD14|CLIP|Avatar>\` — stable across app updates and any
+future packaged release, unlike a path tied to the exe's own install location. (WD14 also
+still checks a `wd14-model` folder next to the exe first, for backward compatibility with
+existing installs that already rely on it.) Clearing a model folder's path and clicking
+**Save** resets it back to this default next time Settings opens.
+
+In **Settings**, each model section shows whether it's already downloaded and when. Clicking
+**Download** checks Hugging Face's current version first (a cheap request, not a re-download)
+and reports "Already up to date" instead of re-fetching if nothing changed. **Restart the app
+after a real download for it to actually load the new model** — models are loaded once at
+startup, so Settings downloading a file doesn't hot-swap it into the running session.
 
 ### WD14 (nudity/content classifier)
 
@@ -112,18 +132,6 @@ model.onnx           (~378 MB)
 selected_tags.csv    (~300 KB)
 ```
 
-**Easiest way:** open **Settings** in the app, browse to (or type) a folder for the model
-files, and click **Download Model Files** — it fetches both directly from Hugging Face and
-saves the folder for next time. Restart the app afterward for it to pick up the change.
-
-**Manual alternative:** download both files yourself into a `wd14-model` folder next to the
-built exe:
-
-```
-wd14-model\model.onnx
-wd14-model\selected_tags.csv
-```
-
 ### CLIP (face-match suggestions)
 
 Needed by **Suggest Faces**. One file from
@@ -134,9 +142,17 @@ Needed by **Suggest Faces**. One file from
 model.onnx           (~1.2 GB)
 ```
 
-Same as WD14: use **Settings** → **Download CLIP Model Files** to fetch it automatically into a
-folder of your choice, or download it yourself and point Settings at that folder. Unlike WD14,
-there's no bundled-default folder — a folder must be configured in Settings either way.
+### Avatar-base classifier
+
+Needed by **Classify Avatars**. Two files from
+[misonyah/vrc-avatar-classifier](https://huggingface.co/misonyah/vrc-avatar-classifier),
+trained on Booth.pm avatar-listing images (scraper tool lives outside this repo — training
+images are never published, only the resulting model weights):
+
+```
+model.onnx
+labels.txt
+```
 
 ## Planned work
 

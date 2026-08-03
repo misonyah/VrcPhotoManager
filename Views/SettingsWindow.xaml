@@ -1,7 +1,7 @@
 <Window x:Class="VrcPhotoManager.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="570" Width="580"
+        Title="Settings" Width="580" SizeToContent="Height"
         ResizeMode="NoResize">
     <StackPanel Margin="20">
         <TextBlock Text="WD14 Nudity Classifier Model" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
