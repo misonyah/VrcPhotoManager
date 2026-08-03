@@ -31,6 +31,10 @@ public class AvatarTypeService : IDisposable
 
     private readonly InferenceSession _session;
     private readonly string[] _labels;
+    // Guards session.Run() only - see WdTaggerService for why (concurrent Run() calls on a
+    // DirectML session caused a real native crash; Preprocess() is unaffected and safe to
+    // run concurrently across threads).
+    private readonly object _inferenceLock = new();
 
     private AvatarTypeService(InferenceSession session, string[] labels)
     {
@@ -90,9 +94,13 @@ public class AvatarTypeService : IDisposable
     public (string? Label, float Confidence) Classify(string imagePath)
     {
         float[] input = Preprocess(imagePath);
-        var tensor = new DenseTensor<float>(input, [1, 3, InputSize, InputSize]);
-        using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_session.InputMetadata.Keys.First(), tensor)]);
-        float[] logits = results.First().AsEnumerable<float>().ToArray();
+        float[] logits;
+        lock (_inferenceLock)
+        {
+            var tensor = new DenseTensor<float>(input, [1, 3, InputSize, InputSize]);
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_session.InputMetadata.Keys.First(), tensor)]);
+            logits = results.First().AsEnumerable<float>().ToArray();
+        }
         float[] probabilities = Softmax(logits);
 
         int bestIndex = 0;

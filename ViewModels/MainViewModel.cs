@@ -686,9 +686,14 @@ public class MainViewModel : INotifyPropertyChanged
         var pathById = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath);
         var needingEmbedding = _faces.GetDetectedFacesWithoutEmbedding();
         int embedded = 0;
-        foreach (var face in needingEmbedding)
+        // See ClassifyPhotosAsync for why bounded concurrency here is safe: ClipEmbeddingService
+        // serializes its own session.Run() calls internally, so only the CPU-bound
+        // preprocessing overlaps across threads.
+        using var embedSemaphore = new SemaphoreSlim(Environment.ProcessorCount);
+        var embedTasks = needingEmbedding.Select(async face =>
         {
-            if (!pathById.TryGetValue(face.PhotoId, out string? path)) continue;
+            if (!pathById.TryGetValue(face.PhotoId, out string? path)) return;
+            await embedSemaphore.WaitAsync();
             try
             {
                 float[] embedding = await Task.Run(() =>
@@ -699,13 +704,18 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 StatusMessage = $"Embedding failed for face {face.Id}: {ex.Message}";
             }
+            finally
+            {
+                embedSemaphore.Release();
+            }
 
             embedded++;
             if (embedded % 25 == 0 || embedded == needingEmbedding.Count)
             {
                 StatusMessage = $"Computing face embeddings... {embedded}/{needingEmbedding.Count}";
             }
-        }
+        });
+        await Task.WhenAll(embedTasks);
 
         StatusMessage = "Building reference centroids...";
         var persons = _faces.GetAllPersons();
@@ -898,8 +908,21 @@ public class MainViewModel : INotifyPropertyChanged
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has a rating."; return; }
 
         int done = 0;
-        foreach (var vm in toClassify)
+        // Bounded to core count: the actual bottleneck is CPU-side preprocessing (image
+        // decode + resize), not the GPU inference call itself - WdTaggerService serializes
+        // its own session.Run() calls internally now (seeing concurrent Run() calls on a
+        // DirectML session natively crash the process - see
+        // feedback-onnx-directml-concurrency-crash memory), so it's safe to run several
+        // photos' preprocessing concurrently here. Safe without explicit locking around the
+        // UI-touching code below despite the concurrency: nothing here uses
+        // ConfigureAwait(false), so every `await Task.Run(...)` resumes back on the UI
+        // thread's captured SynchronizationContext - the WPF Dispatcher serializes those
+        // resumptions, so the vm/_repo/StatusMessage/`done` updates never actually run at
+        // the same instant even though several photos' heavy work overlaps in the pool.
+        using var semaphore = new SemaphoreSlim(Environment.ProcessorCount);
+        var tasks = toClassify.Select(async vm =>
         {
+            await semaphore.WaitAsync();
             try
             {
                 string rating = await Task.Run(() => _tagger.ClassifyRating(vm.Model.LocalPath));
@@ -911,13 +934,18 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 StatusMessage = $"Classification failed for {vm.FileName}: {ex.Message}";
             }
+            finally
+            {
+                semaphore.Release();
+            }
 
             done++;
             if (done % 20 == 0 || done == toClassify.Count)
             {
                 StatusMessage = $"Classifying... {done}/{toClassify.Count}";
             }
-        }
+        });
+        await Task.WhenAll(tasks);
 
         StatusMessage = $"Classified {done} photos.";
         RebuildRows();
@@ -939,8 +967,13 @@ public class MainViewModel : INotifyPropertyChanged
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has an avatar-type result."; return; }
 
         int done = 0, failed = 0;
-        foreach (var vm in toClassify)
+        // See ClassifyPhotosAsync for why bounded concurrency here is safe: AvatarTypeService
+        // serializes its own session.Run() calls internally, so only the CPU-bound
+        // preprocessing overlaps across threads.
+        using var semaphore = new SemaphoreSlim(Environment.ProcessorCount);
+        var tasks = toClassify.Select(async vm =>
         {
+            await semaphore.WaitAsync();
             try
             {
                 var (label, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
@@ -954,13 +987,18 @@ public class MainViewModel : INotifyPropertyChanged
                 failed++;
                 StatusMessage = $"Avatar classification failed for {vm.FileName}: {ex.Message}";
             }
+            finally
+            {
+                semaphore.Release();
+            }
 
             done++;
             if (done % 20 == 0 || done == toClassify.Count)
             {
                 StatusMessage = $"Classifying avatars... {done}/{toClassify.Count}";
             }
-        }
+        });
+        await Task.WhenAll(tasks);
 
         StatusMessage = failed > 0
             ? $"Classified {done - failed} photos' avatar types ({failed} failed)."

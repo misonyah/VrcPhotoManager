@@ -27,6 +27,14 @@ public class WdTaggerService : IDisposable
 
     private readonly InferenceSession _session;
     private readonly int[] _ratingIndices;
+    // Guards session.Run() only - NOT Preprocess(), which is pure CPU work safe to run
+    // concurrently across threads. A DirectML-backed InferenceSession is not safe to call
+    // Run() on from multiple threads at once despite ONNX Runtime's general docs describing
+    // Run() as thread-safe (that guarantee is weaker in practice for GPU execution
+    // providers than for CPU) - a real concurrent-Run() attempt crashed the process natively
+    // (0xc0000409, bypassing all managed exception handling). See
+    // feedback-onnx-directml-concurrency-crash memory for the incident.
+    private readonly object _inferenceLock = new();
 
     private WdTaggerService(InferenceSession session, int[] ratingIndices)
     {
@@ -91,9 +99,13 @@ public class WdTaggerService : IDisposable
     public string ClassifyRating(string imagePath)
     {
         float[] input = Preprocess(imagePath);
-        var tensor = new DenseTensor<float>(input, [1, InputSize, InputSize, 3]);
-        using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_session.InputMetadata.Keys.First(), tensor)]);
-        var output = results.First().AsEnumerable<float>().ToArray();
+        float[] output;
+        lock (_inferenceLock)
+        {
+            var tensor = new DenseTensor<float>(input, [1, InputSize, InputSize, 3]);
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_session.InputMetadata.Keys.First(), tensor)]);
+            output = results.First().AsEnumerable<float>().ToArray();
+        }
 
         int bestSlot = 0;
         for (int i = 1; i < _ratingIndices.Length; i++)

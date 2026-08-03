@@ -31,6 +31,10 @@ public class ClipEmbeddingService
     private static readonly float[] Std = [0.5f, 0.5f, 0.5f];
 
     private readonly InferenceSession _session;
+    // Guards session.Run() only - see WdTaggerService for why (concurrent Run() calls on a
+    // DirectML session caused a real native crash; Preprocess() is unaffected and safe to
+    // run concurrently across threads).
+    private readonly object _inferenceLock = new();
 
     private ClipEmbeddingService(InferenceSession session)
     {
@@ -94,9 +98,13 @@ public class ClipEmbeddingService
     private float[] ComputeEmbeddingFromMat(Mat mat)
     {
         float[] input = Preprocess(mat);
-        var tensor = new DenseTensor<float>(input, [1, 3, InputSize, InputSize]);
-        using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_session.InputMetadata.Keys.First(), tensor)]);
-        float[] embedding = results.First().AsEnumerable<float>().ToArray();
+        float[] embedding;
+        lock (_inferenceLock)
+        {
+            var tensor = new DenseTensor<float>(input, [1, 3, InputSize, InputSize]);
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_session.InputMetadata.Keys.First(), tensor)]);
+            embedding = results.First().AsEnumerable<float>().ToArray();
+        }
 
         // L2-normalize so cosine similarity reduces to a plain dot product downstream.
         float norm = MathF.Sqrt(embedding.Sum(v => v * v));
