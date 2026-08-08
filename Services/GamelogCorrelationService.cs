@@ -44,15 +44,18 @@ public class GamelogCorrelationService : IDisposable
                 if (DateTime.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind, out var startUtc))
                 {
-                    string? worldName = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    string? worldName = reader.IsDBNull(2) || string.IsNullOrWhiteSpace(reader.GetString(2))
+                        ? null
+                        : reader.GetString(2);
                     _visits.Add((startUtc, reader.GetString(1), worldName));
                 }
             }
         }
 
         _avatarSwitches = [];
-        using (var cmd = _conn.CreateCommand())
+        try
         {
+            using var cmd = _conn.CreateCommand();
             cmd.CommandText = $"""
                 SELECT created_at, avatar_id FROM "usr{LocalAccountIdNoPrefix}_avatar_history"
                 ORDER BY created_at ASC
@@ -67,16 +70,26 @@ public class GamelogCorrelationService : IDisposable
                 }
             }
         }
+        catch (SqliteException)
+        {
+            // Table may not exist on a different VRCX version/install - degrade gracefully,
+            // same contract as the rest of this class (see class doc comment).
+        }
 
         _avatarNamesById = new Dictionary<string, string>();
-        using (var cmd = _conn.CreateCommand())
+        try
         {
+            using var cmd = _conn.CreateCommand();
             cmd.CommandText = "SELECT id, name FROM cache_avatar";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
                 if (!reader.IsDBNull(1)) _avatarNamesById[reader.GetString(0)] = reader.GetString(1);
             }
+        }
+        catch (SqliteException)
+        {
+            // Table may not exist on a different VRCX version/install - degrade gracefully.
         }
     }
 
@@ -141,8 +154,7 @@ public class GamelogCorrelationService : IDisposable
     {
         DateTime captureTimeUtc = DateTime.SpecifyKind(localCaptureTime, DateTimeKind.Local).ToUniversalTime();
 
-        var visitsForBracket = _visits.Select(v => (v.StartUtc, v.Location)).ToList();
-        int bracketIndex = FindBracketIndex(visitsForBracket, captureTimeUtc);
+        int bracketIndex = FindBracketIndex(_visits, v => v.StartUtc, captureTimeUtc);
         if (bracketIndex < 0) return null;
 
         var (windowStartUtc, location, _) = _visits[bracketIndex];
@@ -176,13 +188,16 @@ public class GamelogCorrelationService : IDisposable
     /// <summary>Index of the last entry whose StartUtc is at-or-before captureTimeUtc, or -1
     /// if none brackets it (list is empty, or captureTimeUtc predates every entry) - shared by
     /// every "what was true at this moment" lookup in this class (player presence, world name,
-    /// worn avatar), all keyed off a sorted-by-StartUtc list loaded once in the constructor.</summary>
-    private static int FindBracketIndex<T>(List<(DateTime StartUtc, T Value)> sorted, DateTime captureTimeUtc)
+    /// worn avatar), all keyed off a sorted-by-StartUtc list loaded once in the constructor.
+    /// Takes the source list directly plus a selector rather than a pre-projected copy, so
+    /// callers don't have to re-allocate a full copy of a potentially ~8000-row list on every
+    /// call (this runs once per candidate photo in a batch library run).</summary>
+    private static int FindBracketIndex<T>(List<T> sorted, Func<T, DateTime> startUtcSelector, DateTime captureTimeUtc)
     {
         int bracketIndex = -1;
         for (int i = 0; i < sorted.Count; i++)
         {
-            if (sorted[i].StartUtc <= captureTimeUtc) bracketIndex = i;
+            if (startUtcSelector(sorted[i]) <= captureTimeUtc) bracketIndex = i;
             else break;
         }
         return bracketIndex;
@@ -195,8 +210,7 @@ public class GamelogCorrelationService : IDisposable
     public string? TryGetWorldName(DateTime localCaptureTime)
     {
         DateTime captureTimeUtc = DateTime.SpecifyKind(localCaptureTime, DateTimeKind.Local).ToUniversalTime();
-        var visitsForBracket = _visits.Select(v => (v.StartUtc, v.WorldName)).ToList();
-        int bracketIndex = FindBracketIndex(visitsForBracket, captureTimeUtc);
+        int bracketIndex = FindBracketIndex(_visits, v => v.StartUtc, captureTimeUtc);
         return bracketIndex < 0 ? null : _visits[bracketIndex].WorldName;
     }
 
@@ -210,7 +224,7 @@ public class GamelogCorrelationService : IDisposable
     public (string AvatarId, string? AvatarName, DateTime? WornUntilUtc)? TryGetWornAvatar(DateTime localCaptureTime)
     {
         DateTime captureTimeUtc = DateTime.SpecifyKind(localCaptureTime, DateTimeKind.Local).ToUniversalTime();
-        int bracketIndex = FindBracketIndex(_avatarSwitches, captureTimeUtc);
+        int bracketIndex = FindBracketIndex(_avatarSwitches, s => s.StartUtc, captureTimeUtc);
         if (bracketIndex < 0) return null;
 
         string avatarId = _avatarSwitches[bracketIndex].AvatarId;

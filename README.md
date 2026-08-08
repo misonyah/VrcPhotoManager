@@ -52,7 +52,8 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
     review and confirm (or correct) them in Tag Faces.
   - **Cross-reference Gamelog** — a fallback for photos with no VRCX player data at all (e.g.
     taken by someone else nearby): infers who was likely present by matching the photo's
-    capture time against your own VRCX gamelog.
+    capture time against your own VRCX gamelog. Also backfills world name and worn avatar
+    when missing, using the same gamelog and avatar-history data.
   - **Sync VRC Players** — refreshes the local player cache and name-history aliases from
     VRCX's friends list and gamelog. Tag Faces' search reads this cache instead of querying
     VRCX live (which gets slow on a long play history), so run this occasionally to pick up
