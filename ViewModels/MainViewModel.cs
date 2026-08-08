@@ -805,7 +805,10 @@ public class MainViewModel : INotifyPropertyChanged
             }
 
             float combinedScore = confidence + avatarAffinityBoost + coOccurrenceBoost;
-            SuggestionTier tier = FaceMatcher.DetermineTier(combinedScore);
+            // AutoTagThreshold is calibrated against the margin scale (DifferentialMarginThreshold-based);
+            // a single-candidate raw similarity is a different scale entirely and would always exceed it,
+            // so single-candidate suggestions are capped at ConfirmPrompt regardless of score.
+            SuggestionTier tier = scored.Count > 1 ? FaceMatcher.DetermineTier(combinedScore) : SuggestionTier.ConfirmPrompt;
             FaceLabelSource source = tier == SuggestionTier.AutoTagged ? FaceLabelSource.AutoTagged : FaceLabelSource.EmbeddingMatch;
 
             _faces.UpsertFaceLabel(face.Id, best.PersonId, confirmed: false, source, combinedScore);

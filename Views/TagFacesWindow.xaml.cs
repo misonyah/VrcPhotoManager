@@ -753,12 +753,15 @@ public partial class TagFacesWindow : Window
                 : _faces.CreatePerson(item.EffectiveName);
 
         bool isNewVrcLink = item.ExistingPersonId is null && item.VrcUserId is not null;
+        _labelsByFaceId.TryGetValue(_activeFaceId, out var previousLabel);
+        bool pickedSameSuggestedPerson = previousLabel is not null && !previousLabel.Confirmed && previousLabel.PersonId == person.Id;
         ApplyTag(person);
         // Safe to call unconditionally even when this face never had a pending suggestion
         // (e.g. a plain untagged box tagged directly) - ResolveSuggestionLog no-ops in that
-        // case. When it does resolve a real pending suggestion, picking a different person
-        // here means the original suggestion was wrong, not confirmed.
-        _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.CorrectedToDifferentPerson);
+        // case. Picking the SAME person the suggestion already named (e.g. via the search box
+        // instead of the pinned "Confirm: {name}" entry) confirms it, not corrects it.
+        _faces.ResolveSuggestionLog(_activeFaceId,
+            pickedSameSuggestedPerson ? SuggestionOutcome.ConfirmedAsIs : SuggestionOutcome.CorrectedToDifferentPerson);
 
         if (isNewVrcLink && _profileLookup is not null)
         {
@@ -809,6 +812,10 @@ public partial class TagFacesWindow : Window
         _pendingManualFaceId = null;
         PersonPickerPopup.IsOpen = false;
         ApplyTag(_faces.CreatePerson(name));
+        // A brand-new person can never be the person a pending suggestion named, so this is
+        // always a correction (or a harmless no-op via ResolveSuggestionLog's Pending-only
+        // WHERE clause if this face had no pending suggestion at all).
+        _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.CorrectedToDifferentPerson);
     }
 
     /// <summary>

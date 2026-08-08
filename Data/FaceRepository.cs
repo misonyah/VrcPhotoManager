@@ -576,14 +576,15 @@ public class FaceRepository(string dbPath)
     }
 
     /// <summary>
-    /// Photo ids with at least one unconfirmed EmbeddingMatch suggestion at or above the given
-    /// confidence - drives the main window's "Min suggestion confidence" filter slider.
+    /// Photo ids with at least one unconfirmed EmbeddingMatch or AutoTagged suggestion at or
+    /// above the given confidence - drives the main window's "Min suggestion confidence" filter
+    /// slider.
     /// </summary>
     public HashSet<long> GetPhotoIdsWithSuggestionConfidenceAtLeast(float minConfidence)
     {
         using var context = NewContext();
         var faceIds = context.FaceLabels
-            .Where(l => !l.Confirmed && l.Source == FaceLabelSource.EmbeddingMatch && l.Confidence >= minConfidence)
+            .Where(l => !l.Confirmed && (l.Source == FaceLabelSource.EmbeddingMatch || l.Source == FaceLabelSource.AutoTagged) && l.Confidence >= minConfidence)
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces
             .Where(f => !f.Deleted && faceIds.Contains(f.Id))
@@ -668,15 +669,15 @@ public class FaceRepository(string dbPath)
 
     /// <summary>
     /// Faces eligible for a new suggestion: have an embedding already computed, and either no
-    /// label at all, or only an unconfirmed EmbeddingMatch label (safe to re-score and replace
-    /// as more reference data accumulates - never touches a confirmed label, or any label from
-    /// a source other than EmbeddingMatch).
+    /// label at all, or only an unconfirmed EmbeddingMatch or AutoTagged label (safe to re-score
+    /// and replace as more reference data accumulates - never touches a confirmed label, or any
+    /// label from a source other than EmbeddingMatch or AutoTagged).
     /// </summary>
     public List<DetectedFace> GetFacesNeedingSuggestion()
     {
         using var context = NewContext();
         var settledFaceIds = context.FaceLabels
-            .Where(l => l.Confirmed || l.Source != FaceLabelSource.EmbeddingMatch)
+            .Where(l => l.Confirmed || (l.Source != FaceLabelSource.EmbeddingMatch && l.Source != FaceLabelSource.AutoTagged))
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces.AsNoTracking()
             .Where(f => !f.Deleted && f.Embedding != null && !settledFaceIds.Contains(f.Id))
