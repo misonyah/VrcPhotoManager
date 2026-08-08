@@ -1,3 +1,5 @@
+using VrcPhotoManager.Models;
+
 namespace VrcPhotoManager.Services;
 
 /// <summary>
@@ -35,6 +37,34 @@ public static class FaceMatcher
     /// same calibration run, since a lone candidate needs to look convincingly like a match, not
     /// just "closest of a bad lot".</summary>
     public const float SingleCandidateThreshold = 0.70f;
+
+    /// <summary>Deliberately conservative placeholder values, favoring the existing
+    /// ConfirmPrompt tier over AutoTagged until real SuggestionLog data justifies raising
+    /// confidence in the combined score - see
+    /// docs/superpowers/specs/2026-08-06-avatar-face-combined-matching-design.md. Not derived
+    /// from any calibration run (unlike DifferentialMarginThreshold/SingleCandidateThreshold
+    /// above); expect to revise these once SuggestionLog has real outcomes to query.</summary>
+    public const float AvatarAffinityBoost = 0.05f;
+    public const float CoOccurrenceBoost = 0.05f;
+
+    /// <summary>Minimum number of photos two people must already be confirmed together in
+    /// before a co-occurrence boost applies - avoids boosting off a single shared photo, same
+    /// spirit as MinReferenceEmbeddings requiring several references before trusting a
+    /// centroid.</summary>
+    public const int MinCoOccurrenceCount = 3;
+
+    /// <summary>Combined score (face similarity + boosts) at or above this auto-tags without a
+    /// confirm click, instead of the existing ConfirmPrompt behavior. Set comfortably above
+    /// DifferentialMarginThreshold (0.15) plus the maximum possible combined boost (0.10) so a
+    /// face-similarity match that only just cleared the base bar can't reach AutoTagged on
+    /// boosts alone - it still needs to be a genuinely strong match first.</summary>
+    public const float AutoTagThreshold = 0.30f;
+
+    /// <summary>Only ever called for a face that already passed the existing
+    /// SingleCandidateThreshold/DifferentialMarginThreshold accept check - always returns a real
+    /// tier, never "no suggestion" (that decision already happened before this is called).</summary>
+    public static SuggestionTier DetermineTier(float combinedScore) =>
+        combinedScore >= AutoTagThreshold ? SuggestionTier.AutoTagged : SuggestionTier.ConfirmPrompt;
 
     /// <summary>Null if there aren't enough references yet - caller should skip this person
     /// for suggestions this pass, not suggest off an unreliable centroid.</summary>
