@@ -5,6 +5,7 @@ public enum FaceLabelSource
     ExifElimination,
     EmbeddingMatch,
     Manual,
+    AutoTagged,
 }
 
 public class FaceLabel

@@ -144,6 +144,87 @@ public class FaceRepository(string dbPath)
         PruneIfOrphanedManualPerson(context, previousPersonId);
     }
 
+    /// <summary>Writes a new suggestion log entry, or updates the existing Pending row for this
+    /// face in place if one already exists - re-running Suggest Faces on an already-suggested,
+    /// not-yet-reviewed face refreshes its scores instead of accumulating duplicate rows, matching
+    /// how UpsertFaceLabel already replaces rather than accumulates.</summary>
+    public void UpsertSuggestionLog(long detectedFaceId, long suggestedPersonId, float combinedScore,
+        float faceSimilarityScore, float avatarAffinityBoost, float coOccurrenceBoost, SuggestionTier tier)
+    {
+        using var context = NewContext();
+        var pending = context.SuggestionLogs
+            .FirstOrDefault(s => s.DetectedFaceId == detectedFaceId && s.Outcome == SuggestionOutcome.Pending);
+        if (pending is not null)
+        {
+            pending.SuggestedPersonId = suggestedPersonId;
+            pending.CombinedScore = combinedScore;
+            pending.FaceSimilarityScore = faceSimilarityScore;
+            pending.AvatarAffinityBoost = avatarAffinityBoost;
+            pending.CoOccurrenceBoost = coOccurrenceBoost;
+            pending.Tier = tier;
+            pending.CreatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            context.SuggestionLogs.Add(new SuggestionLog
+            {
+                DetectedFaceId = detectedFaceId,
+                SuggestedPersonId = suggestedPersonId,
+                CombinedScore = combinedScore,
+                FaceSimilarityScore = faceSimilarityScore,
+                AvatarAffinityBoost = avatarAffinityBoost,
+                CoOccurrenceBoost = coOccurrenceBoost,
+                Tier = tier,
+            });
+        }
+        context.SaveChanges();
+    }
+
+    /// <summary>Marks the Pending suggestion log for this face (if any) as resolved - called
+    /// whenever a human reviews a face in TagFacesWindow. Safe to call unconditionally on every
+    /// tag-setting action: the WHERE clause makes this a no-op when the face never had a pending
+    /// suggestion (e.g. it was a plain untagged box the user tagged directly).</summary>
+    public void ResolveSuggestionLog(long detectedFaceId, SuggestionOutcome outcome)
+    {
+        using var context = NewContext();
+        context.SuggestionLogs
+            .Where(s => s.DetectedFaceId == detectedFaceId && s.Outcome == SuggestionOutcome.Pending)
+            .ExecuteUpdate(s => s
+                .SetProperty(l => l.Outcome, outcome)
+                .SetProperty(l => l.OutcomeAt, DateTime.UtcNow));
+    }
+
+    /// <summary>Distinct PersonIds with a CONFIRMED face label on some other (non-deleted)
+    /// detected face in the same photo - the co-occurrence boost's "who else is already
+    /// confirmed here" check. Excludes the face currently being scored.</summary>
+    public List<long> GetConfirmedPersonIdsInPhoto(long photoId, long excludingDetectedFaceId)
+    {
+        using var context = NewContext();
+        var faceIdsInPhoto = context.DetectedFaces
+            .Where(f => f.PhotoId == photoId && !f.Deleted && f.Id != excludingDetectedFaceId)
+            .Select(f => f.Id);
+        return context.FaceLabels
+            .Where(l => l.Confirmed && l.PersonId != null && faceIdsInPhoto.Contains(l.DetectedFaceId))
+            .Select(l => l.PersonId!.Value)
+            .Distinct()
+            .ToList();
+    }
+
+    /// <summary>Count of non-deleted detected faces in this photo (excluding the one currently
+    /// being scored) that are still undetermined - no label at all, or only an unconfirmed
+    /// EmbeddingMatch/AutoTagged suggestion. Used to enforce "co-occurrence only applies when
+    /// exactly one other undetermined face remains" (this count must be zero).</summary>
+    public int GetUndeterminedFaceCountInPhoto(long photoId, long excludingDetectedFaceId)
+    {
+        using var context = NewContext();
+        var settledFaceIds = context.FaceLabels
+            .Where(l => l.Confirmed)
+            .Select(l => l.DetectedFaceId);
+        return context.DetectedFaces
+            .Count(f => f.PhotoId == photoId && !f.Deleted && f.Id != excludingDetectedFaceId
+                && !settledFaceIds.Contains(f.Id));
+    }
+
     public void DeleteFaceLabel(long detectedFaceId)
     {
         using var context = NewContext();

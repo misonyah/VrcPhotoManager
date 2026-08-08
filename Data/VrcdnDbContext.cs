@@ -11,6 +11,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<PersonReferencePhoto> PersonReferencePhotos => Set<PersonReferencePhoto>();
     public DbSet<DetectedFace> DetectedFaces => Set<DetectedFace>();
     public DbSet<FaceLabel> FaceLabels => Set<FaceLabel>();
+    public DbSet<SuggestionLog> SuggestionLogs => Set<SuggestionLog>();
     public DbSet<PhotoPlayer> PhotoPlayers => Set<PhotoPlayer>();
     public DbSet<GamelogInferredPlayer> GamelogInferredPlayers => Set<GamelogInferredPlayer>();
     public DbSet<KnownVrcUser> KnownVrcUsers => Set<KnownVrcUser>();
@@ -129,6 +130,25 @@ public class VrcdnDbContext : DbContext
             entity.Property(l => l.Source).HasColumnName("source").HasConversion<string>();
             entity.Property(l => l.Confirmed).HasColumnName("confirmed");
             entity.Property(l => l.CreatedAt).HasColumnName("created_at");
+        });
+
+        modelBuilder.Entity<SuggestionLog>(entity =>
+        {
+            entity.ToTable("suggestion_logs");
+            entity.HasKey(s => s.Id);
+            entity.HasIndex(s => s.DetectedFaceId);
+
+            entity.Property(s => s.Id).HasColumnName("id");
+            entity.Property(s => s.DetectedFaceId).HasColumnName("detected_face_id");
+            entity.Property(s => s.SuggestedPersonId).HasColumnName("suggested_person_id");
+            entity.Property(s => s.CombinedScore).HasColumnName("combined_score");
+            entity.Property(s => s.FaceSimilarityScore).HasColumnName("face_similarity_score");
+            entity.Property(s => s.AvatarAffinityBoost).HasColumnName("avatar_affinity_boost");
+            entity.Property(s => s.CoOccurrenceBoost).HasColumnName("co_occurrence_boost");
+            entity.Property(s => s.Tier).HasColumnName("tier").HasConversion<string>();
+            entity.Property(s => s.CreatedAt).HasColumnName("created_at");
+            entity.Property(s => s.Outcome).HasColumnName("outcome").HasConversion<string>();
+            entity.Property(s => s.OutcomeAt).HasColumnName("outcome_at");
         });
 
         modelBuilder.Entity<PhotoPlayer>(entity =>
