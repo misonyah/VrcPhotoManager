@@ -68,7 +68,7 @@ public partial class TagFacesWindow : Window
     /// use; RawName is null (falls back to DisplayText, which IS the raw name) for items that
     /// were never given a suffix in the first place.
     /// </summary>
-    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsNotAFace = false, string? RawName = null)
+    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsConfirmAutoTag = false, bool IsNotAFace = false, string? RawName = null)
     {
         public string EffectiveName => RawName ?? DisplayText;
 
@@ -451,6 +451,12 @@ public partial class TagFacesWindow : Window
             bool confirmed = label is not null && label.Confirmed && label.PersonId is not null;
             bool suggested = label is not null && !label.Confirmed
                 && label.Source == FaceLabelSource.EmbeddingMatch && label.PersonId is not null;
+            // High-confidence combined-score suggestion (avatar/co-occurrence boosts pushed it
+            // past FaceMatcher.AutoTagThreshold) - still Confirmed=false like `suggested` above
+            // (a human must still open this photo before it's treated as reviewed or feeds
+            // future centroids/boosts), but shown with more visual confidence than a guess.
+            bool autoTagged = label is not null && !label.Confirmed
+                && label.Source == FaceLabelSource.AutoTagged && label.PersonId is not null;
             // Confirmed=true with PersonId=null is the "<unknown>" case (a deliberately marked
             // false-positive detection) - distinct from having no FaceLabel row at all (never
             // reviewed), which is what the default yellow/untagged state below still means.
@@ -467,6 +473,13 @@ public partial class TagFacesWindow : Window
             {
                 personName = $"? {suggestedPerson.Name}";
                 boxColor = Brushes.Orange;
+            }
+            else if (autoTagged && _personsById.TryGetValue(label!.PersonId!.Value, out var autoTaggedPerson))
+            {
+                // Plain name, no "?" prefix - unlike `suggested`, this is shown with confidence
+                // (not marked as a guess), even though Confirmed is still false underneath.
+                personName = autoTaggedPerson.Name;
+                boxColor = Brushes.DeepSkyBlue;
             }
             else if (markedNotAFace)
             {
@@ -654,6 +667,16 @@ public partial class TagFacesWindow : Window
             items.Add(new PickerItem($"Confirm: {suggestedPerson.Name}", suggestedPerson.VrcUserId, suggestedPerson.Id, IsConfirmSuggestion: true));
         }
 
+        // isSuggestion and isAutoTagged are mutually exclusive - a face has exactly one
+        // FaceLabel row with exactly one Source, so at most one of these two picker entries is
+        // ever added.
+        bool isAutoTagged = existing is not null && !existing.Confirmed
+            && existing.Source == FaceLabelSource.AutoTagged && existing.PersonId is not null;
+        if (isAutoTagged && _personsById.TryGetValue(existing!.PersonId!.Value, out var autoTaggedPerson))
+        {
+            items.Add(new PickerItem($"Confirm: {autoTaggedPerson.Name}", autoTaggedPerson.VrcUserId, autoTaggedPerson.Id, IsConfirmAutoTag: true));
+        }
+
         items.Add(new PickerItem("<unknown> (wrongly detected face)", null, null, IsNotAFace: true));
 
         foreach (var player in _photoPlayers)
@@ -703,12 +726,21 @@ public partial class TagFacesWindow : Window
         if (item.IsConfirmSuggestion)
         {
             ApplyTag(_personsById[item.ExistingPersonId!.Value], FaceLabelSource.EmbeddingMatch);
+            _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.ConfirmedAsIs);
+            return;
+        }
+
+        if (item.IsConfirmAutoTag)
+        {
+            ApplyTag(_personsById[item.ExistingPersonId!.Value], FaceLabelSource.AutoTagged);
+            _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.ConfirmedAsIs);
             return;
         }
 
         if (item.IsNotAFace)
         {
             _faces.UpsertFaceLabel(_activeFaceId, null, confirmed: true, FaceLabelSource.Manual);
+            _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.Ignored);
             LoadFaceData();
             RedrawBoxes();
             return;
@@ -722,6 +754,11 @@ public partial class TagFacesWindow : Window
 
         bool isNewVrcLink = item.ExistingPersonId is null && item.VrcUserId is not null;
         ApplyTag(person);
+        // Safe to call unconditionally even when this face never had a pending suggestion
+        // (e.g. a plain untagged box tagged directly) - ResolveSuggestionLog no-ops in that
+        // case. When it does resolve a real pending suggestion, picking a different person
+        // here means the original suggestion was wrong, not confirmed.
+        _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.CorrectedToDifferentPerson);
 
         if (isNewVrcLink && _profileLookup is not null)
         {
@@ -938,6 +975,7 @@ public partial class TagFacesWindow : Window
     {
         _pendingManualFaceId = null; // explicit delete, not the auto-cleanup path
         PersonPickerPopup.IsOpen = false;
+        _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.Ignored);
         _faces.DeleteDetectedFace(_activeFaceId);
         LoadFaceData();
         RedrawBoxes();
