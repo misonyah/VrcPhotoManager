@@ -22,7 +22,7 @@ public class GamelogCorrelationService : IDisposable
     private const string LocalAccountIdNoPrefix = "f9065286b1f24b7fa00815fc2a117546";
 
     private readonly SqliteConnection _conn;
-    private readonly List<(DateTime StartUtc, string Location, string? WorldName)> _visits;
+    private readonly List<(DateTime StartUtc, string Location, string? WorldName, long TimeMs)> _visits;
     private readonly List<(DateTime StartUtc, string AvatarId)> _avatarSwitches;
     private readonly Dictionary<string, string> _avatarNamesById;
 
@@ -37,7 +37,7 @@ public class GamelogCorrelationService : IDisposable
         _visits = [];
         using (var cmd = _conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT created_at, location, world_name FROM gamelog_location ORDER BY created_at ASC";
+            cmd.CommandText = "SELECT created_at, location, world_name, time FROM gamelog_location ORDER BY created_at ASC";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
@@ -47,7 +47,7 @@ public class GamelogCorrelationService : IDisposable
                     string? worldName = reader.IsDBNull(2) || string.IsNullOrWhiteSpace(reader.GetString(2))
                         ? null
                         : reader.GetString(2);
-                    _visits.Add((startUtc, reader.GetString(1), worldName));
+                    _visits.Add((startUtc, reader.GetString(1), worldName, reader.GetInt64(3)));
                 }
             }
         }
@@ -157,7 +157,7 @@ public class GamelogCorrelationService : IDisposable
         int bracketIndex = FindBracketIndex(_visits, v => v.StartUtc, captureTimeUtc);
         if (bracketIndex < 0) return null;
 
-        var (windowStartUtc, location, _) = _visits[bracketIndex];
+        var (windowStartUtc, location, _, _) = _visits[bracketIndex];
 
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
@@ -204,14 +204,20 @@ public class GamelogCorrelationService : IDisposable
     }
 
     /// <summary>World name recorded for whichever visit brackets this capture time, or null if
-    /// no visit brackets it (same "no data, not a guess" convention as FindPresentPlayers) or
-    /// the bracketed visit itself has no recorded world name (a normal gap in gamelog_location,
-    /// not an error).</summary>
+    /// no visit brackets it (same "no data, not a guess" convention as FindPresentPlayers), the
+    /// bracketed visit itself has no recorded world name (a normal gap in gamelog_location, not
+    /// an error), or the capture time falls after that visit's own recorded duration (StartUtc
+    /// + TimeMs) - i.e. the account had already left by then, so attributing that world would
+    /// be a stale guess, not a fact.</summary>
     public string? TryGetWorldName(DateTime localCaptureTime)
     {
         DateTime captureTimeUtc = DateTime.SpecifyKind(localCaptureTime, DateTimeKind.Local).ToUniversalTime();
         int bracketIndex = FindBracketIndex(_visits, v => v.StartUtc, captureTimeUtc);
-        return bracketIndex < 0 ? null : _visits[bracketIndex].WorldName;
+        if (bracketIndex < 0) return null;
+
+        var visit = _visits[bracketIndex];
+        DateTime visitEndUtc = visit.StartUtc.AddMilliseconds(visit.TimeMs);
+        return captureTimeUtc <= visitEndUtc ? visit.WorldName : null;
     }
 
     /// <summary>The local account's avatar at the moment brackated by this capture time, or
