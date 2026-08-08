@@ -77,12 +77,12 @@ public partial class TagFacesWindow : Window
         /// entries, not a bare VRCX player/friend row that hasn't been linked to a
         /// RegisteredPerson yet, and not a person who already has a known VRC username (their
         /// name comes from VRCX, so editing it here would just drift out of sync).</summary>
-        public bool CanRename => ExistingPersonId is not null && VrcUserId is null && !IsConfirmSuggestion && !IsNotAFace;
+        public bool CanRename => ExistingPersonId is not null && VrcUserId is null && !IsConfirmSuggestion && !IsConfirmAutoTag && !IsNotAFace;
 
         /// <summary>The "+" alias button needs a real VRC user id to key aliases off of -
         /// available much more broadly than CanRename (any friend/gamelog/cached/registered
         /// entry with a VrcUserId, not just already-registered manual people).</summary>
-        public bool CanEditAliases => VrcUserId is not null && !IsConfirmSuggestion && !IsNotAFace;
+        public bool CanEditAliases => VrcUserId is not null && !IsConfirmSuggestion && !IsConfirmAutoTag && !IsNotAFace;
 
         /// <summary>Populated after construction (see WithNoteTooltips) from a live,
         /// per-popup VRCX lookup - not a constructor parameter, since none of the 8 call
