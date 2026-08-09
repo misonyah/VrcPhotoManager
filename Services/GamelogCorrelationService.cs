@@ -23,8 +23,6 @@ public class GamelogCorrelationService : IDisposable
 
     private readonly SqliteConnection _conn;
     private readonly List<(DateTime StartUtc, string Location, string? WorldName, long TimeMs)> _visits;
-    private readonly List<(DateTime StartUtc, string AvatarId)> _avatarSwitches;
-    private readonly Dictionary<string, string> _avatarNamesById;
 
     /// <summary>Loads every recorded visit once up front (small table, a few thousand rows at
     /// most) rather than per-photo - this service is built for a batch run across the whole
@@ -50,46 +48,6 @@ public class GamelogCorrelationService : IDisposable
                     _visits.Add((startUtc, reader.GetString(1), worldName, reader.GetInt64(3)));
                 }
             }
-        }
-
-        _avatarSwitches = [];
-        try
-        {
-            using var cmd = _conn.CreateCommand();
-            cmd.CommandText = $"""
-                SELECT created_at, avatar_id FROM "usr{LocalAccountIdNoPrefix}_avatar_history"
-                ORDER BY created_at ASC
-                """;
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                if (DateTime.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
-                    DateTimeStyles.RoundtripKind, out var startUtc))
-                {
-                    _avatarSwitches.Add((startUtc, reader.GetString(1)));
-                }
-            }
-        }
-        catch (SqliteException)
-        {
-            // Table may not exist on a different VRCX version/install - degrade gracefully,
-            // same contract as the rest of this class (see class doc comment).
-        }
-
-        _avatarNamesById = new Dictionary<string, string>();
-        try
-        {
-            using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "SELECT id, name FROM cache_avatar";
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                if (!reader.IsDBNull(1)) _avatarNamesById[reader.GetString(0)] = reader.GetString(1);
-            }
-        }
-        catch (SqliteException)
-        {
-            // Table may not exist on a different VRCX version/install - degrade gracefully.
         }
     }
 
@@ -187,8 +145,8 @@ public class GamelogCorrelationService : IDisposable
 
     /// <summary>Index of the last entry whose StartUtc is at-or-before captureTimeUtc, or -1
     /// if none brackets it (list is empty, or captureTimeUtc predates every entry) - shared by
-    /// every "what was true at this moment" lookup in this class (player presence, world name,
-    /// worn avatar), all keyed off a sorted-by-StartUtc list loaded once in the constructor.
+    /// every "what was true at this moment" lookup in this class (player presence, world name),
+    /// all keyed off a sorted-by-StartUtc list loaded once in the constructor.
     /// Takes the source list directly plus a selector rather than a pre-projected copy, so
     /// callers don't have to re-allocate a full copy of a potentially ~8000-row list on every
     /// call (this runs once per candidate photo in a batch library run).</summary>
@@ -220,24 +178,4 @@ public class GamelogCorrelationService : IDisposable
         return captureTimeUtc <= visitEndUtc ? visit.WorldName : null;
     }
 
-    /// <summary>The local account's avatar at the moment brackated by this capture time, or
-    /// null if no switch brackets it. AvatarName is null if VRCX's own avatar cache doesn't
-    /// have this id (a normal gap, not an error). WornUntilUtc is the next recorded switch's
-    /// timestamp, or null if this is the most recent switch VRCX has ever recorded (i.e. still
-    /// worn as of the last time VRCX observed a change) - gives the same upper-bound
-    /// information the standalone vrc-photo-avatar skill reports, without needing separate
-    /// boundary-uncertainty logic.</summary>
-    public (string AvatarId, string? AvatarName, DateTime? WornUntilUtc)? TryGetWornAvatar(DateTime localCaptureTime)
-    {
-        DateTime captureTimeUtc = DateTime.SpecifyKind(localCaptureTime, DateTimeKind.Local).ToUniversalTime();
-        int bracketIndex = FindBracketIndex(_avatarSwitches, s => s.StartUtc, captureTimeUtc);
-        if (bracketIndex < 0) return null;
-
-        string avatarId = _avatarSwitches[bracketIndex].AvatarId;
-        string? avatarName = _avatarNamesById.TryGetValue(avatarId, out var name) ? name : null;
-        DateTime? wornUntilUtc = bracketIndex + 1 < _avatarSwitches.Count
-            ? _avatarSwitches[bracketIndex + 1].StartUtc
-            : null;
-        return (avatarId, avatarName, wornUntilUtc);
-    }
 }
