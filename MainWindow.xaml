@@ -89,6 +89,9 @@
             <CheckBox Content="Tagged only" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Only show photos where you've confirmed a face tag for this person.&#10;Turn off to also include photos where VRCX just recorded them as present." />
+            <CheckBox Content="Own photos only" IsChecked="{Binding OwnPhotosOnlyFilter}" IsEnabled="{Binding CanFilterOwnPhotosOnly}"
+                      VerticalAlignment="Center" Margin="0,0,16,0"
+                      ToolTip="Only show photos VRChat itself recorded you as the photographer for (via embedded PNG metadata).&#10;Excludes photos taken by someone else in the same instance, even if they ended up in your library." />
 
             <TextBlock Text="Faces:" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox ItemsSource="{Binding FaceCountFilterOptions}" SelectedItem="{Binding FaceCountFilter}" Width="70" Margin="0,0,16,0"
