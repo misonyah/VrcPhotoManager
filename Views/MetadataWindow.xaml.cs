@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager.Views;
@@ -11,6 +12,7 @@ public partial class MetadataWindow : Window
         DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
         DialogWindowBehavior.CloseOnDeactivated(this);
         DialogWindowBehavior.OpenNearCursor(this);
+        PreviewKeyDown += MetadataWindow_PreviewKeyDown;
         var m = photo.Model;
         MetadataText.Text = string.Join("\n", new[]
         {
@@ -34,4 +36,14 @@ public partial class MetadataWindow : Window
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>Escape closes the window outright - same rationale/precedent as
+    /// TagFacesWindow_PreviewKeyDown, and nothing else in this read-only window needs Escape
+    /// for anything else.</summary>
+    private void MetadataWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        Close();
+    }
 }
