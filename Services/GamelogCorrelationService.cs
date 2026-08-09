@@ -177,5 +177,4 @@ public class GamelogCorrelationService : IDisposable
         DateTime visitEndUtc = visit.StartUtc.AddMilliseconds(visit.TimeMs);
         return captureTimeUtc <= visitEndUtc ? visit.WorldName : null;
     }
-
 }

@@ -588,13 +588,11 @@ public class MainViewModel : INotifyPropertyChanged
     /// cross-referencing the local VRCX account's own gamelog instead. See
     /// GamelogCorrelationService and
     /// docs/superpowers/specs/2026-08-01-gamelog-player-inference-design.md (players) and
-    /// docs/superpowers/specs/2026-08-02-gamelog-world-and-avatar-backfill-design.md (world -
-    /// note: that spec's avatar half was removed, see
-    /// docs/superpowers/specs/2026-08-09-remove-worn-avatar-backfill-design.md). Deliberately
-    /// opt-in via its own button rather than folded into Scan Library: it depends on this
-    /// account's gamelog actually covering the photo's capture time, which won't always be true
-    /// (VRCX closed, a gap in the log, a photo from before this account's records start), so it
-    /// shouldn't run silently as part of the normal scan.
+    /// docs/superpowers/specs/2026-08-02-gamelog-world-and-avatar-backfill-design.md (world).
+    /// Deliberately opt-in via its own button rather than folded into Scan Library: it depends
+    /// on this account's gamelog actually covering the photo's capture time, which won't always
+    /// be true (VRCX closed, a gap in the log, a photo from before this account's records
+    /// start), so it shouldn't run silently as part of the normal scan.
     /// </summary>
     private async Task CrossReferenceGamelogAsync()
     {

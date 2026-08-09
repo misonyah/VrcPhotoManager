@@ -1,5 +1,4 @@
 using System.Windows;
-using VrcPhotoManager.Models;
 using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager.Views;
