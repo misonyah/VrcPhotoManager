@@ -86,22 +86,25 @@
                     </ListBox>
                 </Border>
             </Popup>
-            <CheckBox Content="Tagged only" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
+            <CheckBox Content="Tagged" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Only show photos where you've confirmed a face tag for this person.&#10;Turn off to also include photos where VRCX just recorded them as present." />
-            <CheckBox Content="Own photos only" IsChecked="{Binding OwnPhotosOnlyFilter}" IsEnabled="{Binding CanFilterOwnPhotosOnly}"
+            <CheckBox Content="Own" IsChecked="{Binding OwnPhotosOnlyFilter}" IsEnabled="{Binding CanFilterOwnPhotosOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Only show photos VRChat itself recorded you as the photographer for (via embedded PNG metadata).&#10;Excludes photos taken by someone else in the same instance, even if they ended up in your library." />
 
-            <TextBlock Text="Faces:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBlock Text="Faces:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Show only photos with (or without) a detected face.&#10;Run Detect Faces first to populate this." />
             <ComboBox ItemsSource="{Binding FaceCountFilterOptions}" SelectedItem="{Binding FaceCountFilter}" Width="70" Margin="0,0,16,0"
                       ToolTip="Show only photos with (or without) a detected face.&#10;Run Detect Faces first to populate this." />
 
-            <TextBlock Text="People in world:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBlock Text="People:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Filter by how many people VRCX recorded in the instance when the photo was taken.&#10;This is VRCX's headcount, not the number of detected faces." />
             <ComboBox ItemsSource="{Binding PlayerCountFilterOptions}" SelectedItem="{Binding PlayerCountFilter}" Width="130" Margin="0,0,16,0"
                       ToolTip="Filter by how many people VRCX recorded in the instance when the photo was taken.&#10;This is VRCX's headcount, not the number of detected faces." />
 
-            <TextBlock Text="Min suggestion confidence:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBlock Text="Confidence:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most good matches fall between about 0.15 and 0.5, so the slider is scaled to that range." />
             <!-- Real stored confidence values are NOT 0-1: for the common case (2+ registered
                  people), it's the similarity margin over the runner-up candidate, which only
                  ever gets stored above its 0.15 acceptance floor and rarely exceeds ~0.5 even
@@ -110,9 +113,6 @@
             <Slider Minimum="0" Maximum="0.5" Value="{Binding MinSuggestionConfidence}" Width="120" VerticalAlignment="Center"
                     ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most good matches fall between about 0.15 and 0.5, so the slider is scaled to that range." />
             <TextBlock Text="{Binding MinSuggestionConfidenceLabel}" VerticalAlignment="Center" Width="32" Margin="4,0,16,0" />
-
-            <TextBlock Text="Sort:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Width="150" Margin="0,0,16,0" />
         </StackPanel>
 
         <!-- Photo grid (left) + action buttons (right). -->
@@ -283,9 +283,12 @@
                 <Button Content="About" Click="AboutButton_Click" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="About this app, and its VRChat/VRCDN disclaimer." />
 
-                <!-- Not a filter (doesn't change which photos show, just how big they render),
-                     so it lives here instead of the filter bar. -->
+                <!-- Neither of these changes which photos show (Sort just reorders, Thumbnail
+                     size just changes how big they render), so they live here instead of the
+                     filter bar. -->
                 <Separator Margin="0,0,0,8" />
+                <TextBlock Text="Sort:" Margin="0,0,0,4" />
+                <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Margin="0,0,0,8" />
                 <TextBlock Text="Thumbnail size:" Margin="0,0,0,4" />
                 <Slider Minimum="80" Maximum="400" Value="{Binding ThumbnailSize}" />
             </StackPanel>
