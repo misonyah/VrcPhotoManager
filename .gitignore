@@ -3,6 +3,10 @@ obj/
 *.user
 .vs/
 
+# Transient WPF markup-compile temp project - normally lives under obj/, occasionally leaks
+# to the repo root during a build.
+*_wpftmp.csproj
+
 # Local app data (db, thumbnails cache) lives in %LocalAppData%\VrcdnManager, not here -
 # deliberately still the pre-rename folder name, so existing installs keep their database.
 
