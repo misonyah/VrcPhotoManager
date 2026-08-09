@@ -146,7 +146,7 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string MinSuggestionConfidenceLabel => _minSuggestionConfidence <= 0 ? "Off" : _minSuggestionConfidence.ToString("F2");
 
-    private string _sortOption = "Filename (A-Z)";
+    private string _sortOption = "Date (Newest First)";
     public string SortOption
     {
         get => _sortOption;
