@@ -52,9 +52,6 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.AuthorDisplayName).HasColumnName("author_display_name");
             entity.Property(p => p.WorldName).HasColumnName("world_name");
             entity.Property(p => p.WorldNameInferred).HasColumnName("world_name_inferred");
-            entity.Property(p => p.WornAvatarId).HasColumnName("worn_avatar_id");
-            entity.Property(p => p.WornAvatarName).HasColumnName("worn_avatar_name");
-            entity.Property(p => p.WornAvatarUntil).HasColumnName("worn_avatar_until");
             entity.Property(p => p.PlayerNames).HasColumnName("player_names");
             entity.Property(p => p.Selected).HasColumnName("selected");
             entity.Property(p => p.RemoteStatus).HasColumnName("remote_status").HasConversion<string>();

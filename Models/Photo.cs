@@ -50,16 +50,6 @@ public class Photo
     /// spirit as GamelogInferredPlayer being a separate table from PhotoPlayer.</summary>
     public bool WorldNameInferred { get; set; }
 
-    /// <summary>The local account's avatar at capture time, from GamelogCorrelationService's
-    /// cross-reference of VRCX's own avatar-history log - always inferred (there is no
-    /// embedded-metadata source for this, unlike WorldName), so no separate "source" flag is
-    /// needed. WornAvatarName is null if VRCX's avatar cache doesn't have a name for this id.
-    /// WornAvatarUntil is the next recorded avatar switch (UTC) - null means "still worn as of
-    /// VRCX's most recent recorded switch", not "unknown".</summary>
-    public string? WornAvatarId { get; set; }
-    public string? WornAvatarName { get; set; }
-    public DateTime? WornAvatarUntil { get; set; }
-
     /// <summary>Display-ready text, one player per line as "DisplayName {UserId}" - flat text
     /// is enough for both display and substring filtering (the actual filter use case)
     /// without needing a join table for that. The same ids also live in the separate

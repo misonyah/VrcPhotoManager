@@ -238,14 +238,6 @@ public class PhotoRepository
         return context.Photos.Where(p => p.WorldName == null).Select(p => p.Id).ToHashSet();
     }
 
-    /// <summary>Photo ids with no worn-avatar data yet - eligible set for the gamelog
-    /// worn-avatar fallback (GamelogCorrelationService.TryGetWornAvatar).</summary>
-    public HashSet<long> GetPhotoIdsMissingWornAvatar()
-    {
-        using var context = NewContext();
-        return context.Photos.Where(p => p.WornAvatarId == null).Select(p => p.Id).ToHashSet();
-    }
-
     /// <summary>Sets WorldName from the gamelog fallback and marks it as inferred (as opposed
     /// to VRChat's own embedded PNG metadata) - see Photo.WorldNameInferred.</summary>
     public void SetWorldNameInferred(long photoId, string worldName)
@@ -254,17 +246,6 @@ public class PhotoRepository
         var photo = context.Photos.First(p => p.Id == photoId);
         photo.WorldName = worldName;
         photo.WorldNameInferred = true;
-        context.SaveChanges();
-    }
-
-    /// <summary>Sets the worn-avatar fields from the gamelog fallback.</summary>
-    public void SetWornAvatar(long photoId, string avatarId, string? avatarName, DateTime? wornUntilUtc)
-    {
-        using var context = NewContext();
-        var photo = context.Photos.First(p => p.Id == photoId);
-        photo.WornAvatarId = avatarId;
-        photo.WornAvatarName = avatarName;
-        photo.WornAvatarUntil = wornUntilUtc;
         context.SaveChanges();
     }
 
