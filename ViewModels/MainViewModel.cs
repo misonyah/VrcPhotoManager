@@ -22,6 +22,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly FaceRepository _faces;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
+    private string? _selfUserId;
     private ClipEmbeddingService? _clipEmbedder;
     private WdTaggerService? _tagger;
     private AvatarTypeService? _avatarClassifier;
@@ -200,6 +201,17 @@ public class MainViewModel : INotifyPropertyChanged
         set { _taggedOnlyFilter = value; OnPropertyChanged(); RebuildRows(); }
     }
 
+    /// <summary>The "Own photos only" checkbox is meaningless (and disabled) if the local
+    /// account's VRCX id can't be resolved - same reasoning as CanFilterTaggedOnly.</summary>
+    public bool CanFilterOwnPhotosOnly => _selfUserId is not null;
+
+    private bool _ownPhotosOnlyFilter;
+    public bool OwnPhotosOnlyFilter
+    {
+        get => _ownPhotosOnlyFilter;
+        set { _ownPhotosOnlyFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+
     private string _statusMessage = "Not logged in. Click Login to start.";
     public string StatusMessage
     {
@@ -332,6 +344,8 @@ public class MainViewModel : INotifyPropertyChanged
         {
             StatusMessage = $"VRCX profile-picture bootstrap unavailable: {profileLookupError}";
         }
+        _selfUserId = _profileLookup?.GetSelf()?.UserId;
+        OnPropertyChanged(nameof(CanFilterOwnPhotosOnly));
 
         var (clipEmbedder, clipError) = await Task.Run(() =>
         {
@@ -1264,6 +1278,10 @@ public class MainViewModel : INotifyPropertyChanged
                 "No confident match" => filtered.Where(p => p.Model.AvatarTypeConfidence is not null && p.AvatarType is null),
                 _ => filtered.Where(p => p.AvatarType == AvatarTypeFilter),
             };
+        }
+        if (OwnPhotosOnlyFilter && _selfUserId is not null)
+        {
+            filtered = filtered.Where(p => p.Model.AuthorId == _selfUserId);
         }
         if (SelectedPlayerFilter.VrcUserId is string userId)
         {
