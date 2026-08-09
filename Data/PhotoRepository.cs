@@ -137,8 +137,8 @@ public class PhotoRepository
     }
 
     public void SetVrcxMetadata(
-        long id, string? authorId, string? authorDisplayName, string? worldName, string? playerNames,
-        IEnumerable<(string UserId, string DisplayName)>? players = null)
+        long id, string? authorId, string? authorDisplayName, string? worldName, string? worldId,
+        string? playerNames, IEnumerable<(string UserId, string DisplayName)>? players = null)
     {
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s
@@ -146,6 +146,7 @@ public class PhotoRepository
             .SetProperty(p => p.AuthorId, authorId)
             .SetProperty(p => p.AuthorDisplayName, authorDisplayName)
             .SetProperty(p => p.WorldName, worldName)
+            .SetProperty(p => p.WorldId, worldId)
             .SetProperty(p => p.PlayerNames, playerNames));
 
         // Replace this photo's stored players (re-scanning shouldn't accumulate duplicates -

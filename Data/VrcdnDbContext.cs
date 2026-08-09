@@ -51,6 +51,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.AuthorId).HasColumnName("author_id");
             entity.Property(p => p.AuthorDisplayName).HasColumnName("author_display_name");
             entity.Property(p => p.WorldName).HasColumnName("world_name");
+            entity.Property(p => p.WorldId).HasColumnName("world_id");
             entity.Property(p => p.WorldNameInferred).HasColumnName("world_name_inferred");
             entity.Property(p => p.PlayerNames).HasColumnName("player_names");
             entity.Property(p => p.Selected).HasColumnName("selected");

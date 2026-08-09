@@ -43,6 +43,7 @@ public class Photo
     public string? AuthorId { get; set; }
     public string? AuthorDisplayName { get; set; }
     public string? WorldName { get; set; }
+    public string? WorldId { get; set; }
 
     /// <summary>True only when WorldName was filled in by the gamelog cross-reference
     /// fallback (GamelogCorrelationService.TryGetWorldName) rather than VRChat's own embedded

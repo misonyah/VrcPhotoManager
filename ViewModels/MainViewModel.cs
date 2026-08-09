@@ -472,7 +472,8 @@ public class MainViewModel : INotifyPropertyChanged
                 // AuthorId/PhotoPlayer columns (a one-time backfill) - skips photos already
                 // confirmed to have none, since re-parsing those files would be pure waste.
                 bool needsMetadataScan = !existing.Model.MetadataScanned
-                    || (existing.Model.AuthorDisplayName is not null && existing.Model.AuthorId is null);
+                    || (existing.Model.AuthorDisplayName is not null && existing.Model.AuthorId is null)
+                    || (existing.Model.WorldName is not null && existing.Model.WorldId is null);
                 bool needsDimensions = existing.Model.Width is null;
 
                 if (needsMetadataScan || needsDimensions)
@@ -516,11 +517,12 @@ public class MainViewModel : INotifyPropertyChanged
                             ? string.Join("\n", meta.Players.Select(p => $"{p.DisplayName} {{{p.Id}}}"))
                             : null;
                         var players = meta?.Players?.Select(p => (p.Id, p.DisplayName));
-                        _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, playerNames, players);
+                        _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, meta?.World?.Id, playerNames, players);
                         existing.Model.MetadataScanned = true;
                         existing.Model.AuthorId = meta?.Author?.Id;
                         existing.Model.AuthorDisplayName = meta?.Author?.DisplayName;
                         existing.Model.WorldName = meta?.World?.Name;
+                        existing.Model.WorldId = meta?.World?.Id;
                         existing.Model.PlayerNames = playerNames;
                         existing.NotifyMetadataChanged();
                     }
