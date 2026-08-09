@@ -12,3 +12,9 @@ wd14-index.db
 
 # Subagent-driven-development scratch (ledger, briefs, review packages) - not repo content.
 .superpowers/
+
+# Claude Code local configuration and tool state - not repo content.
+.claude/
+
+# Serena MCP local configuration and state - not repo content.
+.serena/
