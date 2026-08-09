@@ -1,12 +1,15 @@
+using System.Diagnostics;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Input;
+using VrcPhotoManager.Data;
 using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager.Views;
 
 public partial class MetadataWindow : Window
 {
-    public MetadataWindow(PhotoViewModel photo)
+    public MetadataWindow(PhotoViewModel photo, PhotoRepository repo)
     {
         InitializeComponent();
         DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
@@ -14,25 +17,59 @@ public partial class MetadataWindow : Window
         DialogWindowBehavior.OpenNearCursor(this);
         PreviewKeyDown += MetadataWindow_PreviewKeyDown;
         var m = photo.Model;
-        MetadataText.Text = string.Join("\n", new[]
+
+        var doc = new FlowDocument { FontFamily = new System.Windows.Media.FontFamily("Consolas"), FontSize = 12 };
+        var p = new Paragraph();
+
+        p.Inlines.Add(new Run($"File:        {m.FileName}\n"));
+        p.Inlines.Add(new Run($"Path:        {m.LocalPath}\n"));
+        p.Inlines.Add(new Run($"Size:        {m.FileSize / 1024.0:N0} KB\n"));
+        p.Inlines.Add(new Run($"Dimensions:  {(m.Width is int w && m.Height is int h ? $"{w}x{h}" : "not scanned")}\n"));
+        p.Inlines.Add(new Run($"File hash:   {m.FileHash ?? "not computed"}\n\n"));
+        p.Inlines.Add(new Run($"Rating:      {m.Rating ?? "(unclassified)"}\n\n"));
+
+        p.Inlines.Add(new Run("Author:      "));
+        p.Inlines.Add(VrcLink(m.AuthorId, m.AuthorDisplayName ?? "(no VRCX metadata)", "https://vrchat.com/home/user/{0}"));
+        p.Inlines.Add(new Run("\n"));
+
+        p.Inlines.Add(new Run("World:       "));
+        p.Inlines.Add(VrcLink(m.WorldId, m.WorldName ?? "-", "https://vrchat.com/home/world/{0}"));
+        if (m.WorldNameInferred) p.Inlines.Add(new Run(" (inferred from gamelog)"));
+        p.Inlines.Add(new Run("\n"));
+
+        p.Inlines.Add(new Run("Players:\n"));
+        var players = repo.GetPlayersForPhoto(m.Id);
+        if (players.Count == 0)
         {
-            $"File:        {m.FileName}",
-            $"Path:        {m.LocalPath}",
-            $"Size:        {m.FileSize / 1024.0:N0} KB",
-            $"Dimensions:  {(m.Width is int w && m.Height is int h ? $"{w}x{h}" : "not scanned")}",
-            $"File hash:   {m.FileHash ?? "not computed"}",
-            "",
-            $"Rating:      {m.Rating ?? "(unclassified)"}",
-            "",
-            $"Author:      {m.AuthorDisplayName ?? "(no VRCX metadata)"}{(m.AuthorId is null ? "" : $" ({m.AuthorId})")}",
-            $"World:       {m.WorldName ?? "-"}{(m.WorldNameInferred ? " (inferred from gamelog)" : "")}",
-            "Players:",
-            m.PlayerNames ?? "  -",
-            "",
-            $"Upload status: {m.RemoteStatus}",
-            $"Remote URL:    {m.RemoteUrl ?? "-"}",
-            $"Uploaded at:   {m.UploadedAt ?? "-"}",
-        });
+            p.Inlines.Add(new Run("  -\n"));
+        }
+        else
+        {
+            foreach (var player in players)
+            {
+                p.Inlines.Add(new Run("  "));
+                p.Inlines.Add(VrcLink(player.UserId, player.DisplayName, "https://vrchat.com/home/user/{0}"));
+                p.Inlines.Add(new Run("\n"));
+            }
+        }
+        p.Inlines.Add(new Run("\n"));
+
+        p.Inlines.Add(new Run($"Upload status: {m.RemoteStatus}\n"));
+        p.Inlines.Add(new Run($"Remote URL:    {m.RemoteUrl ?? "-"}\n"));
+        p.Inlines.Add(new Run($"Uploaded at:   {m.UploadedAt ?? "-"}"));
+
+        doc.Blocks.Add(p);
+        MetadataText.Document = doc;
+    }
+
+    /// <summary>A clickable VRChat website link when id is available, plain text otherwise -
+    /// never a broken/empty link. urlTemplate takes exactly one {0} placeholder for the id.</summary>
+    private static Inline VrcLink(string? id, string? displayText, string urlTemplate)
+    {
+        if (id is null) return new Run(displayText ?? "-");
+        var link = new Hyperlink(new Run(displayText ?? id)) { NavigateUri = new Uri(string.Format(urlTemplate, id)) };
+        link.Click += (_, _) => Process.Start(new ProcessStartInfo(link.NavigateUri.ToString()) { UseShellExecute = true });
+        return link;
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();

@@ -53,8 +53,9 @@ public partial class MainWindow : Window
     private void ViewMetadata_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
+        if (DataContext is not MainViewModel vm) return;
         HidePreviewOverlay();
-        new Views.MetadataWindow(photo).Show();
+        new Views.MetadataWindow(photo, vm.Repo).Show();
     }
 
     private void CopyVrcdnUrl_Click(object sender, RoutedEventArgs e)
