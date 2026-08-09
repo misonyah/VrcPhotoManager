@@ -32,13 +32,18 @@
 
         <!-- Filters -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8" VerticalAlignment="Center">
-            <TextBlock Text="Rating:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Width="110" Margin="0,0,16,0" />
+            <TextBlock Text="Rating:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Photos can suggest one." />
+            <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Width="110" Margin="0,0,16,0"
+                      ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Photos can suggest one." />
 
-            <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0" />
+            <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Filter by VRCDN upload status." />
+            <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0"
+                      ToolTip="Filter by VRCDN upload status." />
 
-            <TextBlock Text="Avatar:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBlock Text="Avatar:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Filter by detected avatar base. 'Unclassified' means Classify Avatars hasn't run on it yet; 'No confident match' means it ran but wasn't confident enough to guess." />
             <!-- Real Plan A labels are raw Booth listing titles (some ~53 chars of Japanese
                  text) sharing long common prefixes, so entries are visually indistinguishable
                  at a narrow width even after widening - the ItemContainerStyle tooltip is what
@@ -52,7 +57,8 @@
                 </ComboBox.ItemContainerStyle>
             </ComboBox>
 
-            <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Search for a player to filter the photo list.&#10;Also matches old names and stylized usernames.&#10;&#10;'(tagged)' = you've confirmed a face tag for them.&#10;'(manual)' = added by name, not yet linked to a VRC account." />
             <Grid Width="170" Margin="0,0,8,0">
                 <TextBox x:Name="PlayerFilterTextBox"
                          GotFocus="PlayerFilterTextBox_GotFocus" LostFocus="PlayerFilterTextBox_LostFocus"
@@ -287,10 +293,12 @@
                      size just changes how big they render), so they live here instead of the
                      filter bar. -->
                 <Separator Margin="0,0,0,8" />
-                <TextBlock Text="Sort:" Margin="0,0,0,4" />
-                <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Margin="0,0,0,8" />
-                <TextBlock Text="Thumbnail size:" Margin="0,0,0,4" />
-                <Slider Minimum="80" Maximum="400" Value="{Binding ThumbnailSize}" />
+                <TextBlock Text="Sort:" Margin="0,0,0,4" ToolTip="Order the photo grid." />
+                <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SortOption}" Margin="0,0,0,8"
+                          ToolTip="Order the photo grid." />
+                <TextBlock Text="Thumbnail size:" Margin="0,0,0,4" ToolTip="Size of each photo thumbnail in the grid." />
+                <Slider Minimum="80" Maximum="400" Value="{Binding ThumbnailSize}"
+                        ToolTip="Size of each photo thumbnail in the grid." />
             </StackPanel>
         </Grid>
 
