@@ -584,15 +584,17 @@ public class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Fallback for photos missing VRCX-embedded data - player list, world name, and/or the
-    /// local account's worn avatar - by cross-referencing the local VRCX account's own gamelog
-    /// and avatar-history log instead. See GamelogCorrelationService and
+    /// Fallback for photos missing VRCX-embedded data - player list and/or world name - by
+    /// cross-referencing the local VRCX account's own gamelog instead. See
+    /// GamelogCorrelationService and
     /// docs/superpowers/specs/2026-08-01-gamelog-player-inference-design.md (players) and
-    /// docs/superpowers/specs/2026-08-02-gamelog-world-and-avatar-backfill-design.md (world,
-    /// avatar). Deliberately opt-in via its own button rather than folded into Scan Library: it
-    /// depends on this account's gamelog/avatar-history actually covering the photo's capture
-    /// time, which won't always be true (VRCX closed, a gap in the log, a photo from before
-    /// this account's records start), so it shouldn't run silently as part of the normal scan.
+    /// docs/superpowers/specs/2026-08-02-gamelog-world-and-avatar-backfill-design.md (world -
+    /// note: that spec's avatar half was removed, see
+    /// docs/superpowers/specs/2026-08-09-remove-worn-avatar-backfill-design.md). Deliberately
+    /// opt-in via its own button rather than folded into Scan Library: it depends on this
+    /// account's gamelog actually covering the photo's capture time, which won't always be true
+    /// (VRCX closed, a gap in the log, a photo from before this account's records start), so it
+    /// shouldn't run silently as part of the normal scan.
     /// </summary>
     private async Task CrossReferenceGamelogAsync()
     {
@@ -605,8 +607,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         var missingPlayerIds = _repo.GetPhotoIdsMissingPlayerData();
         var missingWorldIds = _repo.GetPhotoIdsMissingWorldName();
-        var missingAvatarIds = _repo.GetPhotoIdsMissingWornAvatar();
-        var missingIds = missingPlayerIds.Union(missingWorldIds).Union(missingAvatarIds).ToHashSet();
+        var missingIds = missingPlayerIds.Union(missingWorldIds).ToHashSet();
         var candidates = _allPhotos.Where(p => missingIds.Contains(p.Model.Id)).ToList();
 
         StatusMessage = "Cross-referencing gamelog...";
@@ -639,19 +640,6 @@ public class MainViewModel : INotifyPropertyChanged
                     }
                 }
 
-                if (missingAvatarIds.Contains(vm.Model.Id))
-                {
-                    var avatar = await Task.Run(() => gamelog.TryGetWornAvatar(time));
-                    if (avatar is { } a)
-                    {
-                        _repo.SetWornAvatar(vm.Model.Id, a.AvatarId, a.AvatarName, a.WornUntilUtc);
-                        vm.Model.WornAvatarId = a.AvatarId;
-                        vm.Model.WornAvatarName = a.AvatarName;
-                        vm.Model.WornAvatarUntil = a.WornUntilUtc;
-                        matchedAnything = true;
-                    }
-                }
-
                 if (matchedAnything)
                 {
                     matched++;
@@ -667,7 +655,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         ApplyPlayerCounts();
-        StatusMessage = $"Gamelog cross-reference done: {matched}/{candidates.Count} photos matched (players, world, and/or worn avatar).";
+        StatusMessage = $"Gamelog cross-reference done: {matched}/{candidates.Count} photos matched (players and/or world name).";
     }
 
     /// <summary>

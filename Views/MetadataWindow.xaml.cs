@@ -25,7 +25,6 @@ public partial class MetadataWindow : Window
             "",
             $"Author:      {m.AuthorDisplayName ?? "(no VRCX metadata)"}{(m.AuthorId is null ? "" : $" ({m.AuthorId})")}",
             $"World:       {m.WorldName ?? "-"}{(m.WorldNameInferred ? " (inferred from gamelog)" : "")}",
-            $"Avatar:      {WornAvatarDisplay(m)}",
             "Players:",
             m.PlayerNames ?? "  -",
             "",
@@ -33,15 +32,6 @@ public partial class MetadataWindow : Window
             $"Remote URL:    {m.RemoteUrl ?? "-"}",
             $"Uploaded at:   {m.UploadedAt ?? "-"}",
         });
-    }
-
-    private static string WornAvatarDisplay(Photo m)
-    {
-        if (m.WornAvatarId is null) return "-";
-        string name = m.WornAvatarName ?? m.WornAvatarId;
-        return m.WornAvatarUntil is DateTime until
-            ? $"{name} (until {until.ToLocalTime():g})"
-            : $"{name} (still worn as of latest VRCX record)";
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
