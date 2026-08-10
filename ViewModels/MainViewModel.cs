@@ -14,7 +14,11 @@ namespace VrcPhotoManager.ViewModels;
 public class MainViewModel : INotifyPropertyChanged
 {
     private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
-    private const double RowMargin = 8;
+
+    /// <summary>Public (not just used internally by RebuildRows' column-count math) so
+    /// MainWindow.xaml.cs's cursor-anchored thumbnail-resize handler can compute the same row
+    /// height this class uses, without a second hardcoded copy of the margin value.</summary>
+    public const double RowMargin = 8;
 
     private readonly PhotoRepository _repo;
     private readonly ThumbnailService _thumbnails;

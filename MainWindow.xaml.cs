@@ -35,6 +35,130 @@ public partial class MainWindow : Window
         _hoverTimer.Tick += HoverTimer_Tick;
 
         Closing += (_, _) => viewModel.RequestShutdown();
+        PreviewMouseWheel += MainWindow_PreviewMouseWheel;
+    }
+
+    /// <summary>
+    /// Alt+scroll resizes thumbnails instead of scrolling the grid - PreviewMouseWheel
+    /// (tunneling) so this fires before PhotoGrid's own wheel-scroll handling, and only marks
+    /// the event Handled when Alt is actually held, so a plain scroll still scrolls normally.
+    /// Matches the Slider's own Minimum="80"/Maximum="400" range (see MainWindow.xaml) - a
+    /// direct property set isn't clamped by the Slider the way a drag would be.
+    ///
+    /// Resizing changes both the row height (ThumbnailSize) AND the column count (items per
+    /// row shrinks as thumbnails grow), so the row a given photo ends up in shifts - without
+    /// correction, the grid visibly jumps and whatever was under the cursor is gone. Hit-test
+    /// which photo is under the cursor *before* resizing, remember how far down that photo (as
+    /// a 0-1 fraction) the cursor was, then after resizing, use ScrollIntoView (not a
+    /// hand-computed absolute offset) to bring that photo's new row into view and fine-tune
+    /// from its REAL measured position.
+    ///
+    /// Tried computing an absolute target offset directly (newRowIndex * newRowHeight ± cursor
+    /// position) first - that visibly jumped on even a single scroll notch (confirmed via
+    /// direct feedback), because VirtualizingStackPanel's ScrollableHeight for rows outside the
+    /// realized range is only an estimate, and can still reflect the OLD thumbnail size right
+    /// after a resize - our absolute-offset math assumed the NEW size applied uniformly to
+    /// content WPF hadn't actually re-measured yet. ScrollIntoView sidesteps that: it's WPF's
+    /// own primitive for scrolling to a virtualized item and forces the item to actually
+    /// realize/measure, so following up with a real TranslatePoint reading (not an estimate)
+    /// for the fine adjustment is trustworthy.
+    /// </summary>
+    private void MainWindow_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Alt) return;
+        if (DataContext is not MainViewModel vm) return;
+        e.Handled = true;
+
+        Point cursor = e.GetPosition(PhotoGrid);
+        (int FlatIndex, double Fraction)? anchor = FindAnchor(vm, cursor);
+
+        double step = e.Delta > 0 ? 20 : -20;
+        vm.ThumbnailSize = Math.Clamp(vm.ThumbnailSize + step, 80, 400);
+
+        if (anchor is null) return;
+        var (flatIndex, fraction) = anchor.Value;
+
+        // Deferred to Loaded priority - the Rows collection just changed synchronously above,
+        // but the virtualizing panel needs an actual layout pass (container generation for the
+        // new column count/item size) before ScrollIntoView has anything real to scroll to.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            int newColumns = Math.Max(1, (int)(vm.GridWidth / (vm.ThumbnailSize + MainViewModel.RowMargin)));
+            int newRowIndex = flatIndex / newColumns;
+            if (newRowIndex < 0 || newRowIndex >= vm.Rows.Count) return;
+            var targetRow = vm.Rows[newRowIndex];
+
+            PhotoGrid.ScrollIntoView(targetRow);
+            PhotoGrid.UpdateLayout();
+
+            if (PhotoGrid.ItemContainerGenerator.ContainerFromItem(targetRow) is not FrameworkElement rowContainer) return;
+            if (FindVisualChild<ScrollViewer>(PhotoGrid) is not ScrollViewer scrollViewer) return;
+
+            double actualRowTopY = rowContainer.TranslatePoint(new Point(0, 0), PhotoGrid).Y;
+            double newRowHeight = vm.ThumbnailSize + MainViewModel.RowMargin;
+            double desiredRowTopY = cursor.Y - fraction * newRowHeight;
+            double delta = actualRowTopY - desiredRowTopY;
+            scrollViewer.ScrollToVerticalOffset(Math.Max(0, scrollViewer.VerticalOffset + delta));
+        });
+    }
+
+    /// <summary>Hit-tests PhotoGrid at the given point (walking up from whatever the point-test
+    /// actually hit - an Image, a Border, etc. - to the enclosing element carrying the
+    /// PhotoViewModel DataContext) to find which photo the cursor is over. Null if the cursor
+    /// isn't over any realized photo item (e.g. over empty space past the last row).</summary>
+    private FrameworkElement? FindAnchorElement(Point cursorInGrid, out PhotoViewModel? target)
+    {
+        target = null;
+        var element = PhotoGrid.InputHitTest(cursorInGrid) as DependencyObject;
+        while (element is not null && (element as FrameworkElement)?.DataContext is not PhotoViewModel)
+        {
+            element = VisualTreeHelper.GetParent(element);
+        }
+        if (element is not FrameworkElement found || found.DataContext is not PhotoViewModel photo) return null;
+        target = photo;
+        return found;
+    }
+
+    /// <summary>Finds which photo is under cursorInGrid (already in PhotoGrid's own coordinate
+    /// space, e.g. from e.GetPosition(PhotoGrid)), that photo's flat index in the current Rows
+    /// (summed across preceding rows rather than assumed from a fixed column count, since the
+    /// last row can be short), and how far down that specific item (0=top, 1=bottom) the cursor
+    /// sits. Null if FindAnchorElement found nothing under the cursor.</summary>
+    private (int FlatIndex, double Fraction)? FindAnchor(MainViewModel vm, Point cursorInGrid)
+    {
+        var element = FindAnchorElement(cursorInGrid, out PhotoViewModel? target);
+        if (element is null || target is null) return null;
+
+        int flatIndex = 0;
+        bool found = false;
+        foreach (var row in vm.Rows)
+        {
+            int indexInRow = row.Items.ToList().IndexOf(target);
+            if (indexInRow >= 0)
+            {
+                flatIndex += indexInRow;
+                found = true;
+                break;
+            }
+            flatIndex += row.Items.Count;
+        }
+        if (!found) return null;
+
+        double itemTopY = element.TranslatePoint(new Point(0, 0), PhotoGrid).Y;
+        double itemHeight = element.ActualHeight > 0 ? element.ActualHeight : vm.ThumbnailSize;
+        double fraction = Math.Clamp((cursorInGrid.Y - itemTopY) / itemHeight, 0, 1);
+        return (flatIndex, fraction);
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typed) return typed;
+            if (FindVisualChild<T>(child) is T found) return found;
+        }
+        return null;
     }
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
