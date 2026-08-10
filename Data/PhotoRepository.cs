@@ -519,4 +519,22 @@ public class PhotoRepository
 
     public void SetBoolSetting(string key, bool value) =>
         SetStringSetting(key, value ? "true" : "false");
+
+    /// <summary>Last time this action button ran to completion without a fatal error - shown
+    /// as an extra tooltip line (see MainViewModel's action Tooltip properties). Stored as a
+    /// setting (key-prefixed to avoid colliding with the model-path/etag settings above), not a
+    /// dedicated column - it's a small, infrequently-read per-action timestamp, not data that
+    /// needs querying/filtering.</summary>
+    public DateTime? GetLastActionSuccess(string actionKey)
+    {
+        string? value = GetStringSetting($"last_success_{actionKey}");
+        return value is not null
+            && DateTime.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var dt)
+            ? dt
+            : null;
+    }
+
+    public void RecordActionSuccess(string actionKey) =>
+        SetStringSetting($"last_success_{actionKey}", DateTime.UtcNow.ToString("o"));
 }

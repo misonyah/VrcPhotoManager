@@ -162,7 +162,14 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type vm:PhotoRow}">
-                    <ItemsControl ItemsSource="{Binding Items}">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Invisible leading spacer, 0-width for every normal row - see
+                             PhotoRow.LeadingOffset. Only the Alt+scroll resize handler in
+                             MainWindow.xaml.cs ever gives this a nonzero width, as a one-off
+                             pixel nudge so the row containing the cursor's photo lines that
+                             photo's X position back up with the cursor after a resize. -->
+                        <Border Width="{Binding LeadingOffset}" />
+                        <ItemsControl ItemsSource="{Binding Items}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal" />
@@ -250,7 +257,8 @@
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        </ItemsControl>
+                    </StackPanel>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
@@ -259,29 +267,37 @@
                  (Button's default HorizontalAlignment is Stretch, so each fills it). -->
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
                 <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Sign in to panel.vrcdn.live in an embedded browser.&#10;Needed before you can upload, sync, or remove photos on VRCDN." />
+                        ToolTip="{Binding LoginTooltip}" />
+
+                <Separator Margin="0,0,0,8" />
                 <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Look for new or changed photos in your VRChat screenshots folder.&#10;Reads world/author/player info from VRCX and builds thumbnails." />
-                <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Rate any unrated photo using a local WD14 classifier." />
-                <Button Content="Sync Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Check which photos are already uploaded to VRCDN and fix their status badge.&#10;Despite the name, this isn't about VRCX metadata - that's Scan Library." />
+                        ToolTip="{Binding ScanLibraryTooltip}" />
                 <Button Content="Cross-reference Gamelog" Command="{Binding CrossReferenceGamelogCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="For photos with no VRCX player data at all, e.g. taken by someone else nearby.&#10;Guesses who was present by matching the photo's timestamp against your own VRCX gamelog." />
+                        ToolTip="{Binding CrossReferenceGamelogTooltip}" />
                 <Button Content="Sync VRC Players" Command="{Binding SyncVrcPlayerDataCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Refresh the player cache from VRCX's friends list and gamelog history.&#10;Tag Faces search uses this cache instead of querying VRCX live, since that got slow with a large gamelog.&#10;Run this occasionally to pick up new friends, renames, or people you've recently played with." />
-                <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold"
-                        ToolTip="Upload all selected photos that aren't already on VRCDN." />
-                <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Delete selected photos from VRCDN's storage and mark them Not Uploaded here." />
-                <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="For selected Print-format (2048x1440) photos: crop off the white border and add the 1920x1080 result to your library.&#10;The original is left untouched." />
+                        ToolTip="{Binding SyncVrcPlayerDataTooltip}" />
+
+                <Separator Margin="0,0,0,8" />
                 <Button Content="Detect Faces" Command="{Binding ScanFacesCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Detect anime-style faces in every photo and show a count badge on each thumbnail." />
+                        ToolTip="{Binding ScanFacesTooltip}" />
                 <Button Content="Suggest Faces" Command="{Binding SuggestFacesCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Suggest who's in each untagged face by comparing it to people's confirmed reference photos.&#10;Suggestions aren't automatic - review and confirm them in Tag Faces." />
+                        ToolTip="{Binding SuggestFacesTooltip}" />
+                <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="{Binding ClassifyPhotosTooltip}" />
                 <Button Content="Classify Avatars" Command="{Binding ClassifyAvatarsCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="Detect the avatar base worn in each unclassified photo using the downloaded avatar classifier model." />
+                        ToolTip="{Binding ClassifyAvatarsTooltip}" />
+
+                <Separator Margin="0,0,0,8" />
+                <Button Content="Crop Print Borders" Command="{Binding CropPrintSelectedCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="{Binding CropPrintSelectedTooltip}" />
+
+                <Separator Margin="0,0,0,8" />
+                <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold"
+                        ToolTip="{Binding UploadSelectedTooltip}" />
+                <Button Content="Sync VRCDN Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="{Binding SyncMetadataTooltip}" />
+                <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="{Binding RemoveFromVrcdnTooltip}" />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"

@@ -69,14 +69,21 @@ public partial class MainWindow : Window
         if (DataContext is not MainViewModel vm) return;
         e.Handled = true;
 
+        // Hides the preview overlay for the duration of active resizing rather than letting it
+        // pop up mid-resize - each Alt+scroll notch re-hides it before the hover timer's 0.25s
+        // delay can complete, so it only reappears once you've actually stopped scrolling and
+        // settled on a photo. Also sidesteps _hoverTarget going stale when the row it points at
+        // gets rebuilt (RebuildRows below), same as it always would for any Rows change.
+        HidePreviewOverlay();
+
         Point cursor = e.GetPosition(PhotoGrid);
-        (int FlatIndex, double Fraction)? anchor = FindAnchor(vm, cursor);
+        var anchor = FindAnchor(vm, cursor);
 
         double step = e.Delta > 0 ? 20 : -20;
         vm.ThumbnailSize = Math.Clamp(vm.ThumbnailSize + step, 80, 400);
 
         if (anchor is null) return;
-        var (flatIndex, fraction) = anchor.Value;
+        var (flatIndex, fractionY, fractionX) = anchor.Value;
 
         // Deferred to Loaded priority - the Rows collection just changed synchronously above,
         // but the virtualizing panel needs an actual layout pass (container generation for the
@@ -85,6 +92,7 @@ public partial class MainWindow : Window
         {
             int newColumns = Math.Max(1, (int)(vm.GridWidth / (vm.ThumbnailSize + MainViewModel.RowMargin)));
             int newRowIndex = flatIndex / newColumns;
+            int newColIndex = flatIndex % newColumns;
             if (newRowIndex < 0 || newRowIndex >= vm.Rows.Count) return;
             var targetRow = vm.Rows[newRowIndex];
 
@@ -94,11 +102,30 @@ public partial class MainWindow : Window
             if (PhotoGrid.ItemContainerGenerator.ContainerFromItem(targetRow) is not FrameworkElement rowContainer) return;
             if (FindVisualChild<ScrollViewer>(PhotoGrid) is not ScrollViewer scrollViewer) return;
 
+            double newCellSize = vm.ThumbnailSize + MainViewModel.RowMargin;
+
             double actualRowTopY = rowContainer.TranslatePoint(new Point(0, 0), PhotoGrid).Y;
-            double newRowHeight = vm.ThumbnailSize + MainViewModel.RowMargin;
-            double desiredRowTopY = cursor.Y - fraction * newRowHeight;
+            double desiredRowTopY = cursor.Y - fractionY * newCellSize;
             double delta = actualRowTopY - desiredRowTopY;
             scrollViewer.ScrollToVerticalOffset(Math.Max(0, scrollViewer.VerticalOffset + delta));
+
+            // There's no horizontal ScrollViewer (the grid always fits width and wraps), so the
+            // only way to nudge one specific row's items sideways is a leading spacer on that
+            // row (PhotoRow.LeadingOffset) - solved for so this row's photo at newColIndex lands
+            // at the cursor's original fraction-across-the-item position. Capped at half the
+            // cell size: at most, this shifts the row's content by less than one column, so it
+            // never opens up a full-column-wide visible gap.
+            double desiredItemLeftX = cursor.X - fractionX * newCellSize;
+            double leadingOffset = desiredItemLeftX - newColIndex * newCellSize;
+            targetRow.LeadingOffset = Math.Clamp(leadingOffset, 0, newCellSize / 2);
+
+            // Programmatic scrolling moves content out from under a stationary cursor without
+            // WPF's internal "what's under the mouse" tracking noticing on its own - it stays
+            // stale until some other input (a click, a hover onto a different element) forces a
+            // recompute, which is why plain scrolling needed a click first afterward (confirmed
+            // via direct feedback). Mouse.Synchronize() is the standard WPF workaround: it
+            // forces that recompute artificially, right here, instead of waiting for one.
+            Mouse.Synchronize();
         });
     }
 
@@ -122,9 +149,10 @@ public partial class MainWindow : Window
     /// <summary>Finds which photo is under cursorInGrid (already in PhotoGrid's own coordinate
     /// space, e.g. from e.GetPosition(PhotoGrid)), that photo's flat index in the current Rows
     /// (summed across preceding rows rather than assumed from a fixed column count, since the
-    /// last row can be short), and how far down that specific item (0=top, 1=bottom) the cursor
-    /// sits. Null if FindAnchorElement found nothing under the cursor.</summary>
-    private (int FlatIndex, double Fraction)? FindAnchor(MainViewModel vm, Point cursorInGrid)
+    /// last row can be short), and how far across (FractionX, 0=left/1=right) and down
+    /// (FractionY, 0=top/1=bottom) that specific item the cursor sits. Null if
+    /// FindAnchorElement found nothing under the cursor.</summary>
+    private (int FlatIndex, double FractionY, double FractionX)? FindAnchor(MainViewModel vm, Point cursorInGrid)
     {
         var element = FindAnchorElement(cursorInGrid, out PhotoViewModel? target);
         if (element is null || target is null) return null;
@@ -144,10 +172,12 @@ public partial class MainWindow : Window
         }
         if (!found) return null;
 
-        double itemTopY = element.TranslatePoint(new Point(0, 0), PhotoGrid).Y;
+        Point itemTopLeft = element.TranslatePoint(new Point(0, 0), PhotoGrid);
         double itemHeight = element.ActualHeight > 0 ? element.ActualHeight : vm.ThumbnailSize;
-        double fraction = Math.Clamp((cursorInGrid.Y - itemTopY) / itemHeight, 0, 1);
-        return (flatIndex, fraction);
+        double itemWidth = element.ActualWidth > 0 ? element.ActualWidth : vm.ThumbnailSize;
+        double fractionY = Math.Clamp((cursorInGrid.Y - itemTopLeft.Y) / itemHeight, 0, 1);
+        double fractionX = Math.Clamp((cursorInGrid.X - itemTopLeft.X) / itemWidth, 0, 1);
+        return (flatIndex, fractionY, fractionX);
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject

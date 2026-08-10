@@ -230,11 +230,72 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand ClassifyAvatarsCommand { get; }
     public ICommand LoginCommand { get; }
     public ICommand SyncMetadataCommand { get; }
-    public ICommand CrossReferenceGamelogCommand { get; }
+    public RelayCommand CrossReferenceGamelogCommand { get; }
     public ICommand SyncVrcPlayerDataCommand { get; }
     public RelayCommand UploadSelectedCommand { get; }
     public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
+
+    /// <summary>Appends a "Last succeeded: ..." (or "Never run yet.") line to an action
+    /// button's static explanation text - baseText stays authored here rather than in XAML so
+    /// it can be combined with the live timestamp in one bound string, instead of needing a
+    /// converter or a multi-element ToolTip template repeated on every button.</summary>
+    private bool HasSucceeded(string actionKey) => _repo.GetLastActionSuccess(actionKey) is not null;
+
+    /// <summary>requiredActionKey, if given, is a prerequisite this button is gated on (see the
+    /// RelayCommand CanExecute predicates in the constructor) - when it hasn't succeeded yet,
+    /// the tooltip explains why the button is disabled instead of just showing "Never run yet."
+    /// for this action with no indication of what to do about it.</summary>
+    private string GetActionTooltip(string actionKey, string baseText, (string RequiredActionKey, string RequiredActionLabel)? requires = null)
+    {
+        DateTime? last = _repo.GetLastActionSuccess(actionKey);
+        string lastLine = last is DateTime d ? $"Last succeeded: {d.ToLocalTime():g}" : "Never run yet.";
+        string gateLine = requires is { } r && !HasSucceeded(r.RequiredActionKey)
+            ? $"\n\nRun {r.RequiredActionLabel} first."
+            : "";
+        return $"{baseText}\n\n{lastLine}{gateLine}";
+    }
+
+    /// <summary>Records this action's success (for the tooltip line above) and notifies the
+    /// corresponding Tooltip property so a currently-open or next-shown tooltip reflects it.
+    /// Called once, right at each action method's genuine completion point - never from an
+    /// early "unavailable"/cancelled/nothing-to-do return, so a button that never actually ran
+    /// keeps showing "Never run yet." instead of a misleading timestamp.</summary>
+    private void RecordActionSuccess(string actionKey, string tooltipPropertyName)
+    {
+        _repo.RecordActionSuccess(actionKey);
+        OnPropertyChanged(tooltipPropertyName);
+    }
+
+    public string LoginTooltip => GetActionTooltip("Login",
+        "Sign in to panel.vrcdn.live in an embedded browser.\nNeeded before you can upload, sync, or remove photos on VRCDN.");
+    public string ScanLibraryTooltip => GetActionTooltip("ScanLibrary",
+        "Look for new or changed photos in your VRChat screenshots folder.\nReads world/author/player info from VRCX and builds thumbnails.");
+    public string CrossReferenceGamelogTooltip => GetActionTooltip("CrossReferenceGamelog",
+        "For photos with no VRCX player data at all, e.g. taken by someone else nearby.\nGuesses who was present by matching the photo's timestamp against your own VRCX gamelog.",
+        ("ScanLibrary", "Scan Library"));
+    public string SyncVrcPlayerDataTooltip => GetActionTooltip("SyncVrcPlayerData",
+        "Refresh the player cache from VRCX's friends list and gamelog history.\nTag Faces search uses this cache instead of querying VRCX live, since that got slow with a large gamelog.\nRun this occasionally to pick up new friends, renames, or people you've recently played with.");
+    public string ScanFacesTooltip => GetActionTooltip("DetectFaces",
+        "Detect anime-style faces in every photo and show a count badge on each thumbnail.",
+        ("ScanLibrary", "Scan Library"));
+    public string SuggestFacesTooltip => GetActionTooltip("SuggestFaces",
+        "Suggest who's in each untagged face by comparing it to people's confirmed reference photos.\nSuggestions aren't automatic - review and confirm them in Tag Faces.",
+        ("DetectFaces", "Detect Faces"));
+    public string ClassifyPhotosTooltip => GetActionTooltip("ClassifyPhotos",
+        "Rate any unrated photo using a local WD14 classifier.",
+        ("ScanLibrary", "Scan Library"));
+    public string ClassifyAvatarsTooltip => GetActionTooltip("ClassifyAvatars",
+        "Detect the avatar base worn in each unclassified photo using the downloaded avatar classifier model.",
+        ("ScanLibrary", "Scan Library"));
+    public string CropPrintSelectedTooltip => GetActionTooltip("CropPrintBorders",
+        "For selected Print-format (2048x1440) photos: crop off the white border and add the 1920x1080 result to your library.\nThe original is left untouched.");
+    public string UploadSelectedTooltip => GetActionTooltip("UploadSelected",
+        "Upload all selected photos that aren't already on VRCDN.");
+    public string SyncMetadataTooltip => GetActionTooltip("SyncVrcdnMetadata",
+        "Check which photos are already uploaded to VRCDN and fix their status badge.\nFor VRCX metadata (author/world/players), use Scan Library instead.");
+    public string RemoveFromVrcdnTooltip => GetActionTooltip("RemoveFromVrcdn",
+        "Delete selected photos from VRCDN's storage and mark them Not Uploaded here.");
 
     /// <summary>Exposed so the Settings window (opened from code-behind, like AboutWindow/
     /// MetadataWindow) can read/write the WD14 model path settings.</summary>
@@ -268,13 +329,23 @@ public class MainViewModel : INotifyPropertyChanged
         _faces = new FaceRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
-        ScanFacesCommand = new RelayCommand(ScanFacesAsync, () => _faceDetector is not null);
-        SuggestFacesCommand = new RelayCommand(SuggestFacesAsync, () => _clipEmbedder is not null);
-        ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync, () => _tagger is not null);
-        ClassifyAvatarsCommand = new RelayCommand(ClassifyAvatarsAsync, () => _avatarClassifier is not null);
+        // Gated on ScanLibrary/DetectFaces having succeeded at least once (not just this
+        // session - GetLastActionSuccess is persisted, so a library scanned in an earlier
+        // session correctly leaves these enabled on the next launch too), in addition to the
+        // existing model-availability checks. RaiseCanExecuteChanged for these fires right
+        // after their prerequisite's RecordActionSuccess call, so they unlock immediately
+        // within the same session instead of needing a restart.
+        ScanFacesCommand = new RelayCommand(ScanFacesAsync,
+            () => _faceDetector is not null && HasSucceeded("ScanLibrary"));
+        SuggestFacesCommand = new RelayCommand(SuggestFacesAsync,
+            () => _clipEmbedder is not null && HasSucceeded("DetectFaces"));
+        ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync,
+            () => _tagger is not null && HasSucceeded("ScanLibrary"));
+        ClassifyAvatarsCommand = new RelayCommand(ClassifyAvatarsAsync,
+            () => _avatarClassifier is not null && HasSucceeded("ScanLibrary"));
         LoginCommand = new RelayCommand(LoginAsync);
         SyncMetadataCommand = new RelayCommand(SyncMetadataAsync);
-        CrossReferenceGamelogCommand = new RelayCommand(CrossReferenceGamelogAsync);
+        CrossReferenceGamelogCommand = new RelayCommand(CrossReferenceGamelogAsync, () => HasSucceeded("ScanLibrary"));
         SyncVrcPlayerDataCommand = new RelayCommand(SyncVrcPlayerDataAsync);
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync, CanUploadSelected);
         RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
@@ -397,6 +468,7 @@ public class MainViewModel : INotifyPropertyChanged
         _credentials.SaveCookie(window.SessionCookie, null);
         _api = new VrcdnApiClient(window.SessionCookie);
         StatusMessage = "Logged in.";
+        RecordActionSuccess("Login", nameof(LoginTooltip));
         RaiseSelectionDependentCommands();
         await Task.CompletedTask;
     }
@@ -566,6 +638,18 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyPlayerCounts();
         StatusMessage = $"Scan complete: {files.Count} photos.";
+        RecordActionSuccess("ScanLibrary", nameof(ScanLibraryTooltip));
+        // Unlocks the 4 buttons gated on ScanLibrary having run at least once, and refreshes
+        // their tooltips so the "Run Scan Library first." note disappears immediately instead
+        // of only on the next hover after WPF's own requery happens to fire.
+        ScanFacesCommand.RaiseCanExecuteChanged();
+        ClassifyPhotosCommand.RaiseCanExecuteChanged();
+        ClassifyAvatarsCommand.RaiseCanExecuteChanged();
+        CrossReferenceGamelogCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(ScanFacesTooltip));
+        OnPropertyChanged(nameof(ClassifyPhotosTooltip));
+        OnPropertyChanged(nameof(ClassifyAvatarsTooltip));
+        OnPropertyChanged(nameof(CrossReferenceGamelogTooltip));
     }
 
     private async Task ScanFacesAsync()
@@ -601,6 +685,9 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyFaceCounts();
         StatusMessage = $"Face scan complete: {totalFaces} faces found across {photos.Count} photos.";
+        RecordActionSuccess("DetectFaces", nameof(ScanFacesTooltip));
+        SuggestFacesCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(SuggestFacesTooltip));
     }
 
     /// <summary>
@@ -674,6 +761,7 @@ public class MainViewModel : INotifyPropertyChanged
 
         ApplyPlayerCounts();
         StatusMessage = $"Gamelog cross-reference done: {matched}/{candidates.Count} photos matched (players and/or world name).";
+        RecordActionSuccess("CrossReferenceGamelog", nameof(CrossReferenceGamelogTooltip));
     }
 
     /// <summary>
@@ -723,6 +811,7 @@ public class MainViewModel : INotifyPropertyChanged
         });
 
         StatusMessage = $"VRC player data synced: {knownUserCount} known players cached.";
+        RecordActionSuccess("SyncVrcPlayerData", nameof(SyncVrcPlayerDataTooltip));
     }
 
     private async Task SuggestFacesAsync()
@@ -864,6 +953,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Suggest Faces done: {embedded} embeddings computed, {suggested} new suggestions across {centroids.Count} eligible people.";
+        RecordActionSuccess("SuggestFaces", nameof(SuggestFacesTooltip));
     }
 
     /// <summary>Rebuilds the player-filter dropdown from the current library state - called
@@ -1036,6 +1126,7 @@ public class MainViewModel : INotifyPropertyChanged
         await Task.WhenAll(tasks);
 
         StatusMessage = $"Classified {done} photos.";
+        RecordActionSuccess("ClassifyPhotos", nameof(ClassifyPhotosTooltip));
         RebuildRows();
     }
 
@@ -1091,6 +1182,7 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = failed > 0
             ? $"Classified {done - failed} photos' avatar types ({failed} failed)."
             : $"Classified {done} photos' avatar types.";
+        RecordActionSuccess("ClassifyAvatars", nameof(ClassifyAvatarsTooltip));
         RefreshAvatarTypeFilterOptions();
         RebuildRows();
     }
@@ -1127,6 +1219,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Cropped {cropped} print-format photo(s), skipped {skipped} (no white border found).";
+        RecordActionSuccess("CropPrintBorders", nameof(CropPrintSelectedTooltip));
         RebuildRows();
     }
 
@@ -1168,6 +1261,7 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = unresolved.Count == 0
             ? $"Sync complete: {remoteObjects.Count} remote objects matched."
             : $"Sync complete: {remoteObjects.Count - unresolved.Count} matched, {unresolved.Count} remote objects had no local match.";
+        RecordActionSuccess("SyncVrcdnMetadata", nameof(SyncMetadataTooltip));
     }
 
     private async Task UploadSelectedAsync()
@@ -1213,6 +1307,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Upload complete: {done}/{toUpload.Count} processed.";
+        RecordActionSuccess("UploadSelected", nameof(UploadSelectedTooltip));
         RaiseSelectionDependentCommands();
         await SyncMetadataAsync();
     }
@@ -1260,6 +1355,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = $"Removed {done}/{toRemove.Count} photo(s) from VRCDN.";
+        RecordActionSuccess("RemoveFromVrcdn", nameof(RemoveFromVrcdnTooltip));
         RaiseSelectionDependentCommands();
     }
 
