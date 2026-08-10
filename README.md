@@ -1,5 +1,7 @@
 # VRC Photo Manager
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/misonyah)
+
 A Windows desktop tool for curating and uploading VRChat photos to [VRCDN](https://vrcdn.live)
 object storage — browse a thumbnail grid, pick what goes up and what doesn't, and track
 upload status per photo, instead of blanket-uploading a whole library by filter alone.
