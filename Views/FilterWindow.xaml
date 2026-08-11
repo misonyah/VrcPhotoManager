@@ -54,13 +54,29 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
+                        <!-- Custom ControlTemplate rather than just a Style Setter on Background:
+                             the default ToggleButton theme chrome paints its own Checked-state
+                             highlight (a fixed OS accent/selection color) over a plain Background
+                             setter once IsChecked=True, so the Requires (unchecked) state showed
+                             our green fine but Excludes (checked) never actually turned red -
+                             only rendered whatever the theme's own checked color happened to be
+                             (found via direct report). A plain Border bound to Background via
+                             TemplateBinding has no such built-in checked-state override. -->
                         <ToggleButton Grid.Column="0" Width="60" Margin="0,0,4,0"
                                       IsChecked="{Binding Exclude}"
                                       Content="{Binding Exclude, Converter={StaticResource RequireExcludeTextConverter}}"
                                       ToolTip="Toggle whether the photo must include this player (Requires) or must NOT include them (Excludes) - e.g. Excludes yourself to find photos of everyone but you.">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="3" Padding="4,2">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
                             <ToggleButton.Style>
                                 <Style TargetType="ToggleButton">
                                     <Setter Property="Background" Value="MediumSeaGreen" />
+                                    <Setter Property="Foreground" Value="White" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Exclude}" Value="True">
                                             <Setter Property="Background" Value="IndianRed" />
