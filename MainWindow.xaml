@@ -14,6 +14,7 @@
         <views:FaceCountToVisibilityConverter x:Key="FaceCountToVisibilityConverter" />
         <views:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
         <views:StringNotEmptyToBoolConverter x:Key="StringNotEmptyToBoolConverter" />
+        <views:RemoteStatusToVisibilityConverter x:Key="RemoteStatusToVisibilityConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="PhotoItemStyle" TargetType="Border">
             <Setter Property="Margin" Value="4" />
@@ -21,6 +22,18 @@
             <Setter Property="BorderBrush" Value="#333333" />
             <EventSetter Event="MouseEnter" Handler="PhotoItem_MouseEnter" />
             <EventSetter Event="MouseLeave" Handler="PhotoItem_MouseLeave" />
+            <!-- Selection indicator: a thick border instead of a checkbox overlay - the
+                 checkbox competed for attention with the other corner badges and covered part
+                 of the thumbnail itself, where a border wraps the whole cell without hiding
+                 anything. Gold rather than reusing Cyan (the upload-status cloud) or LimeGreen
+                 (confirmed face tags/the old Uploaded pill), so selection reads as its own
+                 distinct state at a glance. -->
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Selected}" Value="True">
+                    <Setter Property="BorderThickness" Value="4" />
+                    <Setter Property="BorderBrush" Value="Gold" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <!-- A row's Items can hold a null entry - see PhotoRow's doc comment and
@@ -56,26 +69,42 @@
                     </ContextMenu>
                 </Border.ContextMenu>
                 <Grid>
-                    <!-- Clicking the checkbox toggles it directly (it's drawn on top for its
-                         own bounds, so this handler never double-fires for that click); clicking
-                         anywhere else on the thumbnail toggles selection too, via this handler.
+                    <!-- Clicking anywhere on the thumbnail toggles selection (see
+                         PhotoItemStyle's thick-gold-border DataTrigger for the visual state).
                          Middle-click opens Tag Faces directly - MouseUp (not MouseLeftButtonUp)
                          since WPF has no MouseMiddleButtonUp, so the handler itself filters by
                          ChangedButton to avoid double-handling the left-click case above. -->
                     <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
                            MouseLeftButtonUp="PhotoImage_Click"
                            MouseUp="PhotoImage_MiddleClick" />
-                    <CheckBox IsChecked="{Binding Selected}"
-                              HorizontalAlignment="Left" VerticalAlignment="Top"
-                              Margin="4" />
                     <Border HorizontalAlignment="Right" VerticalAlignment="Top"
                             Margin="4" Width="14" Height="14" CornerRadius="7"
                             BorderBrush="White" BorderThickness="1"
                             Background="{Binding Rating, Converter={StaticResource RatingToBrushConverter}}"
                             ToolTip="{Binding Rating}" />
+                    <!-- Uploaded: a plain filled cyan cloud (no pill background) instead of a
+                         text badge - NotUploaded is the common case and already shows nothing,
+                         so a permanent "Uploaded" text pill on every uploaded photo was more
+                         visual noise than the transient Uploading/Failed pills below actually
+                         need. A vector Path (Material Design's "cloud" glyph geometry) rather
+                         than a font character - Segoe MDL2 Assets' own cloud glyph (0xE753) is
+                         outline-only with no filled variant, and a plain Unicode ☁ character
+                         risks an OS emoji-font fallback rendering it as a full-color emoji that
+                         ignores Fill entirely. A Path's Fill is unambiguous either way. -->
+                    <Path HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
+                          Width="18" Height="18" Stretch="Uniform" Fill="Cyan" Cursor="Hand"
+                          Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"
+                          ToolTip="Uploaded to VRCDN - click to copy the URL"
+                          MouseLeftButtonUp="CloudIcon_MouseLeftButtonUp"
+                          Visibility="{Binding RemoteStatus, Converter={StaticResource RemoteStatusToVisibilityConverter}, ConverterParameter=Uploaded}">
+                        <Path.Effect>
+                            <DropShadowEffect Color="Black" ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
+                        </Path.Effect>
+                    </Path>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
                             Margin="4" Padding="4,1" CornerRadius="3"
-                            Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}">
+                            Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}"
+                            Visibility="{Binding RemoteStatus, Converter={StaticResource RemoteStatusToVisibilityConverter}, ConverterParameter='Uploading,Failed'}">
                         <TextBlock Text="{Binding RemoteStatus}" FontSize="10" Foreground="White" />
                     </Border>
                     <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
@@ -274,6 +303,9 @@
                         ToolTip="{Binding SyncMetadataTooltip}" />
                 <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding RemoveFromVrcdnTooltip}" />
+                <Button Command="{Binding DeselectAllCommand}" Padding="8,4" Margin="0,0,0,8"
+                        Content="{Binding SelectedCount, StringFormat='Deselect {0} photos'}"
+                        ToolTip="Clear the current selection." />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
@@ -329,6 +361,16 @@
                 <Image x:Name="PreviewImage" MaxWidth="800" MaxHeight="800" Stretch="Uniform" />
                 <TextBlock x:Name="PreviewPlayers" Foreground="White" FontSize="11" Margin="4" TextWrapping="Wrap" MaxWidth="800" />
             </StackPanel>
+        </Border>
+
+        <!-- Toast notification - MainViewModel.ToastRequested (see ShowToast in code-behind).
+             Opacity-only animation (no scale/translate like PreviewOverlay) since this is a
+             passive pop-up, not something the user interacts with while it's showing -
+             IsHitTestVisible=False throughout so it never blocks clicks on whatever's under it. -->
+        <Border x:Name="ToastOverlay" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                Margin="16" Background="#EE1B3A5E" BorderBrush="Cyan" BorderThickness="1" CornerRadius="4"
+                Padding="12,6" IsHitTestVisible="False" Opacity="0">
+            <TextBlock x:Name="ToastText" Foreground="White" FontSize="12" TextWrapping="Wrap" MaxWidth="600" />
         </Border>
     </Grid>
 </Window>

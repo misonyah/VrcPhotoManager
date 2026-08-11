@@ -39,6 +39,7 @@ public partial class MainWindow : Window
         _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.25) };
         _hoverTimer.Tick += HoverTimer_Tick;
 
+        viewModel.ToastRequested += ShowToast;
         Closing += (_, _) => viewModel.RequestShutdown();
         PreviewMouseWheel += MainWindow_PreviewMouseWheel;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
@@ -330,16 +331,34 @@ public partial class MainWindow : Window
     {
         if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
         if (DataContext is not MainViewModel vm) return;
+        CopyVrcdnUrlToClipboard(vm, photo);
+    }
 
+    /// <summary>Also the cloud-icon badge's click handler (CloudIcon_MouseLeftButtonUp) - that
+    /// badge only ever shows when RemoteStatus is Uploaded (see MainWindow.xaml's
+    /// RemoteStatusToVisibilityConverter usage), so its RemoteUrl is always non-null in
+    /// practice, but the null-check/status-message fallback is kept shared here anyway rather
+    /// than duplicated, in case that ever changes.</summary>
+    private void CopyVrcdnUrlToClipboard(MainViewModel vm, PhotoViewModel photo)
+    {
         if (photo.RemoteUrl is string url)
         {
             Clipboard.SetText(url);
             vm.StatusMessage = "Copied VRCDN URL to clipboard.";
+            vm.ShowToast("Copied VRCDN URL to clipboard.");
         }
         else
         {
             vm.StatusMessage = "This photo hasn't been uploaded yet - no VRCDN URL to copy.";
         }
+    }
+
+    private void CloudIcon_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not PhotoViewModel photo) return;
+        if (DataContext is not MainViewModel vm) return;
+        e.Handled = true;
+        CopyVrcdnUrlToClipboard(vm, photo);
     }
 
     private void TagFaces_Click(object sender, RoutedEventArgs e)
@@ -446,6 +465,20 @@ public partial class MainWindow : Window
 
     private static readonly IEasingFunction PreviewEase = new QuadraticEase { EasingMode = EasingMode.EaseOut };
     private static readonly TimeSpan PreviewAnimDuration = TimeSpan.FromMilliseconds(180);
+
+    /// <summary>MainViewModel.ToastRequested handler - fades ToastOverlay in, holds it, then
+    /// fades it out, all as one KeyFrame animation so a second toast arriving mid-animation
+    /// (BeginAnimation replaces the running one outright) just restarts the same cycle with the
+    /// new text instead of needing separate timer bookkeeping to cancel/reschedule anything.</summary>
+    private void ShowToast(string message)
+    {
+        ToastText.Text = message;
+        var opacity = new DoubleAnimationUsingKeyFrames();
+        opacity.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
+        opacity.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2200))));
+        opacity.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2600))));
+        ToastOverlay.BeginAnimation(UIElement.OpacityProperty, opacity);
+    }
 
     /// <summary>Grows in from 85% scale + a slight upward slide instead of popping in at full
     /// size instantly - the instant version felt too sudden (found via direct feedback).</summary>

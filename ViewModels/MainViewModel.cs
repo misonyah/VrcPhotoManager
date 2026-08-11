@@ -240,6 +240,17 @@ public class MainViewModel : INotifyPropertyChanged
         set { _statusMessage = value; OnPropertyChanged(); }
     }
 
+    /// <summary>A brief, more noticeable pop-up notification than the status bar (which is easy
+    /// to miss, especially mid-way through a batch action's own progress updates) - MainWindow
+    /// subscribes once and animates a fade-in/hold/fade-out toast for whatever text comes
+    /// through. Raised automatically by RecordActionSuccess for every long-running action's
+    /// genuine completion (reuses that moment's StatusMessage text, so no per-action wiring is
+    /// needed), and callable directly (ShowToast) for one-off UI feedback like a clipboard
+    /// copy that isn't a RecordActionSuccess-tracked action.</summary>
+    public event Action<string>? ToastRequested;
+
+    public void ShowToast(string message) => ToastRequested?.Invoke(message);
+
     public ICommand ScanLibraryCommand { get; }
     public RelayCommand ScanFacesCommand { get; }
     public RelayCommand SuggestFacesCommand { get; }
@@ -252,6 +263,21 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand UploadSelectedCommand { get; }
     public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
+    public RelayCommand DeselectAllCommand { get; }
+
+    /// <summary>Drives the Deselect button's "Deselect {n} photos" label - kept up to date by
+    /// RaiseSelectionDependentCommands, the same place Upload/Remove-from-VRCDN's CanExecute
+    /// already gets re-evaluated on every selection change.</summary>
+    public int SelectedCount => _allPhotos.Count(p => p.Selected);
+
+    private Task DeselectAllAsync()
+    {
+        foreach (var photo in _allPhotos.Where(p => p.Selected).ToList())
+        {
+            photo.Selected = false;
+        }
+        return Task.CompletedTask;
+    }
 
     /// <summary>Appends a "Last succeeded: ..." (or "Never run yet.") line to an action
     /// button's static explanation text - baseText stays authored here rather than in XAML so
@@ -273,15 +299,20 @@ public class MainViewModel : INotifyPropertyChanged
         return $"{baseText}\n\n{lastLine}{gateLine}";
     }
 
-    /// <summary>Records this action's success (for the tooltip line above) and notifies the
-    /// corresponding Tooltip property so a currently-open or next-shown tooltip reflects it.
-    /// Called once, right at each action method's genuine completion point - never from an
-    /// early "unavailable"/cancelled/nothing-to-do return, so a button that never actually ran
-    /// keeps showing "Never run yet." instead of a misleading timestamp.</summary>
+    /// <summary>Records this action's success (for the tooltip line above), notifies the
+    /// corresponding Tooltip property so a currently-open or next-shown tooltip reflects it, and
+    /// pops a toast with whatever StatusMessage that action already set as its final
+    /// human-readable completion text (e.g. "Face scan complete: 12 faces found across 340
+    /// photos.") - free toast coverage for every long-running action without touching each one's
+    /// individual code. Called once, right at each action method's genuine completion point -
+    /// never from an early "unavailable"/cancelled/nothing-to-do return, so a button that never
+    /// actually ran keeps showing "Never run yet." instead of a misleading timestamp (and
+    /// doesn't pop a toast for doing nothing).</summary>
     private void RecordActionSuccess(string actionKey, string tooltipPropertyName)
     {
         _repo.RecordActionSuccess(actionKey);
         OnPropertyChanged(tooltipPropertyName);
+        ShowToast(StatusMessage);
     }
 
     public string LoginTooltip => GetActionTooltip("Login",
@@ -373,6 +404,7 @@ public class MainViewModel : INotifyPropertyChanged
         UploadSelectedCommand = new RelayCommand(UploadSelectedAsync, CanUploadSelected);
         RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
         CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
+        DeselectAllCommand = new RelayCommand(DeselectAllAsync, () => _allPhotos.Any(p => p.Selected));
 
         _statusMessage = "Loading...";
         _ = InitializeAsync();
@@ -519,6 +551,8 @@ public class MainViewModel : INotifyPropertyChanged
     {
         UploadSelectedCommand.RaiseCanExecuteChanged();
         RemoveFromVrcdnCommand.RaiseCanExecuteChanged();
+        DeselectAllCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(SelectedCount));
     }
 
     /// <summary>Result of the background-thread probe for one file - kept free of any
