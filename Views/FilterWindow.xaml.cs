@@ -32,4 +32,11 @@ public partial class FilterWindow : Window
     {
         if (DataContext is MainViewModel vm) vm.ClearFilters();
     }
+
+    private void RemovePlayerFilterRow_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        if ((sender as FrameworkElement)?.DataContext is not PlayerFilterRow row) return;
+        vm.RemovePlayerFilterCriterion(row);
+    }
 }

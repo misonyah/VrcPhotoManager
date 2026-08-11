@@ -293,10 +293,46 @@ public class PhotoRepository
             .ToList();
     }
 
+    /// <summary>Distinct photo count per VrcUserId, across both PhotoPlayers and authored
+    /// photos (same "present" definition as GetPhotoIdsForUser) - drives the player-filter
+    /// dropdown's "(tagged/in-photos)" annotation. Pulled into memory as flat (UserId, PhotoId)
+    /// pairs and unioned per user in C# rather than a SQL-side set union across two tables -
+    /// same "small table, load it all" tradeoff already used elsewhere in this class (e.g.
+    /// GetAllAliasesGroupedByUser) for tables in the few-thousand-row range.</summary>
+    public Dictionary<string, int> GetPresentPhotoCountsByUser()
+    {
+        using var context = NewContext();
+        var byUser = new Dictionary<string, HashSet<long>>();
+
+        foreach (var p in context.PhotoPlayers.AsNoTracking().Select(p => new { p.UserId, p.PhotoId }))
+        {
+            if (!byUser.TryGetValue(p.UserId, out var set)) byUser[p.UserId] = set = [];
+            set.Add(p.PhotoId);
+        }
+        foreach (var p in context.Photos.AsNoTracking().Where(p => p.AuthorId != null)
+            .Select(p => new { UserId = p.AuthorId!, p.Id }))
+        {
+            if (!byUser.TryGetValue(p.UserId, out var set)) byUser[p.UserId] = set = [];
+            set.Add(p.Id);
+        }
+
+        return byUser.ToDictionary(kv => kv.Key, kv => kv.Value.Count);
+    }
+
+    /// <summary>Photos where VRCX recorded this user as present - either in the embedded
+    /// PlayerList (PhotoPlayers) or as the photo's own Author. VRCX's PlayerList doesn't
+    /// reliably duplicate the photographer into their own list (found via a real report: 4
+    /// photos authored by the local account, with only the other person present in
+    /// photo_players) - whoever took the photo was definitionally there, so their authored
+    /// photos are unioned in even when the PlayerList metadata omits them. This matters for
+    /// both directions of the player filter: without it, filtering *to* yourself misses photos
+    /// you took, and filtering yourself *out* (Exclude) wouldn't exclude them either.</summary>
     public HashSet<long> GetPhotoIdsForUser(string vrcUserId)
     {
         using var context = NewContext();
-        return context.PhotoPlayers.Where(p => p.UserId == vrcUserId).Select(p => p.PhotoId).ToHashSet();
+        var playerPhotoIds = context.PhotoPlayers.Where(p => p.UserId == vrcUserId).Select(p => p.PhotoId);
+        var authoredPhotoIds = context.Photos.Where(p => p.AuthorId == vrcUserId).Select(p => p.Id);
+        return playerPhotoIds.Union(authoredPhotoIds).ToHashSet();
     }
 
     public void SetFileHash(long id, string hash)

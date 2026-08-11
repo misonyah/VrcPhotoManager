@@ -534,7 +534,8 @@ public class FaceRepository(string dbPath)
 
     /// <summary>
     /// Every VrcUserId with at least one confirmed visual face tag anywhere in the library -
-    /// drives the player-filter dropdown's "(tagged)" annotation.
+    /// used by App.xaml.cs's startup diagnostic self-test. GetTaggedUserTagCounts below is what
+    /// actually drives the player-filter dropdown's annotation now.
     /// </summary>
     public HashSet<string> GetTaggedUserIds()
     {
@@ -547,6 +548,21 @@ public class FaceRepository(string dbPath)
             .Select(id => id!)
             .Distinct()
             .ToHashSet();
+    }
+
+    /// <summary>Confirmed visual face tag count per VrcUserId, anywhere in the library - drives
+    /// the player-filter dropdown's "(N)" annotation (e.g. "MisoNyah (12)"), so it reads as how
+    /// much tagged data exists for that person rather than just a flat yes/no "(tagged)".</summary>
+    public Dictionary<string, int> GetTaggedUserTagCounts()
+    {
+        using var context = NewContext();
+        var activeFaceIds = context.DetectedFaces.Where(f => !f.Deleted).Select(f => f.Id);
+        return context.FaceLabels.AsNoTracking()
+            .Where(l => l.Confirmed && l.PersonId != null && activeFaceIds.Contains(l.DetectedFaceId))
+            .Join(context.RegisteredPeople, l => l.PersonId, p => p.Id, (l, p) => p.VrcUserId)
+            .Where(id => id != null)
+            .GroupBy(id => id!)
+            .ToDictionary(g => g.Key, g => g.Count());
     }
 
     /// <summary>

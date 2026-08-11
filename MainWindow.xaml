@@ -182,7 +182,9 @@
 
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0"
                        ToolTip="Search for a player to filter the photo list.&#10;Also matches old names and stylized usernames.&#10;&#10;'(tagged)' = you've confirmed a face tag for them.&#10;'(manual)' = added by name, not yet linked to a VRC account." />
-            <views:PlayerFilterPicker x:Name="PlayerFilterPicker" Width="170" Margin="0,0,8,0" />
+            <views:PlayerFilterPicker x:Name="PlayerFilterPicker" Width="170" Margin="0,0,8,0"
+                                      SelectedOption="{Binding SelectedPlayerFilter, Mode=TwoWay}"
+                                      SearchSource="{Binding}" />
             <CheckBox Content="Tagged" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Only show photos where you've confirmed a face tag for this person.&#10;Turn off to also include photos where VRCX just recorded them as present." />

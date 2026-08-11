@@ -192,17 +192,78 @@ public class MainViewModel : INotifyPropertyChanged
 
     private static readonly PlayerFilterOption AllPlayersOption = new(null, null, "(all players)");
 
-    private PlayerFilterOption _selectedPlayerFilter = AllPlayersOption;
+    /// <summary>FilterWindow's multi-player filter list (see PlayerFilterRow) - always shaped
+    /// with exactly one trailing empty row by EnsurePlayerFilterCriteriaShape, so picking a
+    /// player in what was the last row automatically reveals a fresh empty one beneath it.
+    /// GetFilteredSortedPhotos intersects every non-empty non-Exclude row's photo set and
+    /// subtracts every Exclude row's (e.g. "everyone but me").</summary>
+    public ObservableCollection<PlayerFilterRow> PlayerFilterCriteria { get; } = [];
+
+    /// <summary>MainWindow's single filter-bar box can only ever represent one player at a
+    /// time, so it's a compatibility view onto PlayerFilterCriteria rather than its own
+    /// separate state: reading it returns the first non-empty row's option (or "(all players)"
+    /// if there isn't one - see PlayerFilterPicker's CollapseWhenMultiple for how the box
+    /// itself shows a "N players filtered" summary instead once there's more than one),
+    /// and setting it (the only thing that box's picker can do) replaces the *entire* criteria
+    /// list with just that one Include row, same as picking a single player always did before
+    /// FilterWindow could add more.</summary>
     public PlayerFilterOption SelectedPlayerFilter
     {
-        get => _selectedPlayerFilter;
+        get => PlayerFilterCriteria.FirstOrDefault(r => !r.IsEmpty)?.Option ?? AllPlayersOption;
         set
         {
-            _selectedPlayerFilter = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(CanFilterTaggedOnly));
-            RebuildRows();
+            PlayerFilterCriteria.Clear();
+            if (value.VrcUserId is not null || value.PersonId is not null)
+            {
+                PlayerFilterCriteria.Add(NewPlayerFilterRow(value));
+            }
+            OnPlayerFilterCriteriaChanged();
         }
+    }
+
+    private PlayerFilterRow NewPlayerFilterRow(PlayerFilterOption option)
+    {
+        var row = new PlayerFilterRow(option);
+        row.Changed += (_, _) => OnPlayerFilterCriteriaChanged();
+        return row;
+    }
+
+    /// <summary>Keeps PlayerFilterCriteria shaped as "zero or more real (non-empty) rows,
+    /// followed by exactly one empty row" - drops any empty row that isn't last (a row cleared
+    /// back to "(all players)" in the middle of the list just disappears rather than leaving a
+    /// gap), and appends a fresh empty one if the list is empty or its last row just became
+    /// real. Called after every row change (PlayerFilterRow.Changed) and by
+    /// RefreshPlayerFilterOptions at startup.</summary>
+    private void EnsurePlayerFilterCriteriaShape()
+    {
+        for (int i = PlayerFilterCriteria.Count - 2; i >= 0; i--)
+        {
+            if (PlayerFilterCriteria[i].IsEmpty) PlayerFilterCriteria.RemoveAt(i);
+        }
+        if (PlayerFilterCriteria.Count == 0 || !PlayerFilterCriteria[^1].IsEmpty)
+        {
+            PlayerFilterCriteria.Add(NewPlayerFilterRow(AllPlayersOption));
+        }
+    }
+
+    private void OnPlayerFilterCriteriaChanged()
+    {
+        EnsurePlayerFilterCriteriaShape();
+        OnPropertyChanged(nameof(SelectedPlayerFilter));
+        OnPropertyChanged(nameof(CanFilterTaggedOnly));
+        RebuildRows();
+    }
+
+    /// <summary>FilterWindow's per-row remove ("x") button - explicit removal rather than just
+    /// clearing the row back to "(all players)", since clearing it would leave it in place as
+    /// the new trailing empty row when it's already the last one, or get silently dropped by
+    /// EnsurePlayerFilterCriteriaShape's "no empty rows except the last" rule when it isn't -
+    /// either way that's a confusing way to express "get rid of this filter" compared to a
+    /// dedicated button.</summary>
+    public void RemovePlayerFilterCriterion(PlayerFilterRow row)
+    {
+        PlayerFilterCriteria.Remove(row);
+        OnPlayerFilterCriteriaChanged();
     }
 
     private List<PlayerFilterOption> _playerFilterOptions = [AllPlayersOption];
@@ -212,8 +273,9 @@ public class MainViewModel : INotifyPropertyChanged
         private set { _playerFilterOptions = value; OnPropertyChanged(); }
     }
 
-    /// <summary>The "Tagged only" checkbox is meaningless with no specific player selected.</summary>
-    public bool CanFilterTaggedOnly => SelectedPlayerFilter.VrcUserId is not null;
+    /// <summary>The "Tagged only" checkbox is meaningless with no VRC-linked player required by
+    /// any active row.</summary>
+    public bool CanFilterTaggedOnly => PlayerFilterCriteria.Any(r => !r.IsEmpty && r.Option.VrcUserId is not null);
 
     private bool _taggedOnlyFilter;
     public bool TaggedOnlyFilter
@@ -405,6 +467,7 @@ public class MainViewModel : INotifyPropertyChanged
         RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
         CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
         DeselectAllCommand = new RelayCommand(DeselectAllAsync, () => _allPhotos.Any(p => p.Selected));
+        EnsurePlayerFilterCriteriaShape();
 
         _statusMessage = "Loading...";
         _ = InitializeAsync();
@@ -1029,14 +1092,20 @@ public class MainViewModel : INotifyPropertyChanged
 
     /// <summary>Rebuilds the player-filter dropdown from the current library state - called
     /// once at startup and again after the Tag Faces window closes, so newly-tagged people
-    /// show "(tagged)" without needing a full app restart.</summary>
+    /// show their current tag/photo counts without needing a full app restart.</summary>
     public void RefreshPlayerFilterOptions()
     {
-        var taggedIds = _faces.GetTaggedUserIds();
+        var taggedCounts = _faces.GetTaggedUserTagCounts();
+        var presentCounts = _repo.GetPresentPhotoCountsByUser();
 
+        // "(tagged/in-photos)" - confirmed face tags vs. total photos they're present in
+        // (PhotoPlayers or as author - see GetPresentPhotoCountsByUser). Every VRCX-sourced
+        // player here has at least one PhotoPlayers row (that's how GetDistinctPlayers found
+        // them), so the second number is never 0; the first commonly is, for anyone not yet
+        // tagged.
         var vrcxPlayers = _repo.GetDistinctPlayers().Select(p =>
             (Name: p.DisplayName, Option: new PlayerFilterOption(p.UserId, null,
-                taggedIds.Contains(p.UserId) ? $"{p.DisplayName} (tagged)" : p.DisplayName)));
+                $"{p.DisplayName} ({taggedCounts.GetValueOrDefault(p.UserId)}/{presentCounts.GetValueOrDefault(p.UserId)})")));
 
         // Manually-created people (typed in the Tag Faces "new person" box, no linked VRC id)
         // never show up in VRCX's own player data - mixed into the same sorted list (not
@@ -1498,24 +1567,35 @@ public class MainViewModel : INotifyPropertyChanged
         {
             filtered = filtered.Where(p => p.Model.AuthorId == _selfUserId);
         }
-        if (SelectedPlayerFilter.VrcUserId is string userId)
+        // Every non-empty row narrows further: an Include row intersects (the photo must have
+        // THIS player too, on top of whatever earlier rows already required), an Exclude row
+        // subtracts (the photo must NOT have this player - e.g. "everyone but me"). Order
+        // between rows doesn't matter since each is applied as its own independent Where.
+        foreach (var row in PlayerFilterCriteria.Where(r => !r.IsEmpty))
         {
-            // "Tagged only" stands on its own - it must NOT further narrow the VRCX-presence
-            // set below, since a confirmed face tag can exist on a photo VRCX never matched a
-            // player to at all (e.g. a manually-drawn box, or metadata scanning missed them).
-            // Requiring both would silently hide correctly-tagged photos (found via a real
-            // report: Sayakiss tagged on a photo with zero photo_players rows).
-            var photoIds = TaggedOnlyFilter
-                ? _faces.GetTaggedPhotoIdsForUser(userId)
-                : _repo.GetPhotoIdsForUser(userId);
-            filtered = filtered.Where(p => photoIds.Contains(p.Model.Id));
-        }
-        else if (SelectedPlayerFilter.PersonId is long personId)
-        {
-            // Manual person - no VRCX presence data to filter from, so "selected" already
-            // means "show their tagged photos" (see GetTaggedPhotoIdsForPerson).
-            var taggedPhotoIds = _faces.GetTaggedPhotoIdsForPerson(personId);
-            filtered = filtered.Where(p => taggedPhotoIds.Contains(p.Model.Id));
+            if (row.Option.VrcUserId is string userId)
+            {
+                // "Tagged only" stands on its own - it must NOT further narrow the VRCX-presence
+                // set below, since a confirmed face tag can exist on a photo VRCX never matched a
+                // player to at all (e.g. a manually-drawn box, or metadata scanning missed them).
+                // Requiring both would silently hide correctly-tagged photos (found via a real
+                // report: Sayakiss tagged on a photo with zero photo_players rows).
+                var photoIds = TaggedOnlyFilter
+                    ? _faces.GetTaggedPhotoIdsForUser(userId)
+                    : _repo.GetPhotoIdsForUser(userId);
+                filtered = row.Exclude
+                    ? filtered.Where(p => !photoIds.Contains(p.Model.Id))
+                    : filtered.Where(p => photoIds.Contains(p.Model.Id));
+            }
+            else if (row.Option.PersonId is long personId)
+            {
+                // Manual person - no VRCX presence data to filter from, so "selected" already
+                // means "show their tagged photos" (see GetTaggedPhotoIdsForPerson).
+                var taggedPhotoIds = _faces.GetTaggedPhotoIdsForPerson(personId);
+                filtered = row.Exclude
+                    ? filtered.Where(p => !taggedPhotoIds.Contains(p.Model.Id))
+                    : filtered.Where(p => taggedPhotoIds.Contains(p.Model.Id));
+            }
         }
         filtered = FaceCountFilter switch
         {
