@@ -106,6 +106,7 @@ public class PhotoRepository
                 AvatarType = p.AvatarType,
                 AvatarTypeConfidence = p.AvatarTypeConfidence,
                 MetadataScanned = p.MetadataScanned,
+                FacesScanned = p.FacesScanned,
                 AuthorId = p.AuthorId,
                 AuthorDisplayName = p.AuthorDisplayName,
                 WorldName = p.WorldName,
@@ -137,6 +138,12 @@ public class PhotoRepository
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id)
             .ExecuteUpdate(s => s.SetProperty(p => p.Width, width).SetProperty(p => p.Height, height));
+    }
+
+    public void SetFacesScanned(long id)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s.SetProperty(p => p.FacesScanned, true));
     }
 
     public void SetVrcxMetadata(
@@ -534,6 +541,17 @@ public class PhotoRepository
 
     public void SetBoolSetting(string key, bool value) =>
         SetStringSetting(key, value ? "true" : "false");
+
+    public double GetDoubleSetting(string key, double defaultValue)
+    {
+        string? value = GetStringSetting(key);
+        return value is not null && double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : defaultValue;
+    }
+
+    public void SetDoubleSetting(string key, double value) =>
+        SetStringSetting(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     /// <summary>Last time this action button ran to completion without a fatal error - shown
     /// as an extra tooltip line (see MainViewModel's action Tooltip properties). Stored as a

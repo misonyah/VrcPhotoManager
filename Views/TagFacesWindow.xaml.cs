@@ -988,6 +988,25 @@ public partial class TagFacesWindow : Window
         RedrawBoxes();
     }
 
+    /// <summary>Bulk cleanup for once you've tagged everyone you recognize in this photo: every
+    /// remaining untagged (yellow) box - no FaceLabel row at all, i.e. never reviewed, not the
+    /// same as the gray "confirmed as &lt;unknown&gt;" state - is a bad detection by elimination,
+    /// so this does the same thing DeleteFaceButton_Click does per-box, just for all of them in
+    /// one click instead of clicking Delete box on each one individually.</summary>
+    private void AllTaggedButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingManualFaceId = null;
+        PersonPickerPopup.IsOpen = false;
+        foreach (var face in _detectedFaces)
+        {
+            if (_labelsByFaceId.ContainsKey(face.Id)) continue;
+            _faces.ResolveSuggestionLog(face.Id, SuggestionOutcome.Ignored);
+            _faces.DeleteDetectedFace(face.Id);
+        }
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
     private void ApplyTag(RegisteredPerson person, FaceLabelSource source = FaceLabelSource.Manual)
     {
         _faces.UpsertFaceLabel(_activeFaceId, person.Id, confirmed: true, source);

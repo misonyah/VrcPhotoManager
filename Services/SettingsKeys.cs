@@ -11,4 +11,6 @@ public static class SettingsKeys
     public const string ClipModelEtag = "clip_model_etag";
     public const string AvatarModelEtag = "avatar_model_etag";
     public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
+    public const string HoverPreviewDelaySeconds = "hover_preview_delay_seconds";
+    public const string SkipResolvedPhotosOnFaceScan = "skip_resolved_photos_on_face_scan";
 }

@@ -66,9 +66,12 @@
             </Grid>
         </ScrollViewer>
 
-        <TextBlock Grid.Row="2"
-                   Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;. Click-drag empty space to add a missed face. Scroll to zoom, middle-drag to pan."
-                   Margin="8" Foreground="Gray" />
+        <DockPanel Grid.Row="2" Margin="8">
+            <Button DockPanel.Dock="Right" Content="All tagged" Click="AllTaggedButton_Click" Padding="8,2" VerticalAlignment="Center"
+                    ToolTip="Everyone identifiable in this photo has been tagged - mark every remaining untagged (yellow) box as a bad detection, same as clicking Delete box on each one.&#10;Kept in the database for reviewing detection quality later, just hidden from view here." />
+            <TextBlock Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;. Click-drag empty space to add a missed face. Scroll to zoom, middle-drag to pan."
+                       Foreground="Gray" Margin="0,0,8,0" VerticalAlignment="Center" />
+        </DockPanel>
 
         <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True"
                Closed="PersonPickerPopup_Closed">

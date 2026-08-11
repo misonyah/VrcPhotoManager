@@ -86,6 +86,24 @@ public class FaceRepository(string dbPath)
             .ToDictionary(g => g.Key, g => (Total: g.Count(), Tagged: g.Count(r => r.IsTagged)));
     }
 
+    /// <summary>Photo ids with at least one detected face nobody has reviewed yet - no
+    /// FaceLabel row at all, and not soft-deleted (see DeleteDetectedFace/TagFacesWindow's
+    /// "All tagged" button). Combined with Photo.FacesScanned (PhotoRepository), this lets
+    /// Detect Faces skip re-invoking the ML detector on photos that are fully resolved: every
+    /// detection already tagged, marked &lt;unknown&gt;, or deleted, so there's nothing left to
+    /// find. A never-scanned photo (FacesScanned=false) is never in this set - it wouldn't have
+    /// any DetectedFaces rows yet either way - so the caller must still check FacesScanned
+    /// separately for that case.</summary>
+    public HashSet<long> GetPhotoIdsWithUnresolvedFaces()
+    {
+        using var context = NewContext();
+        var labeledFaceIds = context.FaceLabels.Select(l => l.DetectedFaceId).ToHashSet();
+        return context.DetectedFaces
+            .Where(f => !f.Deleted && !labeledFaceIds.Contains(f.Id))
+            .Select(f => f.PhotoId)
+            .ToHashSet();
+    }
+
     /// <summary>Adds a single manually-drawn face box (the detector missed a real face) - same
     /// row shape as an auto-detected one, so it goes through the exact same tagging picker.</summary>
     public DetectedFace AddManualFace(long photoId, FaceBox box)

@@ -327,6 +327,12 @@ public class MainViewModel : INotifyPropertyChanged
     /// there's no need for a separate "reload after Settings closes" step.</summary>
     public bool AutoCopyUrlOnHover => _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
 
+    /// <summary>Same "read fresh, no reload step needed" reasoning as AutoCopyUrlOnHover -
+    /// MainWindow's ResetHoverTimer reads this on every MouseEnter rather than caching it once
+    /// at startup, so a change in Settings takes effect on the very next hover instead of
+    /// needing an app restart.</summary>
+    public double HoverPreviewDelaySeconds => _repo.GetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, 0.25);
+
     public MainViewModel()
     {
         // Deliberately still "VrcdnManager" - the on-disk data folder name, kept stable
@@ -675,6 +681,17 @@ public class MainViewModel : INotifyPropertyChanged
 
         StatusMessage = "Scanning for faces...";
         var photos = _allPhotos.ToList();
+        // A fully-resolved photo (already scanned, and every detection it found is now tagged,
+        // marked <unknown>, or deleted - e.g. via TagFacesWindow's "All tagged" button) has
+        // nothing left for the detector to find, so re-running it there is wasted ML inference.
+        // Opt-out via Settings (SkipResolvedPhotosOnFaceScan) for a deliberate full rescan, e.g.
+        // after swapping in a better detector model.
+        if (_repo.GetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, true))
+        {
+            var unresolvedIds = _faces.GetPhotoIdsWithUnresolvedFaces();
+            photos = photos.Where(p => !p.Model.FacesScanned || unresolvedIds.Contains(p.Model.Id)).ToList();
+        }
+
         int processed = 0, totalFaces = 0;
         foreach (var vm in photos)
         {
@@ -682,6 +699,8 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 var faces = await Task.Run(() => _faceDetector.DetectFaces(vm.Model.LocalPath));
                 _faces.InsertDetectedFaces(vm.Model.Id, faces);
+                _repo.SetFacesScanned(vm.Model.Id);
+                vm.Model.FacesScanned = true;
                 totalFaces += faces.Count;
             }
             catch (Exception ex)

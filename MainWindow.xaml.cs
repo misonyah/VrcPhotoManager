@@ -475,6 +475,10 @@ public partial class MainWindow : Window
         if (element is null) return;
         _hoverTarget = element;
         _hoverTimer.Stop();
+        // Read live (not cached at construction) so a change in Settings' preview-delay slider
+        // takes effect on the very next hover, no restart needed - matches AutoCopyUrlOnHover's
+        // "read fresh every time" convention.
+        if (DataContext is MainViewModel vm) _hoverTimer.Interval = TimeSpan.FromSeconds(vm.HoverPreviewDelaySeconds);
         _hoverTimer.Start();
     }
 

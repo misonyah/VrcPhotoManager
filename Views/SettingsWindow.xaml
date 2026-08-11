@@ -58,6 +58,19 @@
                   Margin="0,0,0,12"
                   ToolTip="Automatically copy the photo's VRCDN URL to your clipboard whenever you hover over it.&#10;Clears the clipboard instead if the photo isn't uploaded yet." />
 
+        <TextBlock Text="Preview pop-up delay:" Margin="0,0,0,4"
+                   ToolTip="How long the cursor has to stay on a thumbnail before the full-size hover preview pops up.&#10;Takes effect on the very next hover - no restart needed." />
+        <DockPanel Margin="0,0,0,12"
+                   ToolTip="How long the cursor has to stay on a thumbnail before the full-size hover preview pops up.&#10;Takes effect on the very next hover - no restart needed.">
+            <TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=HoverDelaySlider, Path=Value, StringFormat={}{0:0.00}s}"
+                       Width="42" Margin="4,0,0,0" VerticalAlignment="Center" />
+            <Slider x:Name="HoverDelaySlider" Minimum="0" Maximum="2" TickFrequency="0.05" IsSnapToTickEnabled="True" />
+        </DockPanel>
+
+        <CheckBox x:Name="SkipResolvedPhotosCheckBox" Content="Skip fully-tagged photos when running Detect Faces"
+                  Margin="0,0,0,12"
+                  ToolTip="Once every face detected in a photo is tagged, marked &lt;unknown&gt;, or deleted (e.g. via Tag Faces' &quot;All tagged&quot; button), there's nothing left to find - skip re-running the ML detector on it.&#10;Turn off for a deliberate full rescan of everything, e.g. after switching to a better detector model." />
+
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
             Changes take effect the next time you start VRC Photo Manager.
         </TextBlock>

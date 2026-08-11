@@ -40,6 +40,16 @@ public class Photo
     /// Scan Library doesn't keep re-parsing PNG chunks for photos that genuinely lack it.
     /// </summary>
     public bool MetadataScanned { get; set; }
+
+    /// <summary>Same "checked, there was none" vs. "not checked yet" distinction as
+    /// MetadataScanned, but for Detect Faces - a photo genuinely has zero faces in it
+    /// sometimes, and without this flag that's indistinguishable from "never run the detector
+    /// on this photo at all" (both have zero DetectedFaces rows), so Detect Faces would keep
+    /// re-invoking the ML detector on it forever. Combined with whether any of the photo's
+    /// DetectedFaces are still unresolved (see FaceRepository.GetPhotoIdsWithUnresolvedFaces),
+    /// this lets a re-run skip photos with nothing left to find.</summary>
+    public bool FacesScanned { get; set; }
+
     public string? AuthorId { get; set; }
     public string? AuthorDisplayName { get; set; }
     public string? WorldName { get; set; }

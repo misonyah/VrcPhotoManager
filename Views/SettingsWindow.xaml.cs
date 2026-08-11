@@ -51,6 +51,8 @@ public partial class SettingsWindow : Window
         AvatarModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedAvatarDir) ? DefaultModelPaths.Avatar : savedAvatarDir;
 
         AutoCopyUrlCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
+        HoverDelaySlider.Value = _repo.GetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, 0.25);
+        SkipResolvedPhotosCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, true);
 
         DownloadStatusText.Text = GetModelStatusText(ModelDirTextBox.Text, "model.onnx", "selected_tags.csv");
         DownloadClipStatusText.Text = GetModelStatusText(ClipModelDirTextBox.Text, "model.onnx");
@@ -264,6 +266,8 @@ public partial class SettingsWindow : Window
         _repo.SetStringSetting(SettingsKeys.ClipModelDir, ClipModelDirTextBox.Text.Trim());
         _repo.SetStringSetting(SettingsKeys.AvatarModelDir, AvatarModelDirTextBox.Text.Trim());
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
+        _repo.SetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, HoverDelaySlider.Value);
+        _repo.SetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, SkipResolvedPhotosCheckBox.IsChecked == true);
         DialogResult = true;
         Close();
     }

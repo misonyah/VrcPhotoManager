@@ -48,6 +48,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.AvatarType).HasColumnName("avatar_type");
             entity.Property(p => p.AvatarTypeConfidence).HasColumnName("avatar_type_confidence");
             entity.Property(p => p.MetadataScanned).HasColumnName("metadata_scanned");
+            entity.Property(p => p.FacesScanned).HasColumnName("faces_scanned");
             entity.Property(p => p.AuthorId).HasColumnName("author_id");
             entity.Property(p => p.AuthorDisplayName).HasColumnName("author_display_name");
             entity.Property(p => p.WorldName).HasColumnName("world_name");
