@@ -150,6 +150,23 @@ public class MainViewModel : INotifyPropertyChanged
     }
     public string MinSuggestionConfidenceLabel => _minSuggestionConfidence <= 0 ? "Off" : _minSuggestionConfidence.ToString("F2");
 
+    /// <summary>Resets every filter (both the main bar's and FilterWindow's, since both bind to
+    /// this same MainViewModel instance) back to "show everything" - each setter already raises
+    /// its own OnPropertyChanged/RebuildRows, so this is just "set them all to their defaults"
+    /// rather than needing its own separate notification/rebuild logic.</summary>
+    public void ClearFilters()
+    {
+        RatingFilter = "All";
+        StatusFilter = "All";
+        AvatarTypeFilter = "Any";
+        SelectedPlayerFilter = AllPlayersOption;
+        TaggedOnlyFilter = false;
+        OwnPhotosOnlyFilter = false;
+        FaceCountFilter = "Any";
+        PlayerCountFilter = "Any";
+        MinSuggestionConfidence = 0;
+    }
+
     private string _sortOption = "Date (Newest First)";
     public string SortOption
     {
@@ -589,17 +606,13 @@ public class MainViewModel : INotifyPropertyChanged
                     if (needsMetadataScan)
                     {
                         var meta = probe.Metadata;
-                        string? playerNames = meta?.Players is { Count: > 0 }
-                            ? string.Join("\n", meta.Players.Select(p => $"{p.DisplayName} {{{p.Id}}}"))
-                            : null;
                         var players = meta?.Players?.Select(p => (p.Id, p.DisplayName));
-                        _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, meta?.World?.Id, playerNames, players);
+                        _repo.SetVrcxMetadata(id, meta?.Author?.Id, meta?.Author?.DisplayName, meta?.World?.Name, meta?.World?.Id, players);
                         existing.Model.MetadataScanned = true;
                         existing.Model.AuthorId = meta?.Author?.Id;
                         existing.Model.AuthorDisplayName = meta?.Author?.DisplayName;
                         existing.Model.WorldName = meta?.World?.Name;
                         existing.Model.WorldId = meta?.World?.Id;
-                        existing.Model.PlayerNames = playerNames;
                         existing.NotifyMetadataChanged();
                     }
 
@@ -711,7 +724,11 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         var missingPlayerIds = _repo.GetPhotoIdsMissingPlayerData();
-        var missingWorldIds = _repo.GetPhotoIdsMissingWorldName();
+        // Both sets feed the same TryGetWorld lookup below - GetPhotoIdsMissingWorldName covers
+        // photos with no world name at all, GetPhotoIdsNeedingWorldIdBackfill covers photos
+        // already gamelog-inferred before world_id was read from VRCX (see its doc comment) and
+        // just need the id filled in.
+        var missingWorldIds = _repo.GetPhotoIdsMissingWorldName().Union(_repo.GetPhotoIdsNeedingWorldIdBackfill()).ToHashSet();
         var missingIds = missingPlayerIds.Union(missingWorldIds).ToHashSet();
         var candidates = _allPhotos.Where(p => missingIds.Contains(p.Model.Id)).ToList();
 
@@ -735,11 +752,12 @@ public class MainViewModel : INotifyPropertyChanged
 
                 if (missingWorldIds.Contains(vm.Model.Id))
                 {
-                    string? worldName = await Task.Run(() => gamelog.TryGetWorldName(time));
-                    if (worldName is not null)
+                    var world = await Task.Run(() => gamelog.TryGetWorld(time));
+                    if (world is not null)
                     {
-                        _repo.SetWorldNameInferred(vm.Model.Id, worldName);
-                        vm.Model.WorldName = worldName;
+                        _repo.SetWorldNameInferred(vm.Model.Id, world.Value.WorldName, world.Value.WorldId);
+                        vm.Model.WorldName = world.Value.WorldName;
+                        vm.Model.WorldId = world.Value.WorldId;
                         vm.Model.WorldNameInferred = true;
                         matchedAnything = true;
                     }
@@ -1361,6 +1379,48 @@ public class MainViewModel : INotifyPropertyChanged
 
     private void RebuildRows()
     {
+        int columns = Math.Max(1, (int)(_gridWidth / (_thumbnailSize + RowMargin)));
+        var filtered = GetFilteredSortedPhotos();
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            Rows.Clear();
+            foreach (var chunk in Chunk(filtered, columns))
+            {
+                Rows.Add(new PhotoRow(chunk));
+            }
+        });
+    }
+
+    /// <summary>Rebuilds Rows the same way RebuildRows does, but with leadingBlankCount null
+    /// entries prepended to the flat filtered/sorted list before chunking - all real photos
+    /// stay grouped with the same neighbors they'd normally have, just shifted as a block. Only
+    /// row 0 ever ends up with blanks (leadingBlankCount is always less than the column count -
+    /// see MainWindow's Alt+scroll handler, the only caller), so every row after the first is
+    /// unaffected. Used to keep the photo under the cursor roughly in place across a thumbnail-
+    /// size resize, where the plain unpadded rebuild that ThumbnailSize's setter already
+    /// triggers would otherwise reflow which row/column a given photo lands in.</summary>
+    public void RebuildRowsWithLeadingPadding(int leadingBlankCount)
+    {
+        int columns = Math.Max(1, (int)(_gridWidth / (_thumbnailSize + RowMargin)));
+        var filtered = GetFilteredSortedPhotos();
+
+        var padded = new List<object?>(leadingBlankCount + filtered.Count);
+        padded.AddRange(Enumerable.Repeat<object?>(null, leadingBlankCount));
+        padded.AddRange(filtered);
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            Rows.Clear();
+            foreach (var chunk in Chunk(padded, columns))
+            {
+                Rows.Add(new PhotoRow(chunk));
+            }
+        });
+    }
+
+    private List<PhotoViewModel> GetFilteredSortedPhotos()
+    {
         IEnumerable<PhotoViewModel> filtered = _allPhotos;
         if (RatingFilter != "All")
         {
@@ -1432,16 +1492,7 @@ public class MainViewModel : INotifyPropertyChanged
             _ => filtered.OrderBy(p => p.Model.LocalPath),
         };
 
-        int columns = Math.Max(1, (int)(_gridWidth / (_thumbnailSize + RowMargin)));
-
-        Application.Current.Dispatcher.Invoke(() =>
-        {
-            Rows.Clear();
-            foreach (var chunk in Chunk(filtered.ToList(), columns))
-            {
-                Rows.Add(new PhotoRow(chunk));
-            }
-        });
+        return filtered.ToList();
     }
 
     private static List<List<T>> Chunk<T>(List<T> source, int size)

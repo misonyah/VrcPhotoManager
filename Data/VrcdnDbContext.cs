@@ -53,7 +53,6 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.WorldName).HasColumnName("world_name");
             entity.Property(p => p.WorldId).HasColumnName("world_id");
             entity.Property(p => p.WorldNameInferred).HasColumnName("world_name_inferred");
-            entity.Property(p => p.PlayerNames).HasColumnName("player_names");
             entity.Property(p => p.Selected).HasColumnName("selected");
             entity.Property(p => p.RemoteStatus).HasColumnName("remote_status").HasConversion<string>();
             entity.Property(p => p.RemoteUrl).HasColumnName("remote_url");

@@ -55,7 +55,9 @@ public partial class MetadataWindow : Window
         p.Inlines.Add(new Run("\n"));
 
         p.Inlines.Add(new Run($"Upload status: {m.RemoteStatus}\n"));
-        p.Inlines.Add(new Run($"Remote URL:    {m.RemoteUrl ?? "-"}\n"));
+        p.Inlines.Add(new Run("Remote URL:    "));
+        p.Inlines.Add(m.RemoteUrl is string remoteUrl ? DirectLink(remoteUrl) : new Run("-"));
+        p.Inlines.Add(new Run("\n"));
         p.Inlines.Add(new Run($"Uploaded at:   {m.UploadedAt ?? "-"}"));
 
         doc.Blocks.Add(p);
@@ -67,7 +69,15 @@ public partial class MetadataWindow : Window
     private static Inline VrcLink(string? id, string? displayText, string urlTemplate)
     {
         if (id is null) return new Run(displayText ?? "-");
-        var link = new Hyperlink(new Run(displayText ?? id)) { NavigateUri = new Uri(string.Format(urlTemplate, id)) };
+        return DirectLink(string.Format(urlTemplate, id), displayText ?? id);
+    }
+
+    /// <summary>A clickable link to an already-complete URL (as opposed to VrcLink, which builds
+    /// the URL from a template + id) - used for the VRCDN remote URL, which has no id/template
+    /// split.</summary>
+    private static Hyperlink DirectLink(string url, string? displayText = null)
+    {
+        var link = new Hyperlink(new Run(displayText ?? url)) { NavigateUri = new Uri(url) };
         link.Click += (_, _) => Process.Start(new ProcessStartInfo(link.NavigateUri.ToString()) { UseShellExecute = true });
         return link;
     }

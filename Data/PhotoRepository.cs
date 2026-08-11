@@ -103,11 +103,14 @@ public class PhotoRepository
                 FileHash = p.FileHash,
                 HasThumbnail = p.Thumbnail != null,
                 Rating = p.Rating,
+                AvatarType = p.AvatarType,
+                AvatarTypeConfidence = p.AvatarTypeConfidence,
                 MetadataScanned = p.MetadataScanned,
                 AuthorId = p.AuthorId,
                 AuthorDisplayName = p.AuthorDisplayName,
                 WorldName = p.WorldName,
-                PlayerNames = p.PlayerNames,
+                WorldId = p.WorldId,
+                WorldNameInferred = p.WorldNameInferred,
                 Selected = p.Selected,
                 RemoteStatus = p.RemoteStatus,
                 RemoteUrl = p.RemoteUrl,
@@ -138,7 +141,7 @@ public class PhotoRepository
 
     public void SetVrcxMetadata(
         long id, string? authorId, string? authorDisplayName, string? worldName, string? worldId,
-        string? playerNames, IEnumerable<(string UserId, string DisplayName)>? players = null)
+        IEnumerable<(string UserId, string DisplayName)>? players = null)
     {
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s
@@ -146,8 +149,7 @@ public class PhotoRepository
             .SetProperty(p => p.AuthorId, authorId)
             .SetProperty(p => p.AuthorDisplayName, authorDisplayName)
             .SetProperty(p => p.WorldName, worldName)
-            .SetProperty(p => p.WorldId, worldId)
-            .SetProperty(p => p.PlayerNames, playerNames));
+            .SetProperty(p => p.WorldId, worldId));
 
         // Replace this photo's stored players (re-scanning shouldn't accumulate duplicates -
         // same idempotency approach as FaceRepository.InsertDetectedFaces).
@@ -231,21 +233,34 @@ public class PhotoRepository
     }
 
     /// <summary>Photo ids with no WorldName at all - eligible set for the gamelog world-name
-    /// fallback (GamelogCorrelationService.TryGetWorldName). Same "only ever fills a gap"
-    /// contract as GetPhotoIdsMissingPlayerData.</summary>
+    /// fallback (GamelogCorrelationService.TryGetWorld). Same "only ever fills a gap" contract
+    /// as GetPhotoIdsMissingPlayerData.</summary>
     public HashSet<long> GetPhotoIdsMissingWorldName()
     {
         using var context = NewContext();
         return context.Photos.Where(p => p.WorldName == null).Select(p => p.Id).ToHashSet();
     }
 
-    /// <summary>Sets WorldName from the gamelog fallback and marks it as inferred (as opposed
-    /// to VRChat's own embedded PNG metadata) - see Photo.WorldNameInferred.</summary>
-    public void SetWorldNameInferred(long photoId, string worldName)
+    /// <summary>Photo ids already gamelog-inferred (WorldNameInferred) but still missing a
+    /// WorldId - a one-time backfill set for photos processed before GamelogCorrelationService
+    /// started reading VRCX's world_id column. Distinct from GetPhotoIdsMissingWorldName: those
+    /// have no name at all, these have a name but need only the id filled in, via the same
+    /// GamelogCorrelationService.TryGetWorld lookup.</summary>
+    public HashSet<long> GetPhotoIdsNeedingWorldIdBackfill()
+    {
+        using var context = NewContext();
+        return context.Photos.Where(p => p.WorldNameInferred && p.WorldId == null).Select(p => p.Id).ToHashSet();
+    }
+
+    /// <summary>Sets WorldName (and WorldId, when the gamelog happened to record one) from the
+    /// gamelog fallback and marks it as inferred (as opposed to VRChat's own embedded PNG
+    /// metadata) - see Photo.WorldNameInferred.</summary>
+    public void SetWorldNameInferred(long photoId, string worldName, string? worldId)
     {
         using var context = NewContext();
         var photo = context.Photos.First(p => p.Id == photoId);
         photo.WorldName = worldName;
+        photo.WorldId = worldId;
         photo.WorldNameInferred = true;
         context.SaveChanges();
     }

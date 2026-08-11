@@ -1,0 +1,37 @@
+<UserControl x:Class="VrcPhotoManager.Views.PlayerFilterPicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <TextBox x:Name="PlayerFilterTextBox"
+                 GotFocus="PlayerFilterTextBox_GotFocus" LostFocus="PlayerFilterTextBox_LostFocus"
+                 TextChanged="PlayerFilterTextBox_TextChanged" PreviewKeyDown="PlayerFilterTextBox_PreviewKeyDown"
+                 ToolTip="Search for a player to filter the photo list.&#10;Also matches old names and stylized usernames.&#10;&#10;'(tagged)' = you've confirmed a face tag for them.&#10;'(manual)' = added by name, not yet linked to a VRC account." />
+        <!-- Shown only while the box is empty (i.e. no specific player selected) -
+             "(all players)" is still a real, clickable entry in the dropdown below, it
+             just isn't what the closed box displays for that state. -->
+        <TextBlock x:Name="PlayerFilterPlaceholder" Text="All players" Foreground="Gray"
+                   Margin="6,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+        <Popup x:Name="PlayerFilterPopup" PlacementTarget="{Binding ElementName=PlayerFilterTextBox}"
+               Placement="Bottom" Width="260" StaysOpen="False" AllowsTransparency="True">
+            <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1">
+                <ListBox x:Name="PlayerFilterListBox" MaxHeight="240" MouseUp="PlayerFilterListBox_MouseUp">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="4,2" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsManual}" Value="True">
+                                    <Setter Property="Foreground" Value="DarkOrange" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding DisplayText}" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

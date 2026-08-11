@@ -51,14 +51,6 @@ public class Photo
     /// spirit as GamelogInferredPlayer being a separate table from PhotoPlayer.</summary>
     public bool WorldNameInferred { get; set; }
 
-    /// <summary>Display-ready text, one player per line as "DisplayName {UserId}" - flat text
-    /// is enough for both display and substring filtering (the actual filter use case)
-    /// without needing a join table for that. The same ids also live in the separate
-    /// PhotoPlayer table for structured lookups, since display names can change over time but
-    /// ids don't. Only photos re-scanned since this format was introduced have ids here -
-    /// older entries may still be the plain comma-joined name list from before.</summary>
-    public string? PlayerNames { get; set; }
-
     public bool Selected { get; set; }
     public RemoteStatus RemoteStatus { get; set; } = RemoteStatus.NotUploaded;
     public string? RemoteUrl { get; set; }

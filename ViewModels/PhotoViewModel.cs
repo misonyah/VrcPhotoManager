@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -40,11 +42,27 @@ public class PhotoViewModel : INotifyPropertyChanged
     public string? RemoteUrl => Model.RemoteUrl;
     public string? AuthorDisplayName => Model.AuthorDisplayName;
     public string? WorldName => Model.WorldName;
-    public string? PlayerNames => Model.PlayerNames;
 
-    public string PlayersTooltip => Model.MetadataScanned
-        ? (Model.PlayerNames is null ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers:\n{Model.PlayerNames}")
-        : "Not scanned yet";
+    /// <summary>Built on demand from the real PhotoPlayer/GamelogInferredPlayer rows -
+    /// PhotoRepository's actual relational source of truth for a photo's players (see
+    /// SetVrcxMetadata/InsertGamelogInferredPlayers), rather than a flattened string column.
+    /// Queried live rather than cached since this only runs once per hover-preview pop-up, not
+    /// per photo in the grid.</summary>
+    public string PlayersTooltip
+    {
+        get
+        {
+            if (!Model.MetadataScanned) return "Not scanned yet";
+
+            var players = _repo.GetPlayersForPhoto(Model.Id);
+            IEnumerable<string> names = players.Count > 0
+                ? players.Select(p => p.DisplayName)
+                : _repo.GetGamelogInferredPlayersForPhoto(Model.Id).Select(p => p.DisplayName);
+
+            string joined = string.Join(", ", names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            return joined.Length == 0 ? "No VRCX metadata" : $"{Model.WorldName}\nPlayers: {joined}";
+        }
+    }
 
     /// <summary>Whether VRCX embedded any real metadata for this photo - drives the small
     /// people-icon badge on the thumbnail. Not the same signal as DetectedFaceCount (that's
@@ -173,7 +191,6 @@ public class PhotoViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(PlayersTooltip));
         OnPropertyChanged(nameof(AuthorDisplayName));
         OnPropertyChanged(nameof(WorldName));
-        OnPropertyChanged(nameof(PlayerNames));
     }
 
     public void NotifyThumbnailReady()

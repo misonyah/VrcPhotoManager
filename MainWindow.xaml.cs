@@ -15,27 +15,79 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _hoverTimer;
     private FrameworkElement? _hoverTarget;
     private Views.TagFacesWindow? _openTagFacesWindow;
+    private Views.FilterWindow? _openFilterWindow;
 
-    /// <summary>The photo the preview overlay is currently showing, if any - MouseMove (not
-    /// just MouseEnter) restarts the hover-debounce timer so the preview keeps tracking small
-    /// cursor movements within the same thumbnail, which means the timer can tick again for a
-    /// photo it's already showing. Without this check, that replayed the whole grow-in
-    /// animation from scratch on every tick even though nothing actually changed (found via a
-    /// real report of the animation restarting mid-hover).</summary>
+    /// <summary>The photo the preview overlay is currently showing, if any - guards
+    /// HoverTimer_Tick against redoing the grow-in animation from scratch if its timer somehow
+    /// ticks again for a photo it's already showing (found via a real report of the animation
+    /// restarting mid-hover, back when MouseMove also restarted the timer - see
+    /// ResetHoverTimer's doc comment for why only MouseEnter does now).</summary>
     private PhotoViewModel? _currentPreviewPhoto;
+
+    /// <summary>Tracks rapid-succession plain-scroll wheel notches for HandleRowScroll's
+    /// acceleration - see its doc comment.</summary>
+    private DateTime _lastRowScrollTime;
+    private int _lastRowScrollDelta;
+    private int _rowScrollStreak;
 
     public MainWindow()
     {
         InitializeComponent();
         var viewModel = new MainViewModel();
         DataContext = viewModel;
-        SetPlayerFilterText(TextBoxTextFor(viewModel.SelectedPlayerFilter));
 
         _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.25) };
         _hoverTimer.Tick += HoverTimer_Tick;
 
         Closing += (_, _) => viewModel.RequestShutdown();
         PreviewMouseWheel += MainWindow_PreviewMouseWheel;
+        PreviewKeyDown += MainWindow_PreviewKeyDown;
+    }
+
+    /// <summary>Pressing Alt alone starts WPF's internal menu-access-key gesture (it's how
+    /// Alt+letter mnemonics work), which captures/swallows subsequent input - including mouse
+    /// wheel - until something (typically a click) cancels it. That's a much better fit for the
+    /// "scrolling needs a click after Alt+wheel-resize" symptom than stale hit-testing was: the
+    /// Mouse.Synchronize() deferral in MainWindow_PreviewMouseWheel targeted hit-testing and
+    /// never actually fixed it. Marking the Alt key event handled here stops that gesture from
+    /// starting in the first place, for Alt+wheel or a bare Alt tap.</summary>
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.System && (e.SystemKey == Key.LeftAlt || e.SystemKey == Key.RightAlt))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            if (DataContext is MainViewModel vm) OpenFilterWindow(vm);
+        }
+    }
+
+    private void FilterButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm) OpenFilterWindow(vm);
+    }
+
+    /// <summary>Singleton by the same reasoning as OpenTagFaces - not for data-safety here (the
+    /// filter window has no local state of its own, everything's a live binding to vm), just to
+    /// avoid window clutter from Ctrl+F/the button spawning a new one every time. No Owner, same
+    /// reasoning as OpenTagFaces too.</summary>
+    private void OpenFilterWindow(MainViewModel vm)
+    {
+        if (_openFilterWindow is not null)
+        {
+            _openFilterWindow.Activate();
+            return;
+        }
+
+        var window = new Views.FilterWindow(vm);
+        _openFilterWindow = window;
+        window.Closed += (_, _) => _openFilterWindow = null;
+        window.Show();
+        window.Activate();
     }
 
     /// <summary>
@@ -45,35 +97,56 @@ public partial class MainWindow : Window
     /// Matches the Slider's own Minimum="80"/Maximum="400" range (see MainWindow.xaml) - a
     /// direct property set isn't clamped by the Slider the way a drag would be.
     ///
-    /// Resizing changes both the row height (ThumbnailSize) AND the column count (items per
-    /// row shrinks as thumbnails grow), so the row a given photo ends up in shifts - without
-    /// correction, the grid visibly jumps and whatever was under the cursor is gone. Hit-test
-    /// which photo is under the cursor *before* resizing, remember how far down that photo (as
-    /// a 0-1 fraction) the cursor was, then after resizing, use ScrollIntoView (not a
-    /// hand-computed absolute offset) to bring that photo's new row into view and fine-tune
-    /// from its REAL measured position.
+    /// Resizing changes both the row height AND the column count (items per row shrinks as
+    /// thumbnails grow), so both the row AND the column a given photo ends up in shift - without
+    /// correction, the grid visibly jumps in both directions and whatever was under the cursor
+    /// is gone. Hit-test which photo is under the cursor *before* resizing and remember how far
+    /// down it (0-1 fraction) the cursor was, plus which column the cursor is over.
     ///
-    /// Tried computing an absolute target offset directly (newRowIndex * newRowHeight ± cursor
-    /// position) first - that visibly jumped on even a single scroll notch (confirmed via
-    /// direct feedback), because VirtualizingStackPanel's ScrollableHeight for rows outside the
-    /// realized range is only an estimate, and can still reflect the OLD thumbnail size right
-    /// after a resize - our absolute-offset math assumed the NEW size applied uniformly to
-    /// content WPF hadn't actually re-measured yet. ScrollIntoView sidesteps that: it's WPF's
-    /// own primitive for scrolling to a virtualized item and forces the item to actually
-    /// realize/measure, so following up with a real TranslatePoint reading (not an estimate)
-    /// for the fine adjustment is trustworthy.
+    /// Vertical correction: every row is exactly ThumbnailSize+RowMargin tall (every cell -
+    /// including BlankCellTemplate - is sized to that, see MainWindow.xaml), so the anchor row's
+    /// absolute scroll offset is just newRowIndex * newCellSize - no need to realize the row's
+    /// container and read back its real position. An earlier version called ScrollIntoView
+    /// first to get a real measured position via TranslatePoint - that worked, but ScrollIntoView
+    /// itself scrolls instantly, so by the time the animation ran there was nothing perceptible
+    /// left for it to smooth (confirmed via direct feedback: "doesn't seem smooth yet"). The
+    /// analytic offset needs no realized container, so nothing has to jump ahead of the
+    /// animation.
+    ///
+    /// Horizontal correction: there's no horizontal ScrollViewer to lean on (the grid always
+    /// fits width and wraps), so leading blank placeholder cells (null entries in row 0's
+    /// Items - see PhotoRow's doc comment and MainViewModel.RebuildRowsWithLeadingPadding) are
+    /// used instead - just enough of them that the anchor photo's flat index falls into the
+    /// desired column once re-chunked. A per-row invisible spacer was tried first instead of
+    /// placeholder cells - it never broke anything, but looked visually off (direct feedback),
+    /// so this reverts to the originally-requested placeholder-cell approach.
     /// </summary>
     private void MainWindow_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.Alt) return;
         if (DataContext is not MainViewModel vm) return;
+
+        // This is a Window-level handler (tunnels down from the window before the actual
+        // control under the cursor sees the event), so without this check it steals wheel
+        // input meant for anything else - ComboBox dropdowns, the player-filter popup - and
+        // resize/scrolls the main grid instead (found via direct report: "search comboboxes
+        // aren't scrollable anymore"). Only handle the wheel here when the cursor is actually
+        // over the photo grid itself.
+        if (e.OriginalSource is not DependencyObject source || !IsDescendantOf(source, PhotoGrid)) return;
+
+        if (Keyboard.Modifiers != ModifierKeys.Alt)
+        {
+            HandleRowScroll(vm, e);
+            return;
+        }
+
         e.Handled = true;
 
         // Hides the preview overlay for the duration of active resizing rather than letting it
         // pop up mid-resize - each Alt+scroll notch re-hides it before the hover timer's 0.25s
         // delay can complete, so it only reappears once you've actually stopped scrolling and
         // settled on a photo. Also sidesteps _hoverTarget going stale when the row it points at
-        // gets rebuilt (RebuildRows below), same as it always would for any Rows change.
+        // gets rebuilt (RebuildRowsWithLeadingPadding below), same as it always would for any
+        // Rows change.
         HidePreviewOverlay();
 
         Point cursor = e.GetPosition(PhotoGrid);
@@ -83,50 +156,86 @@ public partial class MainWindow : Window
         vm.ThumbnailSize = Math.Clamp(vm.ThumbnailSize + step, 80, 400);
 
         if (anchor is null) return;
-        var (flatIndex, fractionY, fractionX) = anchor.Value;
+        int flatIndex = anchor.Value;
+
+        int newColumns = Math.Max(1, (int)(vm.GridWidth / (vm.ThumbnailSize + MainViewModel.RowMargin)));
+        double newCellSize = vm.ThumbnailSize + MainViewModel.RowMargin;
+
+        int desiredCol = Math.Clamp((int)(cursor.X / newCellSize), 0, newColumns - 1);
+        int leadingBlanks = ((desiredCol - flatIndex) % newColumns + newColumns) % newColumns;
+        // ThumbnailSize's setter above already triggered one (unpadded) RebuildRows - this
+        // replaces it with the padded version. The extra rebuild is a small, one-off cost per
+        // scroll notch, not worth restructuring ThumbnailSize's setter contract over (the
+        // Slider uses the same setter and has no need for padding logic at all).
+        vm.RebuildRowsWithLeadingPadding(leadingBlanks);
+
+        int newRowIndex = (leadingBlanks + flatIndex) / newColumns;
 
         // Deferred to Loaded priority - the Rows collection just changed synchronously above,
         // but the virtualizing panel needs an actual layout pass (container generation for the
         // new column count/item size) before ScrollIntoView has anything real to scroll to.
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            int newColumns = Math.Max(1, (int)(vm.GridWidth / (vm.ThumbnailSize + MainViewModel.RowMargin)));
-            int newRowIndex = flatIndex / newColumns;
-            int newColIndex = flatIndex % newColumns;
             if (newRowIndex < 0 || newRowIndex >= vm.Rows.Count) return;
-            var targetRow = vm.Rows[newRowIndex];
-
-            PhotoGrid.ScrollIntoView(targetRow);
-            PhotoGrid.UpdateLayout();
-
-            if (PhotoGrid.ItemContainerGenerator.ContainerFromItem(targetRow) is not FrameworkElement rowContainer) return;
             if (FindVisualChild<ScrollViewer>(PhotoGrid) is not ScrollViewer scrollViewer) return;
 
-            double newCellSize = vm.ThumbnailSize + MainViewModel.RowMargin;
+            PhotoGrid.UpdateLayout();
 
-            double actualRowTopY = rowContainer.TranslatePoint(new Point(0, 0), PhotoGrid).Y;
-            double desiredRowTopY = cursor.Y - fractionY * newCellSize;
-            double delta = actualRowTopY - desiredRowTopY;
-            scrollViewer.ScrollToVerticalOffset(Math.Max(0, scrollViewer.VerticalOffset + delta));
-
-            // There's no horizontal ScrollViewer (the grid always fits width and wraps), so the
-            // only way to nudge one specific row's items sideways is a leading spacer on that
-            // row (PhotoRow.LeadingOffset) - solved for so this row's photo at newColIndex lands
-            // at the cursor's original fraction-across-the-item position. Capped at half the
-            // cell size: at most, this shifts the row's content by less than one column, so it
-            // never opens up a full-column-wide visible gap.
-            double desiredItemLeftX = cursor.X - fractionX * newCellSize;
-            double leadingOffset = desiredItemLeftX - newColIndex * newCellSize;
-            targetRow.LeadingOffset = Math.Clamp(leadingOffset, 0, newCellSize / 2);
+            // Snaps the anchor row to the top of the viewport rather than trying to keep the
+            // cursor at the same fractional pixel position within it - simpler, and reads
+            // better per direct feedback than the fractional version did. Clamped to
+            // ScrollableHeight so a resize near the bottom of the list can't request an offset
+            // past what's actually scrollable.
+            double targetOffset = Math.Clamp(newRowIndex * newCellSize, 0, scrollViewer.ScrollableHeight);
 
             // Programmatic scrolling moves content out from under a stationary cursor without
             // WPF's internal "what's under the mouse" tracking noticing on its own - it stays
             // stale until some other input (a click, a hover onto a different element) forces a
             // recompute, which is why plain scrolling needed a click first afterward (confirmed
-            // via direct feedback). Mouse.Synchronize() is the standard WPF workaround: it
-            // forces that recompute artificially, right here, instead of waiting for one.
-            Mouse.Synchronize();
+            // via direct feedback). Mouse.Synchronize() is the standard WPF workaround, but it
+            // has to run once the scroll has actually landed at its final position - with the
+            // animated scroll below, that's the animation's Completed event, not a fixed defer.
+            ScrollAnimation.AnimateTo(scrollViewer, targetOffset, PreviewAnimDuration, PreviewEase,
+                onCompleted: Mouse.Synchronize);
         });
+    }
+
+    /// <summary>How many consecutive notches (within RowScrollStreakWindow, same direction) it
+    /// takes to reach the maximum per-notch row multiplier.</summary>
+    private const int RowScrollMaxStreak = 8;
+    private const double RowScrollMaxMultiplier = 7.0;
+    private static readonly TimeSpan RowScrollStreakWindow = TimeSpan.FromMilliseconds(350);
+
+    /// <summary>Plain (non-Alt) wheel scrolling snaps to whole thumbnail rows instead of WPF's
+    /// default fixed-line scroll amount, and animates the move the same way the Alt+resize
+    /// correction does (same helper, same easing) - a run of wheel notches re-seeds each new
+    /// animation from the ScrollViewer's real (already-interpolating) offset, so it reads as one
+    /// continuous smooth scroll rather than a series of discrete jumps.
+    ///
+    /// Accelerates on rapid successive notches in the same direction (a real flick of the wheel
+    /// rather than one deliberate click), scaling the row multiplier up to RowScrollMaxMultiplier
+    /// over RowScrollMaxStreak notches so a fast scroll covers ground quickly instead of crawling
+    /// one row at a time. Any pause longer than RowScrollStreakWindow, or a direction reversal,
+    /// resets the streak back to a single row - deliberate single clicks stay precise.</summary>
+    private void HandleRowScroll(MainViewModel vm, MouseWheelEventArgs e)
+    {
+        if (FindVisualChild<ScrollViewer>(PhotoGrid) is not ScrollViewer scrollViewer) return;
+        e.Handled = true;
+
+        int delta = Math.Sign(e.Delta);
+        DateTime now = DateTime.UtcNow;
+        bool continuesStreak = delta == _lastRowScrollDelta && now - _lastRowScrollTime < RowScrollStreakWindow;
+        _rowScrollStreak = continuesStreak ? Math.Min(_rowScrollStreak + 1, RowScrollMaxStreak) : 0;
+        _lastRowScrollDelta = delta;
+        _lastRowScrollTime = now;
+
+        double multiplier = 1 + (RowScrollMaxMultiplier - 1) * _rowScrollStreak / RowScrollMaxStreak;
+        double rowHeight = vm.ThumbnailSize + MainViewModel.RowMargin;
+        double targetOffset = Math.Clamp(
+            scrollViewer.VerticalOffset - delta * rowHeight * multiplier,
+            0, scrollViewer.ScrollableHeight);
+
+        ScrollAnimation.AnimateTo(scrollViewer, targetOffset, PreviewAnimDuration, PreviewEase);
     }
 
     /// <summary>Hit-tests PhotoGrid at the given point (walking up from whatever the point-test
@@ -147,37 +256,28 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Finds which photo is under cursorInGrid (already in PhotoGrid's own coordinate
-    /// space, e.g. from e.GetPosition(PhotoGrid)), that photo's flat index in the current Rows
-    /// (summed across preceding rows rather than assumed from a fixed column count, since the
-    /// last row can be short), and how far across (FractionX, 0=left/1=right) and down
-    /// (FractionY, 0=top/1=bottom) that specific item the cursor sits. Null if
-    /// FindAnchorElement found nothing under the cursor.</summary>
-    private (int FlatIndex, double FractionY, double FractionX)? FindAnchor(MainViewModel vm, Point cursorInGrid)
+    /// space, e.g. from e.GetPosition(PhotoGrid)) and that photo's flat index in the current
+    /// Rows (summed across preceding rows rather than assumed from a fixed column count, since
+    /// the last row can be short). Null if FindAnchorElement found nothing under the cursor.
+    ///
+    /// Only the flat index is needed - the resize correction snaps the anchor's row to the top
+    /// of the viewport rather than trying to keep the cursor at the same fractional pixel
+    /// position within it (an earlier version returned FractionY/FractionX for that finer
+    /// correction; per direct feedback, per-row snapping reads better than the fractional
+    /// version did).</summary>
+    private int? FindAnchor(MainViewModel vm, Point cursorInGrid)
     {
         var element = FindAnchorElement(cursorInGrid, out PhotoViewModel? target);
         if (element is null || target is null) return null;
 
         int flatIndex = 0;
-        bool found = false;
         foreach (var row in vm.Rows)
         {
             int indexInRow = row.Items.ToList().IndexOf(target);
-            if (indexInRow >= 0)
-            {
-                flatIndex += indexInRow;
-                found = true;
-                break;
-            }
+            if (indexInRow >= 0) return flatIndex + indexInRow;
             flatIndex += row.Items.Count;
         }
-        if (!found) return null;
-
-        Point itemTopLeft = element.TranslatePoint(new Point(0, 0), PhotoGrid);
-        double itemHeight = element.ActualHeight > 0 ? element.ActualHeight : vm.ThumbnailSize;
-        double itemWidth = element.ActualWidth > 0 ? element.ActualWidth : vm.ThumbnailSize;
-        double fractionY = Math.Clamp((cursorInGrid.Y - itemTopLeft.Y) / itemHeight, 0, 1);
-        double fractionX = Math.Clamp((cursorInGrid.X - itemTopLeft.X) / itemWidth, 0, 1);
-        return (flatIndex, fractionY, fractionX);
+        return null;
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
@@ -189,6 +289,20 @@ public partial class MainWindow : Window
             if (FindVisualChild<T>(child) is T found) return found;
         }
         return null;
+    }
+
+    /// <summary>Walks up the visual tree from element looking for ancestor. Popup content (a
+    /// ComboBox dropdown, PlayerFilterPopup's list) has no visual-tree path back to the main
+    /// window's content - VisualTreeHelper.GetParent hits null at the popup boundary - so this
+    /// correctly returns false for anything rendered inside one.</summary>
+    private static bool IsDescendantOf(DependencyObject? element, DependencyObject ancestor)
+    {
+        while (element is not null)
+        {
+            if (ReferenceEquals(element, ancestor)) return true;
+            element = VisualTreeHelper.GetParent(element);
+        }
+        return false;
     }
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
@@ -293,85 +407,10 @@ public partial class MainWindow : Window
             // The selected filter's DisplayText (e.g. a "(tagged)" suffix) can change as a
             // result of tagging - resync the box so it doesn't show stale text for the
             // still-active selection.
-            SetPlayerFilterText(TextBoxTextFor(vm.SelectedPlayerFilter));
+            PlayerFilterPicker.SyncDisplayText();
         };
         window.Show();
         window.Activate();
-    }
-
-    /// <summary>
-    /// Player filter autocomplete - same search-as-you-type shape as Tag Faces' person picker
-    /// (MainViewModel.SearchPlayerFilterOptions does the alias-aware fuzzy matching), but for a
-    /// filter selection rather than a tag action: clicking a match commits it via
-    /// SelectedPlayerFilter, and losing focus without picking anything reverts the box back to
-    /// whatever filter is still actually active - a plain ComboBox with ~1800 players in
-    /// alphabetical order was unusable for finding one specific person by name (found via a
-    /// real report).
-    /// </summary>
-    private void PlayerFilterTextBox_GotFocus(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel vm) return;
-        PlayerFilterListBox.ItemsSource = vm.SearchPlayerFilterOptions(PlayerFilterTextBox.Text);
-        PlayerFilterPopup.IsOpen = true;
-        PlayerFilterTextBox.SelectAll();
-    }
-
-    /// <summary>"(all players)" is a real, clickable row in the dropdown (so typing "all"
-    /// still finds it), but showing that literal text in the closed box read as if a player
-    /// named "(all players)" were selected - blank (with the "All players" gray placeholder
-    /// text behind it) reads as "no filter" the way an empty search box normally would.</summary>
-    private static string TextBoxTextFor(MainViewModel.PlayerFilterOption option) =>
-        option.VrcUserId is null && option.PersonId is null ? "" : option.DisplayText;
-
-    private void SetPlayerFilterText(string text)
-    {
-        PlayerFilterTextBox.Text = text;
-        PlayerFilterPlaceholder.Visibility = text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    /// <summary>
-    /// Deferred to the dispatcher's Background priority so a click that's selecting an item in
-    /// PlayerFilterListBox - which also fires this LostFocus, since the popup is a separate
-    /// hwnd - gets to run its own MouseUp handler first. By the time this runs,
-    /// SelectedPlayerFilter (and this box's Text) already reflects any new choice, so
-    /// reapplying it here is a harmless no-op in that case; it only actually changes anything
-    /// when the user typed a search and then clicked away without picking a result, where it
-    /// correctly reverts the stray typed text back to the filter that's still really active.
-    /// </summary>
-    private void PlayerFilterTextBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
-        {
-            if (DataContext is not MainViewModel vm) return;
-            PlayerFilterPopup.IsOpen = false;
-            SetPlayerFilterText(TextBoxTextFor(vm.SelectedPlayerFilter));
-        });
-    }
-
-    private void PlayerFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (DataContext is not MainViewModel vm) return;
-        PlayerFilterPlaceholder.Visibility = PlayerFilterTextBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        PlayerFilterListBox.ItemsSource = vm.SearchPlayerFilterOptions(PlayerFilterTextBox.Text);
-        PlayerFilterPopup.IsOpen = true;
-    }
-
-    private void PlayerFilterTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Escape) return;
-        if (DataContext is not MainViewModel vm) return;
-        e.Handled = true;
-        PlayerFilterPopup.IsOpen = false;
-        SetPlayerFilterText(TextBoxTextFor(vm.SelectedPlayerFilter));
-    }
-
-    private void PlayerFilterListBox_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (DataContext is not MainViewModel vm) return;
-        if (PlayerFilterListBox.SelectedItem is not MainViewModel.PlayerFilterOption option) return;
-        vm.SelectedPlayerFilter = option;
-        SetPlayerFilterText(TextBoxTextFor(option));
-        PlayerFilterPopup.IsOpen = false;
     }
 
     private void PhotoGrid_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -384,7 +423,6 @@ public partial class MainWindow : Window
     }
 
     private void PhotoItem_MouseEnter(object sender, MouseEventArgs e) => ResetHoverTimer(sender as FrameworkElement);
-    private void PhotoItem_MouseMove(object sender, MouseEventArgs e) => ResetHoverTimer(sender as FrameworkElement);
 
     private void PhotoItem_MouseLeave(object sender, MouseEventArgs e) => HidePreviewOverlay();
 
@@ -424,6 +462,14 @@ public partial class MainWindow : Window
             new DoubleAnimation(20, 0, PreviewAnimDuration) { EasingFunction = PreviewEase });
     }
 
+    /// <summary>Only called from MouseEnter now, deliberately not MouseMove too - it used to
+    /// also restart on every MouseMove within the same photo, which meant ordinary cursor
+    /// jitter while waiting for the preview to appear kept resetting the countdown before it
+    /// ever completed a full uninterrupted 0.25s (found via direct feedback: the preview
+    /// sometimes never popped up at all). Once it HAS shown, further movement within the same
+    /// photo doesn't need any reset either - HoverTimer_Tick's _currentPreviewPhoto check
+    /// already makes a stray tick for the same photo a no-op, and nothing but MouseLeave hides
+    /// it, so it just stays shown regardless of small in-item movement.</summary>
     private void ResetHoverTimer(FrameworkElement? element)
     {
         if (element is null) return;
@@ -466,5 +512,38 @@ public partial class MainWindow : Window
             // full-res original may be missing/moved since scan, or the clipboard is
             // momentarily locked by another process - either way, just skip silently.
         }
+    }
+}
+
+/// <summary>ScrollViewer.VerticalOffset is a plain CLR property, not a DependencyProperty, so it
+/// can't be targeted by a WPF DoubleAnimation directly - this attached property exists purely as
+/// an animatable proxy: animating it drives ScrollToVerticalOffset on every frame via
+/// OnAnimatedOffsetChanged.</summary>
+internal static class ScrollAnimation
+{
+    private static readonly DependencyProperty AnimatedOffsetProperty = DependencyProperty.RegisterAttached(
+        "AnimatedOffset", typeof(double), typeof(ScrollAnimation),
+        new PropertyMetadata(0.0, OnAnimatedOffsetChanged));
+
+    private static void OnAnimatedOffsetChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ScrollViewer scrollViewer) scrollViewer.ScrollToVerticalOffset((double)e.NewValue);
+    }
+
+    public static void AnimateTo(ScrollViewer scrollViewer, double targetOffset, TimeSpan duration,
+        IEasingFunction easing, Action? onCompleted = null)
+    {
+        // Seeded from the ScrollViewer's real current offset (not the attached property's own
+        // stale value) since nothing else drives AnimatedOffsetProperty - without this, a
+        // second resize mid-animation would start the new animation from wherever the last one
+        // left the proxy property, not from where the ScrollViewer actually is. Same reasoning
+        // makes back-to-back plain-scroll notches (HandleRowScroll) chain smoothly instead of
+        // each one restarting from a stale position.
+        var animation = new DoubleAnimation(scrollViewer.VerticalOffset, targetOffset, duration)
+        {
+            EasingFunction = easing
+        };
+        if (onCompleted is not null) animation.Completed += (_, _) => onCompleted();
+        scrollViewer.BeginAnimation(AnimatedOffsetProperty, animation);
     }
 }

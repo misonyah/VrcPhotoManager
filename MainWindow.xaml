@@ -13,15 +13,109 @@
         <views:RatingToBrushConverter x:Key="RatingToBrushConverter" />
         <views:FaceCountToVisibilityConverter x:Key="FaceCountToVisibilityConverter" />
         <views:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
+        <views:StringNotEmptyToBoolConverter x:Key="StringNotEmptyToBoolConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="PhotoItemStyle" TargetType="Border">
             <Setter Property="Margin" Value="4" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="BorderBrush" Value="#333333" />
             <EventSetter Event="MouseEnter" Handler="PhotoItem_MouseEnter" />
-            <EventSetter Event="MouseMove" Handler="PhotoItem_MouseMove" />
             <EventSetter Event="MouseLeave" Handler="PhotoItem_MouseLeave" />
         </Style>
+
+        <!-- A row's Items can hold a null entry - see PhotoRow's doc comment and
+             MainViewModel.RebuildRowsWithLeadingPadding. PhotoOrBlankTemplateSelector picks
+             BlankCellTemplate for those (an appropriately-sized empty cell, same footprint as
+             a real photo but with nothing in it) so the row still lays out correctly. -->
+        <DataTemplate x:Key="BlankCellTemplate">
+            <Border Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Margin="4" />
+        </DataTemplate>
+        <DataTemplate x:Key="PhotoCellTemplate" DataType="{x:Type vm:PhotoViewModel}">
+            <Border Style="{StaticResource PhotoItemStyle}"
+                    Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Tag="{Binding}">
+                <Border.ContextMenu>
+                    <!-- ContextMenu is a separate visual tree root, so DataContext doesn't
+                         flow to it automatically - this is the standard WPF idiom to recover it. -->
+                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                        <MenuItem Header="Set Rating">
+                            <MenuItem Header="General" Command="{Binding SetRatingCommand}" CommandParameter="general" />
+                            <MenuItem Header="Sensitive" Command="{Binding SetRatingCommand}" CommandParameter="sensitive" />
+                            <MenuItem Header="Questionable" Command="{Binding SetRatingCommand}" CommandParameter="questionable" />
+                            <MenuItem Header="Explicit" Command="{Binding SetRatingCommand}" CommandParameter="explicit" />
+                            <Separator />
+                            <MenuItem Header="Clear (unclassified)" Command="{Binding SetRatingCommand}" CommandParameter="{x:Null}" />
+                        </MenuItem>
+                        <MenuItem Header="View Metadata..." Click="ViewMetadata_Click" />
+                        <MenuItem Header="Tag Faces..." Click="TagFaces_Click" />
+                        <MenuItem Header="Copy VRCDN URL" Click="CopyVrcdnUrl_Click"
+                                  IsEnabled="{Binding RemoteUrl, Converter={StaticResource StringNotEmptyToBoolConverter}}" />
+                    </ContextMenu>
+                </Border.ContextMenu>
+                <Grid>
+                    <!-- Clicking the checkbox toggles it directly (it's drawn on top for its
+                         own bounds, so this handler never double-fires for that click); clicking
+                         anywhere else on the thumbnail toggles selection too, via this handler.
+                         Middle-click opens Tag Faces directly - MouseUp (not MouseLeftButtonUp)
+                         since WPF has no MouseMiddleButtonUp, so the handler itself filters by
+                         ChangedButton to avoid double-handling the left-click case above. -->
+                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
+                           MouseLeftButtonUp="PhotoImage_Click"
+                           MouseUp="PhotoImage_MiddleClick" />
+                    <CheckBox IsChecked="{Binding Selected}"
+                              HorizontalAlignment="Left" VerticalAlignment="Top"
+                              Margin="4" />
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="4" Width="14" Height="14" CornerRadius="7"
+                            BorderBrush="White" BorderThickness="1"
+                            Background="{Binding Rating, Converter={StaticResource RatingToBrushConverter}}"
+                            ToolTip="{Binding Rating}" />
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="4" Padding="4,1" CornerRadius="3"
+                            Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}">
+                        <TextBlock Text="{Binding RemoteStatus}" FontSize="10" Foreground="White" />
+                    </Border>
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                            Margin="4" Padding="4,1" CornerRadius="3"
+                            Background="{Binding FaceCountBadgeBrush}"
+                            Visibility="{Binding DetectedFaceCount, Converter={StaticResource FaceCountToVisibilityConverter}}"
+                            ToolTip="Detected faces (tagged / total)">
+                        <TextBlock Text="{Binding FaceCountDisplay}" FontSize="10" Foreground="White" />
+                    </Border>
+                    <!-- MaxWidth matches the same DataContext.ThumbnailSize binding used by the
+                         outer photo Border's own Width/Height above, so a long/CJK avatar label
+                         (Plan A labels are raw Booth listing titles, some ~53 characters of
+                         Japanese text) can't render wider than the thumbnail and overlap
+                         neighboring photos. TextTrimming + ToolTip keep the full name discoverable
+                         on hover instead of just cutting it off silently. -->
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="4,4,4,20"
+                            Padding="4,1" CornerRadius="3" Background="#CC1B3A5E"
+                            MaxWidth="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                            ToolTip="{Binding AvatarType}"
+                            Visibility="{Binding AvatarType, Converter={StaticResource NullToVisibilityConverter}}">
+                        <TextBlock Text="{Binding AvatarType}" FontSize="10" Foreground="White" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <!-- People icon: VRCX embedded author/world/player metadata for this photo.
+                         Single color for now - a second color tier for "everyone in the photo
+                         has been identified" needs Phase 2+'s person-labeling data, which
+                         doesn't exist yet. -->
+                    <Border HorizontalAlignment="Center" VerticalAlignment="Top"
+                            Margin="4" Width="16" Height="16" CornerRadius="8"
+                            Background="#CC000000"
+                            Visibility="{Binding HasVrcxMetadata, Converter={StaticResource BoolToVisibilityConverter}}"
+                            ToolTip="This photo has VRCX player metadata">
+                        <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+        <local:PhotoOrBlankTemplateSelector x:Key="PhotoOrBlankTemplateSelector"
+                                             PhotoTemplate="{StaticResource PhotoCellTemplate}"
+                                             BlankTemplate="{StaticResource BlankCellTemplate}" />
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -59,39 +153,7 @@
 
             <TextBlock Text="Player:" VerticalAlignment="Center" Margin="0,0,4,0"
                        ToolTip="Search for a player to filter the photo list.&#10;Also matches old names and stylized usernames.&#10;&#10;'(tagged)' = you've confirmed a face tag for them.&#10;'(manual)' = added by name, not yet linked to a VRC account." />
-            <Grid Width="170" Margin="0,0,8,0">
-                <TextBox x:Name="PlayerFilterTextBox"
-                         GotFocus="PlayerFilterTextBox_GotFocus" LostFocus="PlayerFilterTextBox_LostFocus"
-                         TextChanged="PlayerFilterTextBox_TextChanged" PreviewKeyDown="PlayerFilterTextBox_PreviewKeyDown"
-                         ToolTip="Search for a player to filter the photo list.&#10;Also matches old names and stylized usernames.&#10;&#10;'(tagged)' = you've confirmed a face tag for them.&#10;'(manual)' = added by name, not yet linked to a VRC account." />
-                <!-- Shown only while the box is empty (i.e. no specific player selected) -
-                     "(all players)" is still a real, clickable entry in the dropdown below, it
-                     just isn't what the closed box displays for that state. -->
-                <TextBlock x:Name="PlayerFilterPlaceholder" Text="All players" Foreground="Gray"
-                           Margin="6,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
-            </Grid>
-            <Popup x:Name="PlayerFilterPopup" PlacementTarget="{Binding ElementName=PlayerFilterTextBox}"
-                   Placement="Bottom" Width="260" StaysOpen="False" AllowsTransparency="True">
-                <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1">
-                    <ListBox x:Name="PlayerFilterListBox" MaxHeight="240" MouseUp="PlayerFilterListBox_MouseUp">
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="4,2" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsManual}" Value="True">
-                                        <Setter Property="Foreground" Value="DarkOrange" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayText}" />
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Border>
-            </Popup>
+            <views:PlayerFilterPicker x:Name="PlayerFilterPicker" Width="170" Margin="0,0,8,0" />
             <CheckBox Content="Tagged" IsChecked="{Binding TaggedOnlyFilter}" IsEnabled="{Binding CanFilterTaggedOnly}"
                       VerticalAlignment="Center" Margin="0,0,16,0"
                       ToolTip="Only show photos where you've confirmed a face tag for this person.&#10;Turn off to also include photos where VRCX just recorded them as present." />
@@ -162,103 +224,13 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type vm:PhotoRow}">
-                    <StackPanel Orientation="Horizontal">
-                        <!-- Invisible leading spacer, 0-width for every normal row - see
-                             PhotoRow.LeadingOffset. Only the Alt+scroll resize handler in
-                             MainWindow.xaml.cs ever gives this a nonzero width, as a one-off
-                             pixel nudge so the row containing the cursor's photo lines that
-                             photo's X position back up with the cursor after a resize. -->
-                        <Border Width="{Binding LeadingOffset}" />
-                        <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl ItemsSource="{Binding Items}" ItemTemplateSelector="{StaticResource PhotoOrBlankTemplateSelector}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:PhotoViewModel}">
-                                <Border Style="{StaticResource PhotoItemStyle}"
-                                        Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        Tag="{Binding}">
-                                    <Border.ContextMenu>
-                                        <!-- ContextMenu is a separate visual tree root, so DataContext doesn't
-                                             flow to it automatically - this is the standard WPF idiom to recover it. -->
-                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                            <MenuItem Header="Set Rating">
-                                                <MenuItem Header="General" Command="{Binding SetRatingCommand}" CommandParameter="general" />
-                                                <MenuItem Header="Sensitive" Command="{Binding SetRatingCommand}" CommandParameter="sensitive" />
-                                                <MenuItem Header="Questionable" Command="{Binding SetRatingCommand}" CommandParameter="questionable" />
-                                                <MenuItem Header="Explicit" Command="{Binding SetRatingCommand}" CommandParameter="explicit" />
-                                                <Separator />
-                                                <MenuItem Header="Clear (unclassified)" Command="{Binding SetRatingCommand}" CommandParameter="{x:Null}" />
-                                            </MenuItem>
-                                            <MenuItem Header="View Metadata..." Click="ViewMetadata_Click" />
-                                            <MenuItem Header="Tag Faces..." Click="TagFaces_Click" />
-                                            <MenuItem Header="Copy VRCDN URL" Click="CopyVrcdnUrl_Click" />
-                                        </ContextMenu>
-                                    </Border.ContextMenu>
-                                    <Grid>
-                                        <!-- Clicking the checkbox toggles it directly (it's drawn on top for its
-                                             own bounds, so this handler never double-fires for that click); clicking
-                                             anywhere else on the thumbnail toggles selection too, via this handler.
-                                             Middle-click opens Tag Faces directly - MouseUp (not MouseLeftButtonUp)
-                                             since WPF has no MouseMiddleButtonUp, so the handler itself filters by
-                                             ChangedButton to avoid double-handling the left-click case above. -->
-                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
-                                               MouseLeftButtonUp="PhotoImage_Click"
-                                               MouseUp="PhotoImage_MiddleClick" />
-                                        <CheckBox IsChecked="{Binding Selected}"
-                                                  HorizontalAlignment="Left" VerticalAlignment="Top"
-                                                  Margin="4" />
-                                        <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                                                Margin="4" Width="14" Height="14" CornerRadius="7"
-                                                BorderBrush="White" BorderThickness="1"
-                                                Background="{Binding Rating, Converter={StaticResource RatingToBrushConverter}}"
-                                                ToolTip="{Binding Rating}" />
-                                        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                                Margin="4" Padding="4,1" CornerRadius="3"
-                                                Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}">
-                                            <TextBlock Text="{Binding RemoteStatus}" FontSize="10" Foreground="White" />
-                                        </Border>
-                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                                                Margin="4" Padding="4,1" CornerRadius="3"
-                                                Background="{Binding FaceCountBadgeBrush}"
-                                                Visibility="{Binding DetectedFaceCount, Converter={StaticResource FaceCountToVisibilityConverter}}"
-                                                ToolTip="Detected faces (tagged / total)">
-                                            <TextBlock Text="{Binding FaceCountDisplay}" FontSize="10" Foreground="White" />
-                                        </Border>
-                                        <!-- MaxWidth matches the same DataContext.ThumbnailSize binding used by the
-                                             outer photo Border's own Width/Height above, so a long/CJK avatar label
-                                             (Plan A labels are raw Booth listing titles, some ~53 characters of
-                                             Japanese text) can't render wider than the thumbnail and overlap
-                                             neighboring photos. TextTrimming + ToolTip keep the full name discoverable
-                                             on hover instead of just cutting it off silently. -->
-                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="4,4,4,20"
-                                                Padding="4,1" CornerRadius="3" Background="#CC1B3A5E"
-                                                MaxWidth="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                ToolTip="{Binding AvatarType}"
-                                                Visibility="{Binding AvatarType, Converter={StaticResource NullToVisibilityConverter}}">
-                                            <TextBlock Text="{Binding AvatarType}" FontSize="10" Foreground="White" TextTrimming="CharacterEllipsis" />
-                                        </Border>
-                                        <!-- People icon: VRCX embedded author/world/player metadata for this photo.
-                                             Single color for now - a second color tier for "everyone in the photo
-                                             has been identified" needs Phase 2+'s person-labeling data, which
-                                             doesn't exist yet. -->
-                                        <Border HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                Margin="4" Width="16" Height="16" CornerRadius="8"
-                                                Background="#CC000000"
-                                                Visibility="{Binding HasVrcxMetadata, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                ToolTip="This photo has VRCX player metadata">
-                                            <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                                       Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
+                    </ItemsControl>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
@@ -268,6 +240,10 @@
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
                 <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding LoginTooltip}" />
+
+                <Separator Margin="0,0,0,8" />
+                <Button Content="Filter (Ctrl+F)" Click="FilterButton_Click" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="Open a standalone filter panel - the same filters as the bar above, in one window you can keep open on the side." />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8"
