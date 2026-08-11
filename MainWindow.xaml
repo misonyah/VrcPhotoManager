@@ -304,8 +304,8 @@
                 <Button Content="Remove from VRCDN" Command="{Binding RemoveFromVrcdnCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding RemoveFromVrcdnTooltip}" />
                 <Button Command="{Binding DeselectAllCommand}" Padding="8,4" Margin="0,0,0,8"
-                        Content="{Binding SelectedCount, StringFormat='Deselect {0} photos'}"
-                        ToolTip="Clear the current selection." />
+                        Content="{Binding SelectedCount}" ContentStringFormat="Deselect {0} photos"
+                        ToolTip="Clear the current photo selection - the thick gold border marks which photos are selected." />
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
