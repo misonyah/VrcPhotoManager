@@ -57,9 +57,7 @@ public class VrcdnApiClient
         if (resp.Content.Headers.ContentType?.MediaType != "application/json")
         {
             throw new InvalidOperationException(
-                $"VRCDN did not return JSON (got {resp.Content.Headers.ContentType?.MediaType}) - " +
-                $"the session is likely expired or invalid. Log in again. Response started with: " +
-                $"{text[..Math.Min(200, text.Length)]}");
+                "VRCDN session expired or invalid - log in again.");
         }
         return JsonDocument.Parse(text);
     }

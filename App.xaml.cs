@@ -105,6 +105,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 2 && e.Args[0] == "--test-remove-object")
+        {
+            RunRemoveObjectDiagnostic(e.Args[1]);
+            Shutdown();
+            return;
+        }
+
         if (e.Args.Length == 3 && e.Args[0] == "--debug-tag-faces")
         {
             // Verification-only hook (like --debug-login) - accepts a db path (point at a
@@ -346,6 +353,43 @@ public partial class App : Application
         catch (Exception ex)
         {
             Console.WriteLine($"ERROR: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Throwaway diagnostic for a real "Remove from VRCDN didn't work" report - calls
+    /// RemoveObjectAsync directly against a single remote object id and prints the real
+    /// exception/response, since MainViewModel.RemoveFromVrcdnAsync's catch block only shows
+    /// ex.Message in StatusMessage (easy to miss/lose in the UI).</summary>
+    private static void RunRemoveObjectDiagnostic(string objectId)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        var credentials = new Services.CredentialStore(repo);
+        string? cookie = credentials.LoadCookie(null);
+        if (cookie is null)
+        {
+            Console.WriteLine("No stored session cookie - not logged in.");
+            return;
+        }
+
+        var api = new Services.VrcdnApiClient(cookie);
+        try
+        {
+            Task.Run(async () =>
+            {
+                Console.WriteLine($"Removing object {objectId}...");
+                await api.RemoveObjectAsync(objectId);
+                Console.WriteLine("RemoveObjectAsync returned successfully.");
+            }).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"ERROR: {ex.GetType().FullName}: {ex.Message}");
+            for (Exception? inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+            {
+                Console.WriteLine($"  INNER: {inner.GetType().FullName}: {inner.Message}");
+            }
         }
     }
 

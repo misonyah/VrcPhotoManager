@@ -139,6 +139,23 @@ public partial class MainWindow : Window
             e.Handled = true;
             if (DataContext is MainViewModel vm) OpenFilterWindow(vm);
         }
+
+        // Nudges the not-yet-uploaded crop position on whichever photo is currently hovered
+        // (see PhotoViewModel.NudgeCropOffset) - _hoverTarget is the same FrameworkElement
+        // ResetHoverTimer/HidePreviewOverlay already track for the hover-preview popup, so
+        // there's no separate "which photo is under the cursor" bookkeeping to add. Skipped
+        // while typing in a text box (e.g. the custom crop-ratio field) so arrow keys still
+        // move the text cursor there instead of being hijacked just because a photo happens
+        // to be hovered at the same time.
+        if ((e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
+            && Keyboard.FocusedElement is not TextBox
+            && _hoverTarget?.DataContext is PhotoViewModel hoveredPhoto)
+        {
+            int dx = e.Key == Key.Left ? -1 : e.Key == Key.Right ? 1 : 0;
+            int dy = e.Key == Key.Up ? -1 : e.Key == Key.Down ? 1 : 0;
+            hoveredPhoto.NudgeCropOffset(dx, dy);
+            e.Handled = true;
+        }
     }
 
     private void FilterButton_Click(object sender, RoutedEventArgs e)

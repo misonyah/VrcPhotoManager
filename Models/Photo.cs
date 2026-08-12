@@ -81,6 +81,17 @@ public class Photo
     /// without re-deriving it from the remote filename's resolution suffix.</summary>
     public string? UploadCropMode { get; set; }
 
+    /// <summary>Where within the source image the not-yet-applied upload crop is positioned,
+    /// as a -1..1 fraction of the available slack on each axis (0 = centered, the previous
+    /// fixed behavior; -1/+1 = pinned to one edge). Adjusted per-photo via arrow keys while
+    /// hovering (see MainWindow's PreviewKeyDown + PhotoViewModel.NudgeCropOffset), remembered
+    /// until the photo is actually uploaded (UploadSelectedAsync resets both back to 0 on
+    /// success, since the crop that mattered has already been applied and baked into the
+    /// uploaded file). Meaningless once RemoteStatus is Uploaded - the preview overlay only
+    /// ever reads these for a not-yet-uploaded photo.</summary>
+    public double CropOffsetX { get; set; }
+    public double CropOffsetY { get; set; }
+
     /// <summary>
     /// Only ever populated by a query that deliberately projects it (never loading the
     /// Thumbnail blob for the whole library at once) - not a real column.

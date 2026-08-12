@@ -41,6 +41,44 @@ public class PhotoViewModel : INotifyPropertyChanged
     public RemoteStatus RemoteStatus => Model.RemoteStatus;
     public string? RemoteUrl => Model.RemoteUrl;
     public string? UploadCropMode => Model.UploadCropMode;
+    public double CropOffsetX => Model.CropOffsetX;
+    public double CropOffsetY => Model.CropOffsetY;
+
+    /// <summary>Per-keypress nudge amount - a -1..1 fraction of the crop's available slack per
+    /// axis, so ~10 presses moves the crop from centered to a pinned edge.</summary>
+    private const double CropNudgeStep = 0.1;
+
+    /// <summary>Adjusts where the not-yet-applied upload crop sits within the source image (see
+    /// Photo.CropOffsetX's doc comment) - called from MainWindow's PreviewKeyDown while this
+    /// photo is the one currently hovered. No-ops once the photo is Uploaded, since the crop
+    /// that mattered has already been baked into the uploaded file.</summary>
+    public void NudgeCropOffset(int dx, int dy)
+    {
+        if (Model.RemoteStatus == RemoteStatus.Uploaded) return;
+
+        double newX = Math.Clamp(Model.CropOffsetX + dx * CropNudgeStep, -1, 1);
+        double newY = Math.Clamp(Model.CropOffsetY + dy * CropNudgeStep, -1, 1);
+        if (newX == Model.CropOffsetX && newY == Model.CropOffsetY) return;
+
+        Model.CropOffsetX = newX;
+        Model.CropOffsetY = newY;
+        _repo.SetCropOffset(Model.Id, newX, newY);
+        OnPropertyChanged(nameof(CropOffsetX));
+        OnPropertyChanged(nameof(CropOffsetY));
+    }
+
+    /// <summary>UploadCropMode trimmed to just the ratio (e.g. "4:3" out of "4:3 (Landscape)") -
+    /// the full label is still available via the badge's ToolTip.</summary>
+    public string? UploadCropModeShort
+    {
+        get
+        {
+            string? mode = Model.UploadCropMode;
+            if (mode is null) return null;
+            int parenIndex = mode.IndexOf(" (", StringComparison.Ordinal);
+            return parenIndex > 0 ? mode[..parenIndex] : mode;
+        }
+    }
     public string? AuthorDisplayName => Model.AuthorDisplayName;
     public string? WorldName => Model.WorldName;
 
@@ -181,6 +219,9 @@ public class PhotoViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(RemoteStatus));
         OnPropertyChanged(nameof(RemoteUrl));
         OnPropertyChanged(nameof(UploadCropMode));
+        OnPropertyChanged(nameof(UploadCropModeShort));
+        OnPropertyChanged(nameof(CropOffsetX));
+        OnPropertyChanged(nameof(CropOffsetY));
     }
 
     public void NotifyRatingChanged() => OnPropertyChanged(nameof(Rating));

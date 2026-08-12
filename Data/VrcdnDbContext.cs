@@ -69,6 +69,8 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.RemoteId).HasColumnName("remote_id");
             entity.Property(p => p.UploadedAt).HasColumnName("uploaded_at");
             entity.Property(p => p.UploadCropMode).HasColumnName("upload_crop_mode");
+            entity.Property(p => p.CropOffsetX).HasColumnName("crop_offset_x");
+            entity.Property(p => p.CropOffsetY).HasColumnName("crop_offset_y");
         });
 
         modelBuilder.Entity<AppSetting>(entity =>

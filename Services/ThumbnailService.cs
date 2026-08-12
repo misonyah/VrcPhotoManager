@@ -23,20 +23,24 @@ public class ThumbnailService
     private const int UploadMaxSide = 2048;
 
     public async Task<byte[]> GenerateThumbnailAsync(string localPath, CancellationToken ct = default) =>
-        (await ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, cropAspectRatio: null, ct)).Bytes;
+        (await ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, cropAspectRatio: null, cropOffsetX: 0, cropOffsetY: 0, ct)).Bytes;
 
     /// <summary>cropAspectRatio is Width/Height (e.g. 0.75 for a 3:4 portrait crop) - null
     /// uploads the photo at its original aspect ratio, unchanged from before crop-on-upload
-    /// existed. Returns the final pixel dimensions alongside the encoded bytes so the caller
-    /// can encode them into the uploaded filename (see MainViewModel.UploadSelectedAsync) -
-    /// only meaningful to show for a cropped upload, since an uncropped one already keeps its
-    /// original filename verbatim.</summary>
+    /// existed. cropOffsetX/Y are -1..1 fractions of the available slack on each axis (0 =
+    /// centered - see Photo.CropOffsetX's doc comment for how they get set). Returns the final
+    /// pixel dimensions alongside the encoded bytes so the caller can encode them into the
+    /// uploaded filename (see MainViewModel.UploadSelectedAsync) - only meaningful to show for
+    /// a cropped upload, since an uncropped one already keeps its original filename
+    /// verbatim.</summary>
     public Task<(byte[] Bytes, int Width, int Height)> PrepareForUploadAsync(
-        string localPath, double? cropAspectRatio, CancellationToken ct = default) =>
-        ResizeAsync(localPath, UploadMaxSide, quality: 92, cropAspectRatio, ct);
+        string localPath, double? cropAspectRatio, double cropOffsetX = 0, double cropOffsetY = 0,
+        CancellationToken ct = default) =>
+        ResizeAsync(localPath, UploadMaxSide, quality: 92, cropAspectRatio, cropOffsetX, cropOffsetY, ct);
 
     private static Task<(byte[] Bytes, int Width, int Height)> ResizeAsync(
-        string localPath, int maxSide, int quality, double? cropAspectRatio, CancellationToken ct)
+        string localPath, int maxSide, int quality, double? cropAspectRatio,
+        double cropOffsetX, double cropOffsetY, CancellationToken ct)
     {
         return Task.Run(() =>
         {
@@ -69,23 +73,20 @@ public class ThumbnailService
             {
                 int w = bmp.PixelWidth, h = bmp.PixelHeight;
                 double currentRatio = (double)w / h;
-                int cropWidth, cropHeight, x, y;
-                if (currentRatio > targetRatio)
-                {
-                    // Wider than the target ratio - crop the sides, keep full height centered.
-                    cropHeight = h;
-                    cropWidth = Math.Max(1, (int)Math.Round(h * targetRatio));
-                    x = (w - cropWidth) / 2;
-                    y = 0;
-                }
-                else
-                {
-                    // Taller than the target ratio - crop top/bottom, keep full width centered.
-                    cropWidth = w;
-                    cropHeight = Math.Max(1, (int)Math.Round(w / targetRatio));
-                    x = 0;
-                    y = (h - cropHeight) / 2;
-                }
+                bool cropSides = currentRatio > targetRatio;
+                int cropWidth = cropSides ? Math.Max(1, (int)Math.Round(h * targetRatio)) : w;
+                int cropHeight = cropSides ? h : Math.Max(1, (int)Math.Round(w / targetRatio));
+
+                // cropOffsetX/Y (-1..1) position the crop within its available slack on each
+                // axis instead of always centering it (0 = centered, the previous behavior) -
+                // -1/+1 pin it to one edge. A no-op on whichever axis isn't actually cropped
+                // (its slack is 0 there).
+                int x = cropSides
+                    ? Math.Clamp((int)Math.Round((w - cropWidth) / 2.0 * (1 + cropOffsetX)), 0, w - cropWidth)
+                    : 0;
+                int y = cropSides
+                    ? 0
+                    : Math.Clamp((int)Math.Round((h - cropHeight) / 2.0 * (1 + cropOffsetY)), 0, h - cropHeight);
                 final = new CroppedBitmap(bmp, new Int32Rect(x, y, cropWidth, cropHeight));
             }
 

@@ -33,6 +33,11 @@ public class MainViewModel : INotifyPropertyChanged
     private AvatarTypeService? _avatarClassifier;
     private VrcdnApiClient? _api;
 
+    /// <summary>Periodically pings VRCDN while logged in so an idle PHP session doesn't expire
+    /// out from under the app - see StartSessionKeepAlive. Disposed on shutdown (RequestShutdown).</summary>
+    private System.Threading.Timer? _sessionKeepAliveTimer;
+    private static readonly TimeSpan SessionKeepAliveInterval = TimeSpan.FromMinutes(10);
+
     /// <summary>Cancelled when the window closes, so a long-running background scan stops
     /// starting new file work instead of racing the process teardown.</summary>
     private readonly CancellationTokenSource _shutdownCts = new();
@@ -519,8 +524,95 @@ public class MainViewModel : INotifyPropertyChanged
         ShowToast(StatusMessage);
     }
 
+    /// <summary>True once a VRCDN call has come back with the specific "session expired/invalid"
+    /// failure (see NoteVrcdnException) - drives the Login button's red highlight in XAML, since
+    /// otherwise the only sign of an expired session was a status-bar message that a later status
+    /// update (e.g. an unrelated "Removed 0/1..." summary) could immediately overwrite and hide.</summary>
+    private bool _isSessionExpired;
+    public bool IsSessionExpired
+    {
+        get => _isSessionExpired;
+        private set
+        {
+            if (_isSessionExpired == value) return;
+            _isSessionExpired = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(LoginTooltip));
+        }
+    }
+
+    /// <summary>VrcdnApiClient throws InvalidOperationException specifically for an expired/
+    /// invalid session (see PostAsync/GetUsernameAsync) - distinct from network or other
+    /// failures, so this is a reliable signal without string-matching the message. Kicks off a
+    /// background silent-relogin attempt (fire-and-forget - the operation that hit this has
+    /// already failed and reported its own error; this just prepares things for the next one).</summary>
+    private void NoteVrcdnException(Exception ex)
+    {
+        if (ex is not InvalidOperationException) return;
+        IsSessionExpired = true;
+        _ = TrySilentReloginAsync();
+    }
+
+    private bool _isRelogging;
+
+    /// <summary>Re-runs the login flow with no visible UI - see LoginWindow's "Silent mode" doc
+    /// comment. Works as long as WebView2's own persisted Patreon session is still valid, which
+    /// usually outlives panel.vrcdn.live's own PHPSESSID by a wide margin. Falls back to just
+    /// leaving IsSessionExpired set (red Login button) when it isn't - an actual interactive
+    /// login is unavoidable at that point.</summary>
+    private async Task TrySilentReloginAsync()
+    {
+        if (_isRelogging) return;
+        _isRelogging = true;
+        try
+        {
+            string? cookie = await Views.LoginWindow.TrySilentLoginAsync();
+            if (cookie is null) return;
+
+            _credentials.SaveCookie(cookie, null);
+            _api = new VrcdnApiClient(cookie);
+            IsSessionExpired = false;
+            StatusMessage = "VRCDN session refreshed automatically.";
+            RaiseSelectionDependentCommands();
+        }
+        finally
+        {
+            _isRelogging = false;
+        }
+    }
+
+    /// <summary>Pings a lightweight VRCDN endpoint every SessionKeepAliveInterval while logged
+    /// in, so an idle app doesn't silently let the PHP session time out from inactivity - the
+    /// server has no way to know the app is still "in use" otherwise. Doesn't change anything
+    /// server-side we don't already control (session TTL policy is VRCDN's), but keeping the
+    /// session actively touched is the only lever available from this side.</summary>
+    private void StartSessionKeepAlive()
+    {
+        _sessionKeepAliveTimer?.Dispose();
+        _sessionKeepAliveTimer = new System.Threading.Timer(
+            async _ => await SessionKeepAliveTickAsync(),
+            null, SessionKeepAliveInterval, SessionKeepAliveInterval);
+    }
+
+    private async Task SessionKeepAliveTickAsync()
+    {
+        var api = _api;
+        if (api is null) return;
+        try
+        {
+            await api.GetQuotaAsync();
+            Application.Current.Dispatcher.Invoke(() => IsSessionExpired = false);
+        }
+        catch (Exception ex)
+        {
+            Application.Current.Dispatcher.Invoke(() => NoteVrcdnException(ex));
+        }
+    }
+
     public string LoginTooltip => GetActionTooltip("Login",
-        "Sign in to panel.vrcdn.live in an embedded browser.\nNeeded before you can upload, sync, or remove photos on VRCDN.");
+        IsSessionExpired
+            ? "Your VRCDN session has expired - log in again to keep uploading/syncing/removing."
+            : "Sign in to panel.vrcdn.live in an embedded browser.\nNeeded before you can upload, sync, or remove photos on VRCDN.");
     public string ScanLibraryTooltip => GetActionTooltip("ScanLibrary",
         "Look for new or changed photos in your VRChat screenshots folder.\nReads world/author/player info from VRCX and builds thumbnails.");
     public string CrossReferenceGamelogTooltip => GetActionTooltip("CrossReferenceGamelog",
@@ -714,6 +806,8 @@ public class MainViewModel : INotifyPropertyChanged
             if (cookie is not null)
             {
                 _api = new VrcdnApiClient(cookie);
+                IsSessionExpired = false;
+                StartSessionKeepAlive();
                 StatusMessage = "Logged in (restored session).";
                 RaiseSelectionDependentCommands();
             }
@@ -736,6 +830,8 @@ public class MainViewModel : INotifyPropertyChanged
 
         _credentials.SaveCookie(window.SessionCookie, null);
         _api = new VrcdnApiClient(window.SessionCookie);
+        IsSessionExpired = false;
+        StartSessionKeepAlive();
         StatusMessage = "Logged in.";
         RecordActionSuccess("Login", nameof(LoginTooltip));
         RaiseSelectionDependentCommands();
@@ -759,7 +855,11 @@ public class MainViewModel : INotifyPropertyChanged
 
     /// <summary>Called from MainWindow's Closing handler - lets an in-progress Scan Library
     /// stop starting new file work promptly instead of continuing to churn as the app exits.</summary>
-    public void RequestShutdown() => _shutdownCts.Cancel();
+    public void RequestShutdown()
+    {
+        _shutdownCts.Cancel();
+        _sessionKeepAliveTimer?.Dispose();
+    }
 
     private void RaiseSelectionDependentCommands()
     {
@@ -1529,6 +1629,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            NoteVrcdnException(ex);
             StatusMessage = $"Sync failed: {ex.Message}";
             return;
         }
@@ -1583,7 +1684,8 @@ public class MainViewModel : INotifyPropertyChanged
 
             try
             {
-                var (resized, width, height) = await _thumbnails.PrepareForUploadAsync(vm.Model.LocalPath, cropRatio);
+                var (resized, width, height) = await _thumbnails.PrepareForUploadAsync(
+                    vm.Model.LocalPath, cropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY);
                 // Only a cropped upload gets a resolution suffix - an uncropped one keeps its
                 // filename exactly as before crop-on-upload existed, so existing uploads/
                 // filename-matching (SyncRemoteMatches) aren't affected.
@@ -1610,6 +1712,13 @@ public class MainViewModel : INotifyPropertyChanged
                 _repo.SyncRemoteMatches(remoteObjects.Select(o => (o.Original, o.Id, o.Extension, o.Size)), username);
                 (vm.Model.RemoteUrl, vm.Model.RemoteId) = _repo.GetRemoteInfo(vm.Model.Id);
 
+                // The crop nudge (if any) has already been baked into the uploaded file - reset
+                // it so a future re-crop of this same photo starts from centered again, not from
+                // wherever it happened to be left.
+                vm.Model.CropOffsetX = 0;
+                vm.Model.CropOffsetY = 0;
+                _repo.SetCropOffset(vm.Model.Id, 0, 0);
+
                 // Clear selection on success (so the button correctly disables once nothing
                 // eligible remains, and the next batch starts from an empty selection) - but
                 // leave failed uploads selected, so they're easy to spot and retry.
@@ -1620,6 +1729,7 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 vm.Model.RemoteStatus = RemoteStatus.Failed;
                 _repo.UpdateRemoteStatus(vm.Model.Id, RemoteStatus.Failed);
+                NoteVrcdnException(ex);
                 StatusMessage = $"Failed to upload {vm.FileName}: {ex.Message}";
             }
             vm.RefreshStatus();
@@ -1658,6 +1768,7 @@ public class MainViewModel : INotifyPropertyChanged
         if (confirm != MessageBoxResult.Yes) { StatusMessage = "Remove cancelled."; return; }
 
         int done = 0;
+        var failures = new List<string>();
         foreach (var vm in toRemove)
         {
             try
@@ -1676,12 +1787,21 @@ public class MainViewModel : INotifyPropertyChanged
             }
             catch (Exception ex)
             {
-                StatusMessage = $"Failed to remove {vm.FileName}: {ex.Message}";
+                NoteVrcdnException(ex);
+                failures.Add($"{vm.FileName}: {ex.Message}");
             }
         }
 
-        StatusMessage = $"Removed {done}/{toRemove.Count} photo(s) from VRCDN.";
-        RecordActionSuccess("RemoveFromVrcdn", nameof(RemoveFromVrcdnTooltip));
+        // Previously this unconditionally overwrote the per-photo failure message set in the
+        // catch above with just "Removed 0/1...", so a real failure (e.g. an expired session)
+        // was completely invisible to the user - they'd only ever see a bare, unexplained count.
+        StatusMessage = failures.Count == 0
+            ? $"Removed {done}/{toRemove.Count} photo(s) from VRCDN."
+            : $"Removed {done}/{toRemove.Count} photo(s) from VRCDN. Failed: {string.Join("; ", failures)}";
+        if (done > 0)
+        {
+            RecordActionSuccess("RemoveFromVrcdn", nameof(RemoveFromVrcdnTooltip));
+        }
         RaiseSelectionDependentCommands();
     }
 

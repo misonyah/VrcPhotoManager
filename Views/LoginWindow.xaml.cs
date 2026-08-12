@@ -27,6 +27,16 @@ namespace VrcPhotoManager.Views;
 ///    "Logout" marker entirely, with no second chance since the URL won't change again.
 ///    Fixed by using NavigationCompleted instead, which fires once the page has actually
 ///    finished loading.
+///
+/// Silent mode (2026-08-12): WebView2 keeps its own persistent browser profile (cookies,
+/// including the Patreon OAuth session, survive across app restarts) separately from the
+/// PHPSESSID this class extracts - so a PHPSESSID that's expired doesn't mean the
+/// underlying Patreon login has expired too, usually a much longer-lived session. Re-running
+/// the exact same navigation in an off-screen window lets that stale Patreon session silently
+/// complete the OAuth redirect chain and mint a fresh PHPSESSID with no user interaction at
+/// all - see TrySilentLoginAsync. Only falls back to an actual visible login when the Patreon
+/// session itself is also gone (the flow lands on a real login form and just sits there,
+/// caught by the timeout in TrySilentLoginAsync).
 /// </summary>
 public partial class LoginWindow : Window
 {
@@ -36,11 +46,57 @@ public partial class LoginWindow : Window
 
     private bool _checking;
     private bool _retried;
+    private readonly bool _silent;
+    private readonly TaskCompletionSource<string?>? _silentCompletion;
 
-    public LoginWindow()
+    public LoginWindow() : this(silent: false)
+    {
+    }
+
+    private LoginWindow(bool silent)
     {
         InitializeComponent();
+        _silent = silent;
+        if (silent)
+        {
+            _silentCompletion = new TaskCompletionSource<string?>();
+            // Off-screen rather than Visibility=Hidden - WebView2 needs a real, laid-out HWND
+            // to initialize and navigate correctly, which a Hidden window doesn't reliably give
+            // it. Placed far off any real desktop instead of relying on WindowStyle=None +
+            // ShowInTaskbar=false alone to keep it from ever flashing on screen.
+            WindowStyle = WindowStyle.None;
+            ShowInTaskbar = false;
+            ShowActivated = false;
+            Width = 50;
+            Height = 50;
+            Left = -32000;
+            Top = -32000;
+        }
         Loaded += async (_, _) => await InitializeAsync();
+    }
+
+    /// <summary>Attempts to refresh the VRCDN session with no visible UI - see the class doc
+    /// comment's "Silent mode" section. Returns null (never throws) if the underlying Patreon
+    /// session is also gone, or on any other failure - the caller's only recourse at that point
+    /// is an interactive LoginWindow.</summary>
+    public static async Task<string?> TrySilentLoginAsync(TimeSpan? timeout = null)
+    {
+        var window = new LoginWindow(silent: true);
+        window.Show();
+        try
+        {
+            var completed = window._silentCompletion!.Task;
+            var winner = await Task.WhenAny(completed, Task.Delay(timeout ?? TimeSpan.FromSeconds(20)));
+            return winner == completed ? await completed : null;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     private async Task InitializeAsync()
@@ -51,11 +107,13 @@ public partial class LoginWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this,
-                $"Couldn't start the embedded browser (WebView2 Runtime may be missing):\n{ex.Message}",
-                "Login failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            DialogResult = false;
-            Close();
+            if (!_silent)
+            {
+                MessageBox.Show(this,
+                    $"Couldn't start the embedded browser (WebView2 Runtime may be missing):\n{ex.Message}",
+                    "Login failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            Complete(success: false);
             return;
         }
 
@@ -95,13 +153,30 @@ public partial class LoginWindow : Window
                 if (sessionCookie is null) return;
 
                 SessionCookie = sessionCookie.Value;
-                DialogResult = true;
-                Close();
+                Complete(success: true);
             }
         }
         finally
         {
             _checking = false;
+        }
+    }
+
+    /// <summary>Routes "the login flow finished" (success or failure) through DialogResult/Close
+    /// for the interactive case (LoginAsync's caller awaits ShowDialog()) or the completion
+    /// source for the silent case (TrySilentLoginAsync's caller awaits that directly) - setting
+    /// DialogResult on a window that was never shown via ShowDialog throws, so the two paths
+    /// can't share the same call.</summary>
+    private void Complete(bool success)
+    {
+        if (_silent)
+        {
+            _silentCompletion!.TrySetResult(success ? SessionCookie : null);
+        }
+        else
+        {
+            DialogResult = success;
+            Close();
         }
     }
 }

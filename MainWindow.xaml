@@ -18,22 +18,37 @@
         <views:CropOverlayVisibilityConverter x:Key="CropOverlayVisibilityConverter" />
         <views:CropOverlayMarginConverter x:Key="CropOverlayMarginConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <!-- The always-1px frame drawn around the actual photo cell (fixed Width/Height below) -
+             constant regardless of selection, so the inner content area (and the crop-line
+             overlay computed from it) never shrinks or shifts. -->
         <Style x:Key="PhotoItemStyle" TargetType="Border">
-            <Setter Property="Margin" Value="4" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="BorderBrush" Value="#333333" />
+        </Style>
+
+        <!-- Selection indicator: wraps PhotoItemStyle's fixed-size inner Border and grows its
+             OWN border outward from 0 into the cell's existing 4px Margin gap when selected,
+             instead of the inner border thickening inward - that was the earlier approach, and
+             it shrank the actual photo content area on selection (the whole image + the
+             crop-line overlay computed from it visibly shifted by a few pixels the instant you
+             selected a photo). BorderThickness and Margin always sum to 4 on each side, so this
+             never changes the cell's total footprint or nudges neighboring cells - only how much
+             of that fixed space is border vs. gap. A thick border instead of a checkbox overlay -
+             the checkbox competed for attention with the other corner badges and covered part of
+             the thumbnail itself, where a border wraps the whole cell without hiding anything.
+             Gold rather than reusing Cyan (the upload-status cloud) or LimeGreen (confirmed face
+             tags/the old Uploaded pill), so selection reads as its own distinct state at a
+             glance. -->
+        <Style x:Key="PhotoSelectionOuterStyle" TargetType="Border">
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderBrush" Value="Gold" />
             <EventSetter Event="MouseEnter" Handler="PhotoItem_MouseEnter" />
             <EventSetter Event="MouseLeave" Handler="PhotoItem_MouseLeave" />
-            <!-- Selection indicator: a thick border instead of a checkbox overlay - the
-                 checkbox competed for attention with the other corner badges and covered part
-                 of the thumbnail itself, where a border wraps the whole cell without hiding
-                 anything. Gold rather than reusing Cyan (the upload-status cloud) or LimeGreen
-                 (confirmed face tags/the old Uploaded pill), so selection reads as its own
-                 distinct state at a glance. -->
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Selected}" Value="True">
-                    <Setter Property="BorderThickness" Value="4" />
-                    <Setter Property="BorderBrush" Value="Gold" />
+                    <Setter Property="BorderThickness" Value="3" />
+                    <Setter Property="Margin" Value="1" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -48,10 +63,7 @@
                     Margin="4" />
         </DataTemplate>
         <DataTemplate x:Key="PhotoCellTemplate" DataType="{x:Type vm:PhotoViewModel}">
-            <Border Style="{StaticResource PhotoItemStyle}"
-                    Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                    Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                    Tag="{Binding}">
+            <Border x:Name="PhotoBorder" Style="{StaticResource PhotoSelectionOuterStyle}" Tag="{Binding}">
                 <Border.ContextMenu>
                     <!-- ContextMenu is a separate visual tree root, so DataContext doesn't
                          flow to it automatically - this is the standard WPF idiom to recover it. -->
@@ -70,7 +82,10 @@
                                   IsEnabled="{Binding RemoteUrl, Converter={StaticResource StringNotEmptyToBoolConverter}}" />
                     </ContextMenu>
                 </Border.ContextMenu>
-                <Grid>
+                <Border Style="{StaticResource PhotoItemStyle}"
+                        Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType=Window}}">
+                <Grid x:Name="PhotoGrid">
                     <!-- Clicking anywhere on the thumbnail toggles selection (see
                          PhotoItemStyle's thick-gold-border DataTrigger for the visual state).
                          Middle-click opens Tag Faces directly - MouseUp (not MouseLeftButtonUp)
@@ -79,26 +94,43 @@
                     <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
                            MouseLeftButtonUp="PhotoImage_Click"
                            MouseUp="PhotoImage_MiddleClick" />
-                    <!-- Crop-line preview: shows what the currently-selected upload crop ratio
-                         (e.g. "4:3") would actually cut from THIS photo when uploaded, on
-                         selected thumbnails only. The Margin marks the same centered-crop
-                         rectangle ThumbnailService.PrepareForUploadAsync applies at upload time -
-                         see CropOverlayMarginConverter's doc comment for why it also has to
-                         account for the Image's own Uniform-stretch letterboxing. -->
-                    <Rectangle Stroke="White" StrokeThickness="2" Fill="Transparent" IsHitTestVisible="False">
-                        <Rectangle.Effect>
-                            <DropShadowEffect Color="Black" ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
-                        </Rectangle.Effect>
+                    <!-- Crop-line preview: for an already-Uploaded photo, shows the ratio it was
+                         actually uploaded as (from UploadCropMode); for anything else, shows what
+                         the currently-selected dropdown preset would cut on upload - see
+                         CropOverlayRatioResolver. Shown while selected, or on hover for an
+                         already-Uploaded photo (see CropOverlayVisibilityConverter). The Margin
+                         marks the same centered-crop rectangle ThumbnailService.PrepareForUploadAsync
+                         applies at upload time - see CropOverlayMarginConverter's doc comment for
+                         why it also has to account for the Image's own Uniform-stretch
+                         letterboxing. Container size comes from PhotoGrid's own ActualWidth
+                         (the fixed-size inner Border's content area, unaffected by
+                         PhotoSelectionOuterStyle's outward-growing selection border) rather than
+                         DataContext.ThumbnailSize. -->
+                    <!-- No DropShadowEffect here (unlike the other badges) - its blur radiates
+                         both sides of the line, softening/darkening a band of the photo just
+                         inside the crop boundary and reading as the preview having shrunk by a
+                         pixel or two. StrokeThickness="1" with SnapsToDevicePixels so the line
+                         sits exactly on the crop boundary (no soft/inset edge from a centered
+                         stroke straddling a fractional pixel). -->
+                    <Rectangle Stroke="White" StrokeThickness="1" Fill="Transparent" IsHitTestVisible="False"
+                               SnapsToDevicePixels="True" UseLayoutRounding="True">
                         <Rectangle.Margin>
                             <MultiBinding Converter="{StaticResource CropOverlayMarginConverter}">
                                 <Binding Path="Thumbnail" />
-                                <Binding Path="DataContext.ThumbnailSize" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="ActualWidth" ElementName="PhotoGrid" />
+                                <Binding Path="RemoteStatus" />
+                                <Binding Path="UploadCropMode" />
                                 <Binding Path="DataContext.EffectiveCropAspectRatio" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="CropOffsetX" />
+                                <Binding Path="CropOffsetY" />
                             </MultiBinding>
                         </Rectangle.Margin>
                         <Rectangle.Visibility>
                             <MultiBinding Converter="{StaticResource CropOverlayVisibilityConverter}">
                                 <Binding Path="Selected" />
+                                <Binding Path="IsMouseOver" ElementName="PhotoBorder" />
+                                <Binding Path="RemoteStatus" />
+                                <Binding Path="UploadCropMode" />
                                 <Binding Path="DataContext.EffectiveCropAspectRatio" RelativeSource="{RelativeSource AncestorType=Window}" />
                                 <Binding Path="Thumbnail" />
                             </MultiBinding>
@@ -118,16 +150,25 @@
                          outline-only with no filled variant, and a plain Unicode ☁ character
                          risks an OS emoji-font fallback rendering it as a full-color emoji that
                          ignores Fill entirely. A Path's Fill is unambiguous either way. -->
-                    <Path HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
-                          Width="18" Height="18" Stretch="Uniform" Fill="Cyan" Cursor="Hand"
-                          Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"
-                          ToolTip="Uploaded to VRCDN - click to copy the URL"
-                          MouseLeftButtonUp="CloudIcon_MouseLeftButtonUp"
-                          Visibility="{Binding RemoteStatus, Converter={StaticResource RemoteStatusToVisibilityConverter}, ConverterParameter=Uploaded}">
-                        <Path.Effect>
-                            <DropShadowEffect Color="Black" ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
-                        </Path.Effect>
-                    </Path>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
+                                Visibility="{Binding RemoteStatus, Converter={StaticResource RemoteStatusToVisibilityConverter}, ConverterParameter=Uploaded}">
+                        <!-- The ratio/size it was actually uploaded as (e.g. "4:3 (Landscape)"),
+                             not the crop currently selected in the dropdown above - those two can
+                             differ once you've re-selected a different preset since the upload. -->
+                        <Border Padding="4,1" CornerRadius="3" Background="#CC1B3A5E" Margin="0,0,4,0"
+                                Visibility="{Binding UploadCropMode, Converter={StaticResource NullToVisibilityConverter}}"
+                                ToolTip="{Binding UploadCropMode}">
+                            <TextBlock Text="{Binding UploadCropModeShort}" FontSize="10" Foreground="White" />
+                        </Border>
+                        <Path Width="18" Height="18" Stretch="Uniform" Fill="Cyan" Cursor="Hand"
+                              Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"
+                              ToolTip="Uploaded to VRCDN - click to copy the URL"
+                              MouseLeftButtonUp="CloudIcon_MouseLeftButtonUp">
+                            <Path.Effect>
+                                <DropShadowEffect Color="Black" ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
+                            </Path.Effect>
+                        </Path>
+                    </StackPanel>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
                             Margin="4" Padding="4,1" CornerRadius="3"
                             Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}"
@@ -167,6 +208,7 @@
                                    Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                 </Grid>
+                </Border>
             </Border>
         </DataTemplate>
         <local:PhotoOrBlankTemplateSelector x:Key="PhotoOrBlankTemplateSelector"
@@ -303,7 +345,21 @@
                  (Button's default HorizontalAlignment is Stretch, so each fills it). -->
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
                 <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
-                        ToolTip="{Binding LoginTooltip}" />
+                        ToolTip="{Binding LoginTooltip}">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Style.Triggers>
+                                <!-- Session expired - the only other sign is a status-bar message
+                                     that a later status update can immediately overwrite/hide. -->
+                                <DataTrigger Binding="{Binding IsSessionExpired}" Value="True">
+                                    <Setter Property="Background" Value="IndianRed" />
+                                    <Setter Property="Foreground" Value="White" />
+                                    <Setter Property="FontWeight" Value="Bold" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
 
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Filter (Ctrl+F)" Click="FilterButton_Click" Padding="8,4" Margin="0,0,0,8"

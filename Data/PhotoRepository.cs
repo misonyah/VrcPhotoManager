@@ -455,6 +455,17 @@ public class PhotoRepository
             .ExecuteUpdate(s => s.SetProperty(p => p.UploadCropMode, uploadCropMode));
     }
 
+    /// <summary>Persists a per-photo pre-upload crop nudge (see Photo.CropOffsetX's doc comment)
+    /// so it survives an app restart before the photo actually gets uploaded.</summary>
+    public void SetCropOffset(long id, double offsetX, double offsetY)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id)
+            .ExecuteUpdate(s => s
+                .SetProperty(p => p.CropOffsetX, offsetX)
+                .SetProperty(p => p.CropOffsetY, offsetY));
+    }
+
     /// <summary>Distinct "Uploaded as" values currently on record, for the filter dropdown -
     /// same shape as GetDistinctAvatarTypes.</summary>
     public List<string> GetDistinctUploadCropModes()
@@ -518,7 +529,7 @@ public class PhotoRepository
     // also happens to end in "_<res>.jpg", since VRChat's own native filenames always carry a
     // resolution suffix, so this only ever gets a chance once that's already been ruled out).
     private static readonly Regex CroppedUploadSuffixPattern = new(
-        @"_\d+x\d+\.jpg$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        @"_(?<cropW>\d+)x(?<cropH>\d+)\.jpg$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>Normalized "date-time-resolution" key so an uploaded name and a local
     /// filename can be compared even though neither is a substring of the other.</summary>
@@ -563,9 +574,10 @@ public class PhotoRepository
         // translate to SQL, and re-querying per remote object would be thousands of round trips.
         var candidates = context.Photos
             .OrderBy(p => p.Id)
-            .Select(p => new { p.Id, p.LocalPath, p.RemoteStatus, p.RemoteUrl })
+            .Select(p => new { p.Id, p.LocalPath, p.RemoteStatus, p.RemoteUrl, p.UploadCropMode })
             .ToList();
         var hasRemoteUrlById = candidates.ToDictionary(c => c.Id, c => !string.IsNullOrEmpty(c.RemoteUrl));
+        var uploadCropModeMissingById = candidates.ToDictionary(c => c.Id, c => c.UploadCropMode is null);
         var byNormalizedKey = candidates
             .Select(c => (c.Id, c.LocalPath, Key: TryParseLocalNameKey(c.LocalPath)))
             .Where(c => c.Key is not null)
@@ -577,6 +589,14 @@ public class PhotoRepository
         foreach (var obj in remoteObjects)
         {
             long? matchId = candidates.FirstOrDefault(c => !claimed.Contains(c.Id) && c.LocalPath.EndsWith(obj.OriginalFileName))?.Id;
+
+            // Set only when the cropped-suffix branch below actually resolves a match - the
+            // extra "_<width>x<height>" segment it strips off is the real, actually-applied crop
+            // resolution, letting a retroactively-synced photo (never uploaded through
+            // UploadSelectedAsync's own UploadCropMode-setting code path) still get a correct
+            // "Uploaded as" label further down, derived straight from what VRCDN reports rather
+            // than guessed from the currently-selected dropdown preset.
+            string? backfilledCropMode = null;
 
             if (matchId is null && CroppedUploadSuffixPattern.IsMatch(obj.OriginalFileName))
             {
@@ -590,6 +610,7 @@ public class PhotoRepository
                 // normalized-key comparison as the legacy-pipeline path below, not a literal
                 // string match against the local filename - it's just as reformatted as
                 // everything else that path was built for.
+                var cropMatch = CroppedUploadSuffixPattern.Match(obj.OriginalFileName);
                 string strippedBase = CroppedUploadSuffixPattern.Replace(obj.OriginalFileName, "");
                 string? croppedKey = TryParseUploadedNameKey(strippedBase + ".jpg");
                 if (croppedKey is not null)
@@ -598,6 +619,12 @@ public class PhotoRepository
                         .Where(c => !claimed.Contains(c.Id))
                         .Select(c => (long?)c.Id)
                         .FirstOrDefault();
+                    if (matchId is not null
+                        && int.TryParse(cropMatch.Groups["cropW"].Value, out int cropW)
+                        && int.TryParse(cropMatch.Groups["cropH"].Value, out int cropH))
+                    {
+                        backfilledCropMode = Services.CropRatioLabels.ForResolution(cropW, cropH);
+                    }
                 }
             }
 
@@ -623,13 +650,19 @@ public class PhotoRepository
             // Status alone isn't proof the URL was ever set - the app's own upload path marks a
             // row Uploaded immediately, before this sync resolves its RemoteUrl, so a status-only
             // check here skipped rows a broken older sync had already marked Uploaded but never
-            // actually filled in (the original bug this method exists to fix).
-            if (hasRemoteUrlById[matchId.Value]) continue; // already resolved by a prior sync
+            // actually filled in (the original bug this method exists to fix). Still worth a
+            // photo lookup even when the URL's already resolved, to backfill UploadCropMode on a
+            // row a prior sync resolved before this backfill existed.
+            if (hasRemoteUrlById[matchId.Value] && !uploadCropModeMissingById[matchId.Value]) continue;
 
             var photo = context.Photos.First(p => p.Id == matchId.Value);
             photo.RemoteStatus = RemoteStatus.Uploaded;
             photo.RemoteUrl = $"https://vrcdn.cloud/{vrcdnUsername}/{obj.Id}.{obj.Extension}";
             photo.RemoteId = obj.Id;
+            if (backfilledCropMode is not null && photo.UploadCropMode is null)
+            {
+                photo.UploadCropMode = backfilledCropMode;
+            }
             context.SaveChanges();
         }
         return unresolved;
