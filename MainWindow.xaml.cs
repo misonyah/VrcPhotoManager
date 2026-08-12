@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -6,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using VrcPhotoManager.Services;
 using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager;
@@ -35,14 +37,86 @@ public partial class MainWindow : Window
         InitializeComponent();
         var viewModel = new MainViewModel();
         DataContext = viewModel;
+        RestoreWindowBounds(viewModel);
 
         _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.25) };
         _hoverTimer.Tick += HoverTimer_Tick;
 
         viewModel.ToastRequested += ShowToast;
-        Closing += (_, _) => viewModel.RequestShutdown();
+        // The very next StatusMessage change after this subscribes is guaranteed to be
+        // InitializeAsync's "N photos loaded." (MainViewModel's constructor already set
+        // "Loading..." and returned before this line runs, so that first assignment doesn't
+        // count) - a reliable one-shot signal that the initial RebuildRows has synchronously
+        // finished and Rows actually has content to scroll into, without depending on Rows'
+        // own CollectionChanged noise (RebuildRows Adds one row at a time, so the first Add
+        // alone doesn't mean the full set is there yet).
+        viewModel.PropertyChanged += RestoreScrollPositionOnce;
+        Closing += (_, _) =>
+        {
+            SaveSessionState(viewModel);
+            viewModel.RequestShutdown();
+        };
         PreviewMouseWheel += MainWindow_PreviewMouseWheel;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
+    }
+
+    /// <summary>Applied before the window is shown - MainWindow.xaml's Height="900" Width="1400"
+    /// are just the first-ever-launch defaults, left untouched when no prior session exists.</summary>
+    private void RestoreWindowBounds(MainViewModel vm)
+    {
+        double savedWidth = vm.Repo.GetDoubleSetting(SettingsKeys.WindowWidth, 0);
+        double savedHeight = vm.Repo.GetDoubleSetting(SettingsKeys.WindowHeight, 0);
+        if (savedWidth > 0 && savedHeight > 0)
+        {
+            Width = savedWidth;
+            Height = savedHeight;
+        }
+        if (vm.Repo.GetBoolSetting(SettingsKeys.WindowMaximized))
+        {
+            WindowState = WindowState.Maximized;
+        }
+    }
+
+    private void SaveSessionState(MainViewModel vm)
+    {
+        bool maximized = WindowState == WindowState.Maximized;
+        vm.Repo.SetBoolSetting(SettingsKeys.WindowMaximized, maximized);
+        // RestoreBounds gives the pre-maximize size even while currently maximized - saving
+        // ActualWidth/Height instead would persist the maximized (near-screen-size) dimensions,
+        // which would then get treated as the "normal" size the next time the window
+        // un-maximizes.
+        Rect bounds = maximized ? RestoreBounds : new Rect(Left, Top, ActualWidth, ActualHeight);
+        vm.Repo.SetDoubleSetting(SettingsKeys.WindowWidth, bounds.Width);
+        vm.Repo.SetDoubleSetting(SettingsKeys.WindowHeight, bounds.Height);
+
+        vm.Repo.SetDoubleSetting(SettingsKeys.LastThumbnailSize, vm.ThumbnailSize);
+
+        if (FindVisualChild<ScrollViewer>(PhotoGrid) is ScrollViewer scrollViewer)
+        {
+            vm.Repo.SetDoubleSetting(SettingsKeys.LastScrollOffset, scrollViewer.VerticalOffset);
+        }
+    }
+
+    private void RestoreScrollPositionOnce(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainViewModel.StatusMessage)) return;
+        if (DataContext is not MainViewModel vm) return;
+        vm.PropertyChanged -= RestoreScrollPositionOnce;
+
+        double savedOffset = vm.Repo.GetDoubleSetting(SettingsKeys.LastScrollOffset, 0);
+        if (savedOffset <= 0) return;
+
+        // Deferred to Loaded priority - Rows is already fully populated by this point, but the
+        // virtualizing panel still needs an actual layout pass before ScrollableHeight reflects
+        // it (same reasoning as the Alt+resize handler's own Loaded-priority defer).
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            PhotoGrid.UpdateLayout();
+            if (FindVisualChild<ScrollViewer>(PhotoGrid) is ScrollViewer scrollViewer)
+            {
+                scrollViewer.ScrollToVerticalOffset(savedOffset);
+            }
+        });
     }
 
     /// <summary>Pressing Alt alone starts WPF's internal menu-access-key gesture (it's how
@@ -416,7 +490,7 @@ public partial class MainWindow : Window
         }
 
         HidePreviewOverlay();
-        var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.ProfileLookup, photo.Model);
+        var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.AvatarRegions, vm.AvatarClassifier, vm.ProfileLookup, photo.Model);
         _openTagFacesWindow = window;
         window.Closed += (_, _) =>
         {

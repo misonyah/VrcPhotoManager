@@ -24,6 +24,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly ThumbnailService _thumbnails;
     private readonly CredentialStore _credentials;
     private readonly FaceRepository _faces;
+    private readonly AvatarRegionRepository _avatarRegions;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
     private string? _selfUserId;
@@ -84,8 +85,16 @@ public class MainViewModel : INotifyPropertyChanged
         set { _avatarTypeFilter = value ?? "Any"; OnPropertyChanged(); RebuildRows(); }
     }
 
-    private List<string> _avatarTypeFilterOptions = ["Any", "Unclassified", "No confident match"];
-    public List<string> AvatarTypeFilterOptions
+    /// <summary>Value is what RebuildRows actually matches against p.AvatarType (and what
+    /// AvatarTypeFilter itself holds) - kept separate from DisplayText so the dropdown can show
+    /// a "(N)" classified-photo count without that count text becoming part of the match
+    /// value (which would silently break the filter, since stored AvatarType text never
+    /// includes a count suffix).</summary>
+    public record AvatarTypeOption(string Value, string DisplayText);
+
+    private List<AvatarTypeOption> _avatarTypeFilterOptions =
+        [new("Any", "Any"), new("Unclassified", "Unclassified"), new("No confident match", "No confident match")];
+    public List<AvatarTypeOption> AvatarTypeFilterOptions
     {
         get => _avatarTypeFilterOptions;
         private set { _avatarTypeFilterOptions = value; OnPropertyChanged(); }
@@ -93,12 +102,19 @@ public class MainViewModel : INotifyPropertyChanged
 
     /// <summary>Rebuilds the avatar-type filter dropdown from the current library state -
     /// called once at startup and again after Classify Avatars runs, so newly-classified
-    /// avatar types show up without needing a full app restart (same pattern as
-    /// RefreshPlayerFilterOptions).</summary>
+    /// avatar types (and updated counts) show up without needing a full app restart (same
+    /// pattern as RefreshPlayerFilterOptions).</summary>
     public void RefreshAvatarTypeFilterOptions()
     {
-        var options = new List<string> { "Any", "Unclassified", "No confident match" };
-        options.AddRange(_repo.GetDistinctAvatarTypes());
+        var counts = _repo.GetAvatarTypeCounts();
+        var options = new List<AvatarTypeOption>
+        {
+            new("Any", "Any"),
+            new("Unclassified", "Unclassified"),
+            new("No confident match", "No confident match"),
+        };
+        options.AddRange(_repo.GetDistinctAvatarTypes()
+            .Select(t => new AvatarTypeOption(t, $"{t} ({counts.GetValueOrDefault(t)})")));
         AvatarTypeFilterOptions = options;
     }
 
@@ -109,6 +125,131 @@ public class MainViewModel : INotifyPropertyChanged
         set { _statusFilter = value; OnPropertyChanged(); RebuildRows(); }
     }
     public string[] StatusFilterOptions { get; } = ["All", "NotUploaded", "Uploading", "Uploaded", "Failed"];
+
+    /// <summary>The literal value stored in Photo.UploadCropMode for an uploaded-but-uncropped
+    /// photo is null - this is the filter-dropdown stand-in for that state, distinct from "Any"
+    /// (no filtering at all). See GetFilteredSortedPhotos for how it's matched.</summary>
+    public const string UploadCropModeOriginal = "Original (no crop)";
+
+    private string _uploadCropModeFilter = "Any";
+    public string UploadCropModeFilter
+    {
+        get => _uploadCropModeFilter;
+        set { _uploadCropModeFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+
+    private List<string> _uploadCropModeFilterOptions = ["Any", UploadCropModeOriginal];
+    public List<string> UploadCropModeFilterOptions
+    {
+        get => _uploadCropModeFilterOptions;
+        private set { _uploadCropModeFilterOptions = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Rebuilds the "Uploaded as" filter dropdown from the current library state -
+    /// called once at startup and again after Upload Selected runs, same pattern as
+    /// RefreshAvatarTypeFilterOptions.</summary>
+    public void RefreshUploadCropModeFilterOptions()
+    {
+        var options = new List<string> { "Any", UploadCropModeOriginal };
+        options.AddRange(_repo.GetDistinctUploadCropModes());
+        UploadCropModeFilterOptions = options;
+    }
+
+    /// <summary>One entry in the Upload crop-mode dropdown (above the Upload Selected button) -
+    /// AspectRatio is Width/Height, null for "don't crop, keep the original aspect ratio".
+    /// IsCustom marks the one entry whose ratio instead comes from CustomCropRatioText at
+    /// upload time, since an arbitrary user-typed ratio can't be a fixed preset value.</summary>
+    public record UploadCropPreset(string Name, double? AspectRatio, bool IsCustom = false);
+
+    public static readonly List<UploadCropPreset> UploadCropPresets =
+    [
+        new(UploadCropModeOriginal, null),
+        new("1:1 (Square)", 1.0),
+        new("3:4 (Portrait)", 3.0 / 4.0),
+        new("4:3 (Landscape)", 4.0 / 3.0),
+        new("9:16 (Portrait)", 9.0 / 16.0),
+        new("16:9 (Landscape)", 16.0 / 9.0),
+        new("Custom...", null, IsCustom: true),
+    ];
+
+    private UploadCropPreset _selectedUploadCropPreset = UploadCropPresets[0];
+    public UploadCropPreset SelectedUploadCropPreset
+    {
+        get => _selectedUploadCropPreset;
+        set
+        {
+            _selectedUploadCropPreset = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsCustomCropRatioVisible));
+            OnPropertyChanged(nameof(EffectiveCropAspectRatio));
+        }
+    }
+
+    /// <summary>Drives the custom-ratio TextBox's Visibility next to the crop-preset dropdown -
+    /// only meaningful (and only shown) when "Custom..." is the selected preset.</summary>
+    public bool IsCustomCropRatioVisible => SelectedUploadCropPreset.IsCustom;
+
+    private string _customCropRatioText = "5:7";
+    public string CustomCropRatioText
+    {
+        get => _customCropRatioText;
+        set
+        {
+            _customCropRatioText = value;
+            OnPropertyChanged();
+            if (SelectedUploadCropPreset.IsCustom) OnPropertyChanged(nameof(EffectiveCropAspectRatio));
+        }
+    }
+
+    /// <summary>Width/Height the selected crop preset would apply, or null for "Original (no
+    /// crop)" - drives the white crop-line preview overlay on selected thumbnails in the grid
+    /// (see PhotoCellTemplate's crop-overlay Rectangle). Best-effort for Custom: an unparseable
+    /// ratio just shows no preview rather than an error, since this is preview-only - the real
+    /// validation/error happens in TryResolveUploadCropAspectRatio at actual upload time.</summary>
+    public double? EffectiveCropAspectRatio =>
+        SelectedUploadCropPreset.IsCustom ? TryParseCropRatio(CustomCropRatioText) : SelectedUploadCropPreset.AspectRatio;
+
+    /// <summary>W:H (or WxH) - null if unparseable or non-positive, so callers can tell "typed
+    /// something invalid" apart from a legitimate ratio.</summary>
+    private static double? TryParseCropRatio(string text)
+    {
+        var parts = text.Split([':', 'x', 'X'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2
+            && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out double w)
+            && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out double h)
+            && w > 0 && h > 0)
+        {
+            return w / h;
+        }
+        return null;
+    }
+
+    /// <summary>The actual crop ratio UploadSelectedAsync should apply - resolves the selected
+    /// preset's fixed ratio, or parses CustomCropRatioText for the Custom preset. Null means
+    /// "don't crop" UNLESS the Custom preset is selected with unparseable text, in which case
+    /// the caller must treat this as an error, not as "no crop" - see
+    /// TryResolveUploadCropAspectRatio.</summary>
+    private bool TryResolveUploadCropAspectRatio(out double? aspectRatio, out string? error)
+    {
+        error = null;
+        var preset = SelectedUploadCropPreset;
+        if (!preset.IsCustom)
+        {
+            aspectRatio = preset.AspectRatio;
+            return true;
+        }
+
+        aspectRatio = TryParseCropRatio(CustomCropRatioText);
+        if (aspectRatio is null)
+        {
+            error = $"Invalid custom crop ratio \"{CustomCropRatioText}\" - use W:H, e.g. 5:7.";
+            return false;
+        }
+        return true;
+    }
+
+    private string? ResolveUploadCropModeLabel(double? aspectRatio) =>
+        aspectRatio is null ? null : SelectedUploadCropPreset.IsCustom ? $"Custom {CustomCropRatioText}" : SelectedUploadCropPreset.Name;
 
     private string _faceCountFilter = "Any";
     public string FaceCountFilter
@@ -158,6 +299,7 @@ public class MainViewModel : INotifyPropertyChanged
     {
         RatingFilter = "All";
         StatusFilter = "All";
+        UploadCropModeFilter = "Any";
         AvatarTypeFilter = "Any";
         SelectedPlayerFilter = AllPlayersOption;
         TaggedOnlyFilter = false;
@@ -414,6 +556,8 @@ public class MainViewModel : INotifyPropertyChanged
     /// <summary>Exposed so MainWindow's code-behind can open TagFacesWindow (opened from
     /// code-behind, like MetadataWindow/SettingsWindow).</summary>
     public FaceRepository Faces => _faces;
+    public AvatarRegionRepository AvatarRegions => _avatarRegions;
+    public AvatarTypeService? AvatarClassifier => _avatarClassifier;
     public VrcxProfileLookupService? ProfileLookup => _profileLookup;
 
     /// <summary>Read fresh (not cached) each time - it's a single cheap SQLite lookup, so
@@ -440,9 +584,15 @@ public class MainViewModel : INotifyPropertyChanged
         // photos here made the whole window appear white/unresponsive until construction
         // finished. Both are deferred to InitializeAsync, run after the window is visible.
         _repo = new PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        // Restored from the previous session - straight into the backing field (not the
+        // ThumbnailSize property) since its setter calls RebuildRows, which has nothing to
+        // rebuild yet (this runs before InitializeAsync loads any photos) and would just be
+        // redundant work once it does.
+        _thumbnailSize = _repo.GetDoubleSetting(SettingsKeys.LastThumbnailSize, _thumbnailSize);
         _thumbnails = new ThumbnailService();
         _credentials = new CredentialStore(_repo);
         _faces = new FaceRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        _avatarRegions = new AvatarRegionRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         // Gated on ScanLibrary/DetectFaces having succeeded at least once (not just this
@@ -486,6 +636,7 @@ public class MainViewModel : INotifyPropertyChanged
         ApplyPlayerCounts();
         RefreshPlayerFilterOptions();
         RefreshAvatarTypeFilterOptions();
+        RefreshUploadCropModeFilterOptions();
 
         TryAutoLogin();
 
@@ -1295,10 +1446,11 @@ public class MainViewModel : INotifyPropertyChanged
             await semaphore.WaitAsync();
             try
             {
-                var (label, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
+                var (label, catalogId, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
                 vm.Model.AvatarType = label;
+                vm.Model.AvatarCatalogId = catalogId;
                 vm.Model.AvatarTypeConfidence = confidence;
-                _repo.SetAvatarType(vm.Model.Id, label, confidence);
+                _repo.SetAvatarType(vm.Model.Id, label, catalogId, confidence);
                 vm.NotifyAvatarTypeChanged();
             }
             catch (Exception ex)
@@ -1411,6 +1563,17 @@ public class MainViewModel : INotifyPropertyChanged
         var toUpload = _allPhotos.Where(p => p.Selected && p.RemoteStatus != RemoteStatus.Uploaded).ToList();
         if (toUpload.Count == 0) { StatusMessage = "Nothing selected to upload."; return; }
 
+        if (!TryResolveUploadCropAspectRatio(out double? cropRatio, out string? cropError))
+        {
+            StatusMessage = cropError!;
+            return;
+        }
+        string? cropModeLabel = ResolveUploadCropModeLabel(cropRatio);
+
+        // Fetched once, not per-photo - only used to build the RemoteUrl string below, which
+        // is the same for every photo in this batch.
+        string username = await _api.GetUsernameAsync();
+
         int done = 0;
         foreach (var vm in toUpload)
         {
@@ -1420,12 +1583,32 @@ public class MainViewModel : INotifyPropertyChanged
 
             try
             {
-                byte[] resized = await _thumbnails.PrepareForUploadAsync(vm.Model.LocalPath);
-                string uploadFileName = Path.GetFileNameWithoutExtension(vm.FileName) + ".jpg";
+                var (resized, width, height) = await _thumbnails.PrepareForUploadAsync(vm.Model.LocalPath, cropRatio);
+                // Only a cropped upload gets a resolution suffix - an uncropped one keeps its
+                // filename exactly as before crop-on-upload existed, so existing uploads/
+                // filename-matching (SyncRemoteMatches) aren't affected.
+                string baseFileName = Path.GetFileNameWithoutExtension(vm.FileName);
+                string uploadFileName = cropRatio is not null ? $"{baseFileName}_{width}x{height}.jpg" : $"{baseFileName}.jpg";
                 await _api.UploadBytesAsync(uploadFileName, resized);
                 vm.Model.RemoteStatus = RemoteStatus.Uploaded;
                 vm.Model.UploadedAt = DateTime.UtcNow.ToString("o");
+                vm.Model.UploadCropMode = cropModeLabel;
                 _repo.UpdateRemoteStatus(vm.Model.Id, RemoteStatus.Uploaded, uploadedAt: vm.Model.UploadedAt);
+                _repo.SetUploadCropMode(vm.Model.Id, cropModeLabel);
+
+                // UploadBytesAsync only returns a job id, not the object's final id/URL - VRCDN
+                // resolves that asynchronously, AND reformats the filename server-side
+                // (confirmed live: this app's own upload of
+                // "VRChat_2026-07-11_23-30-14.050_7680x4320.jpg" came back from ListObjects as
+                // "vrchat_20260711_233014050_7680x4320.jpg"), so a naive exact-name lookup can
+                // never find it - reuse SyncRemoteMatches' real matching logic instead, run
+                // right after this photo's own upload rather than deferred to the trailing
+                // batch-wide sync. Best-effort: if VRCDN hasn't finished processing the upload
+                // yet, this just doesn't resolve it this pass, and the trailing
+                // SyncMetadataAsync call below still catches it as a fallback.
+                var remoteObjects = await _api.ListObjectsAsync();
+                _repo.SyncRemoteMatches(remoteObjects.Select(o => (o.Original, o.Id, o.Extension, o.Size)), username);
+                (vm.Model.RemoteUrl, vm.Model.RemoteId) = _repo.GetRemoteInfo(vm.Model.Id);
 
                 // Clear selection on success (so the button correctly disables once nothing
                 // eligible remains, and the next batch starts from an empty selection) - but
@@ -1449,6 +1632,9 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = $"Upload complete: {done}/{toUpload.Count} processed.";
         RecordActionSuccess("UploadSelected", nameof(UploadSelectedTooltip));
         RaiseSelectionDependentCommands();
+        RefreshUploadCropModeFilterOptions();
+        // Fallback safety net for anything the per-photo lookup above missed (VRCDN still
+        // processing at the time), not the primary resolution path anymore.
         await SyncMetadataAsync();
     }
 
@@ -1553,6 +1739,12 @@ public class MainViewModel : INotifyPropertyChanged
         if (StatusFilter != "All")
         {
             filtered = filtered.Where(p => p.RemoteStatus.ToString() == StatusFilter);
+        }
+        if (UploadCropModeFilter != "Any")
+        {
+            filtered = UploadCropModeFilter == UploadCropModeOriginal
+                ? filtered.Where(p => p.RemoteStatus == RemoteStatus.Uploaded && p.Model.UploadCropMode is null)
+                : filtered.Where(p => p.Model.UploadCropMode == UploadCropModeFilter);
         }
         if (AvatarTypeFilter != "Any")
         {

@@ -58,7 +58,8 @@ public partial class MetadataWindow : Window
         p.Inlines.Add(new Run("Remote URL:    "));
         p.Inlines.Add(m.RemoteUrl is string remoteUrl ? DirectLink(remoteUrl) : new Run("-"));
         p.Inlines.Add(new Run("\n"));
-        p.Inlines.Add(new Run($"Uploaded at:   {m.UploadedAt ?? "-"}"));
+        p.Inlines.Add(new Run($"Uploaded at:   {m.UploadedAt ?? "-"}\n"));
+        p.Inlines.Add(new Run($"Uploaded as:   {m.UploadCropMode ?? "-"}"));
 
         doc.Blocks.Add(p);
         MetadataText.Document = doc;

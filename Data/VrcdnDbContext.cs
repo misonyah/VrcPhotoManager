@@ -16,6 +16,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<GamelogInferredPlayer> GamelogInferredPlayers => Set<GamelogInferredPlayer>();
     public DbSet<KnownVrcUser> KnownVrcUsers => Set<KnownVrcUser>();
     public DbSet<VrcUserAlias> VrcUserAliases => Set<VrcUserAlias>();
+    public DbSet<AvatarRegion> AvatarRegions => Set<AvatarRegion>();
 
     private readonly string _dbPath;
 
@@ -24,8 +25,15 @@ public class VrcdnDbContext : DbContext
         _dbPath = dbPath;
     }
 
+    // "Default Timeout" (seconds) maps to sqlite3_busy_timeout - without it, a write from one
+    // repository class's own DbContext (PhotoRepository/FaceRepository/AvatarRegionRepository
+    // all point at the same file, each with their own short-lived connections) that lands
+    // while another one is mid-transaction fails immediately as "database is locked" instead
+    // of waiting briefly and retrying. Found via a real "An error occurred while saving the
+    // entity changes" report that coincided with a concurrent diagnostic CLI run
+    // (--test-vrcdn-sync) against the same live database file.
     protected override void OnConfiguring(DbContextOptionsBuilder options) =>
-        options.UseSqlite($"Data Source={_dbPath}");
+        options.UseSqlite($"Data Source={_dbPath};Default Timeout=10");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -47,6 +55,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.Rating).HasColumnName("rating");
             entity.Property(p => p.AvatarType).HasColumnName("avatar_type");
             entity.Property(p => p.AvatarTypeConfidence).HasColumnName("avatar_type_confidence");
+            entity.Property(p => p.AvatarCatalogId).HasColumnName("avatar_catalog_id");
             entity.Property(p => p.MetadataScanned).HasColumnName("metadata_scanned");
             entity.Property(p => p.FacesScanned).HasColumnName("faces_scanned");
             entity.Property(p => p.AuthorId).HasColumnName("author_id");
@@ -59,6 +68,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.RemoteUrl).HasColumnName("remote_url");
             entity.Property(p => p.RemoteId).HasColumnName("remote_id");
             entity.Property(p => p.UploadedAt).HasColumnName("uploaded_at");
+            entity.Property(p => p.UploadCropMode).HasColumnName("upload_crop_mode");
         });
 
         modelBuilder.Entity<AppSetting>(entity =>
@@ -116,6 +126,24 @@ public class VrcdnDbContext : DbContext
             entity.Property(f => f.Embedding).HasColumnName("embedding");
             entity.Property(f => f.DetectedAt).HasColumnName("detected_at");
             entity.Property(f => f.Deleted).HasColumnName("deleted").HasDefaultValue(false);
+        });
+
+        modelBuilder.Entity<AvatarRegion>(entity =>
+        {
+            entity.ToTable("avatar_regions");
+            entity.HasKey(r => r.Id);
+            entity.HasIndex(r => r.PhotoId);
+
+            entity.Property(r => r.Id).HasColumnName("id");
+            entity.Property(r => r.PhotoId).HasColumnName("photo_id");
+            entity.Property(r => r.X).HasColumnName("x");
+            entity.Property(r => r.Y).HasColumnName("y");
+            entity.Property(r => r.Width).HasColumnName("width");
+            entity.Property(r => r.Height).HasColumnName("height");
+            entity.Property(r => r.AvatarCatalogId).HasColumnName("avatar_catalog_id");
+            entity.Property(r => r.AvatarDisplayName).HasColumnName("avatar_display_name");
+            entity.Property(r => r.TaggedAt).HasColumnName("tagged_at");
+            entity.Property(r => r.Deleted).HasColumnName("deleted").HasDefaultValue(false);
         });
 
         modelBuilder.Entity<FaceLabel>(entity =>

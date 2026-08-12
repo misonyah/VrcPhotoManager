@@ -40,6 +40,7 @@ public class PhotoViewModel : INotifyPropertyChanged
     public string? AvatarType => Model.AvatarType;
     public RemoteStatus RemoteStatus => Model.RemoteStatus;
     public string? RemoteUrl => Model.RemoteUrl;
+    public string? UploadCropMode => Model.UploadCropMode;
     public string? AuthorDisplayName => Model.AuthorDisplayName;
     public string? WorldName => Model.WorldName;
 
@@ -179,6 +180,7 @@ public class PhotoViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(RemoteStatus));
         OnPropertyChanged(nameof(RemoteUrl));
+        OnPropertyChanged(nameof(UploadCropMode));
     }
 
     public void NotifyRatingChanged() => OnPropertyChanged(nameof(Rating));

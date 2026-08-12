@@ -33,6 +33,13 @@ public class Photo
     public string? AvatarType { get; set; }
     public float? AvatarTypeConfidence { get; set; }
 
+    /// <summary>The stable "booth:&lt;item id&gt;"/"local:NNNN" identity for AvatarType (see
+    /// the avatar-scraper tool's catalog_ids.py) - unlike AvatarType's display text, which can
+    /// change as label-cleanup rules improve, this is meant to stay the same for a given avatar
+    /// across re-classification. Null for photos classified before this existed, or against a
+    /// model directory with no catalog_ids.txt.</summary>
+    public string? AvatarCatalogId { get; set; }
+
     /// <summary>
     /// VRCX embeds author/world/player info directly into the photo's PNG metadata at
     /// capture time - not every photo has it (needs VRCX running with that feature active).
@@ -66,6 +73,13 @@ public class Photo
     public string? RemoteUrl { get; set; }
     public string? RemoteId { get; set; }
     public string? UploadedAt { get; set; }
+
+    /// <summary>Which crop preset (see MainViewModel.UploadCropPreset) was applied to this
+    /// photo's currently-uploaded VRCDN copy, e.g. "3:4", "4:3", "Custom 5:7" - null means it
+    /// was uploaded uncropped (its original aspect ratio) or hasn't been uploaded at all.
+    /// Drives the "Uploaded as" filter, letting you find photos uploaded with a specific crop
+    /// without re-deriving it from the remote filename's resolution suffix.</summary>
+    public string? UploadCropMode { get; set; }
 
     /// <summary>
     /// Only ever populated by a query that deliberately projects it (never loading the

@@ -15,6 +15,8 @@
         <views:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
         <views:StringNotEmptyToBoolConverter x:Key="StringNotEmptyToBoolConverter" />
         <views:RemoteStatusToVisibilityConverter x:Key="RemoteStatusToVisibilityConverter" />
+        <views:CropOverlayVisibilityConverter x:Key="CropOverlayVisibilityConverter" />
+        <views:CropOverlayMarginConverter x:Key="CropOverlayMarginConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="PhotoItemStyle" TargetType="Border">
             <Setter Property="Margin" Value="4" />
@@ -77,6 +79,31 @@
                     <Image Source="{Binding Thumbnail}" Stretch="Uniform" Cursor="Hand"
                            MouseLeftButtonUp="PhotoImage_Click"
                            MouseUp="PhotoImage_MiddleClick" />
+                    <!-- Crop-line preview: shows what the currently-selected upload crop ratio
+                         (e.g. "4:3") would actually cut from THIS photo when uploaded, on
+                         selected thumbnails only. The Margin marks the same centered-crop
+                         rectangle ThumbnailService.PrepareForUploadAsync applies at upload time -
+                         see CropOverlayMarginConverter's doc comment for why it also has to
+                         account for the Image's own Uniform-stretch letterboxing. -->
+                    <Rectangle Stroke="White" StrokeThickness="2" Fill="Transparent" IsHitTestVisible="False">
+                        <Rectangle.Effect>
+                            <DropShadowEffect Color="Black" ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
+                        </Rectangle.Effect>
+                        <Rectangle.Margin>
+                            <MultiBinding Converter="{StaticResource CropOverlayMarginConverter}">
+                                <Binding Path="Thumbnail" />
+                                <Binding Path="DataContext.ThumbnailSize" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="DataContext.EffectiveCropAspectRatio" RelativeSource="{RelativeSource AncestorType=Window}" />
+                            </MultiBinding>
+                        </Rectangle.Margin>
+                        <Rectangle.Visibility>
+                            <MultiBinding Converter="{StaticResource CropOverlayVisibilityConverter}">
+                                <Binding Path="Selected" />
+                                <Binding Path="DataContext.EffectiveCropAspectRatio" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="Thumbnail" />
+                            </MultiBinding>
+                        </Rectangle.Visibility>
+                    </Rectangle>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Top"
                             Margin="4" Width="14" Height="14" CornerRadius="7"
                             BorderBrush="White" BorderThickness="1"
@@ -165,17 +192,23 @@
             <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Width="110" Margin="0,0,16,0"
                       ToolTip="Filter by VRCDN upload status." />
 
+            <TextBlock Text="Uploaded as:" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="Filter by which crop (if any) a photo was uploaded to VRCDN with." />
+            <ComboBox ItemsSource="{Binding UploadCropModeFilterOptions}" SelectedItem="{Binding UploadCropModeFilter}" Width="130" Margin="0,0,16,0"
+                      ToolTip="Filter by which crop (if any) a photo was uploaded to VRCDN with." />
+
             <TextBlock Text="Avatar:" VerticalAlignment="Center" Margin="0,0,4,0"
                        ToolTip="Filter by detected avatar base. 'Unclassified' means Classify Avatars hasn't run on it yet; 'No confident match' means it ran but wasn't confident enough to guess." />
             <!-- Real Plan A labels are raw Booth listing titles (some ~53 chars of Japanese
                  text) sharing long common prefixes, so entries are visually indistinguishable
                  at a narrow width even after widening - the ItemContainerStyle tooltip is what
                  actually makes each entry identifiable on hover. -->
-            <ComboBox ItemsSource="{Binding AvatarTypeFilterOptions}" SelectedItem="{Binding AvatarTypeFilter}" Width="180" Margin="0,0,16,0"
+            <ComboBox ItemsSource="{Binding AvatarTypeFilterOptions}" DisplayMemberPath="DisplayText"
+                      SelectedValuePath="Value" SelectedValue="{Binding AvatarTypeFilter}" Width="180" Margin="0,0,16,0"
                       ToolTip="Filter by detected avatar base. 'Unclassified' means Classify Avatars hasn't run on it yet; 'No confident match' means it ran but wasn't confident enough to guess.">
                 <ComboBox.ItemContainerStyle>
                     <Style TargetType="ComboBoxItem">
-                        <Setter Property="ToolTip" Value="{Binding}" />
+                        <Setter Property="ToolTip" Value="{Binding Value}" />
                     </Style>
                 </ComboBox.ItemContainerStyle>
             </ComboBox>
@@ -299,6 +332,14 @@
                         ToolTip="{Binding CropPrintSelectedTooltip}" />
 
                 <Separator Margin="0,0,0,8" />
+                <TextBlock Text="Upload crop:" Margin="0,0,0,4"
+                           ToolTip="Crops each photo to this aspect ratio (centered) before uploading.&#10;&quot;Original (no crop)&quot; uploads unchanged, same as before this existed.&#10;A cropped upload's filename gets its final resolution appended, so you can tell which crop was used from the filename alone." />
+                <ComboBox ItemsSource="{x:Static vm:MainViewModel.UploadCropPresets}" DisplayMemberPath="Name"
+                          SelectedItem="{Binding SelectedUploadCropPreset}" Margin="0,0,0,4"
+                          ToolTip="Crops each photo to this aspect ratio (centered) before uploading.&#10;&quot;Original (no crop)&quot; uploads unchanged, same as before this existed.&#10;A cropped upload's filename gets its final resolution appended, so you can tell which crop was used from the filename alone." />
+                <TextBox Text="{Binding CustomCropRatioText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"
+                         Visibility="{Binding IsCustomCropRatioVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                         ToolTip="Custom crop ratio as Width:Height, e.g. 5:7." />
                 <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold"
                         ToolTip="{Binding UploadSelectedTooltip}" />
                 <Button Content="Sync VRCDN Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8"

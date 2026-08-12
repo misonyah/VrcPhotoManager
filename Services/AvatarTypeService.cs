@@ -31,15 +31,23 @@ public class AvatarTypeService : IDisposable
 
     private readonly InferenceSession _session;
     private readonly string[] _labels;
+    // Parallel to _labels (same index order) - the stable "booth:<item id>"/"local:NNNN"
+    // identity from the avatar-scraper's catalog_ids.py, unlike _labels' display text which
+    // can freely change as boilerplate-stripping rules improve. Null when catalog_ids.txt
+    // wasn't present in modelDir (older downloaded models, or a model built before this file
+    // existed) - CatalogId is then just null for everything, degrading gracefully rather than
+    // failing to load.
+    private readonly string?[]? _catalogIds;
     // Guards session.Run() only - see WdTaggerService for why (concurrent Run() calls on a
     // DirectML session caused a real native crash; Preprocess() is unaffected and safe to
     // run concurrently across threads).
     private readonly object _inferenceLock = new();
 
-    private AvatarTypeService(InferenceSession session, string[] labels)
+    private AvatarTypeService(InferenceSession session, string[] labels, string?[]? catalogIds)
     {
         _session = session;
         _labels = labels;
+        _catalogIds = catalogIds;
     }
 
     public static AvatarTypeService? TryCreate(string modelDir, out string? error)
@@ -79,7 +87,26 @@ public class AvatarTypeService : IDisposable
                 return null;
             }
 
-            return new AvatarTypeService(session, labels);
+            // Optional - not every model directory has one (older downloads predate
+            // catalog_ids.txt). A line-count mismatch is treated the same as "absent" rather
+            // than a load failure, since it just means a stale/half-updated model folder;
+            // CatalogId simply comes back null for everything until re-downloaded.
+            string catalogIdsPath = Path.Combine(modelDir, "catalog_ids.txt");
+            string?[]? catalogIds = null;
+            if (File.Exists(catalogIdsPath))
+            {
+                string[] rawCatalogIds = File.ReadAllLines(catalogIdsPath);
+                if (rawCatalogIds.Length > 0 && rawCatalogIds[^1].Length == 0)
+                {
+                    rawCatalogIds = rawCatalogIds[..^1];
+                }
+                if (rawCatalogIds.Length == labels.Length)
+                {
+                    catalogIds = rawCatalogIds!;
+                }
+            }
+
+            return new AvatarTypeService(session, labels, catalogIds);
         }
         catch (Exception ex)
         {
@@ -90,8 +117,10 @@ public class AvatarTypeService : IDisposable
 
     /// <summary>Returns the top-scoring avatar type, or a null Label (with the real
     /// confidence still reported) when the top score doesn't clear AcceptanceThreshold -
-    /// callers store this as "no confident match" rather than forcing a guess.</summary>
-    public (string? Label, float Confidence) Classify(string imagePath)
+    /// callers store this as "no confident match" rather than forcing a guess. CatalogId is
+    /// the stable identity for whatever Label resolves to (null exactly when Label is null, or
+    /// when this model directory has no catalog_ids.txt - see the _catalogIds field doc).</summary>
+    public (string? Label, string? CatalogId, float Confidence) Classify(string imagePath)
     {
         float[] input = Preprocess(imagePath);
         float[] logits;
@@ -112,7 +141,8 @@ public class AvatarTypeService : IDisposable
         float confidence = probabilities[bestIndex];
         bool isConfidentRealClass = confidence >= AcceptanceThreshold && _labels[bestIndex] != NegativeClassLabel;
         string? label = isConfidentRealClass ? _labels[bestIndex] : null;
-        return (label, confidence);
+        string? catalogId = isConfidentRealClass ? _catalogIds?[bestIndex] : null;
+        return (label, catalogId, confidence);
     }
 
     private static float[] Softmax(float[] logits)
@@ -169,6 +199,13 @@ public class AvatarTypeService : IDisposable
         }
         return tensorData;
     }
+
+    /// <summary>Every (Label, CatalogId) pair this model knows, regardless of whether Classify
+    /// has ever actually matched a photo to it - powers Tag Faces' Avatar-mode search picker,
+    /// which needs to let you tag a region as any known avatar, not just ones already surfaced
+    /// by auto-classification.</summary>
+    public IReadOnlyList<(string Label, string? CatalogId)> AllEntries =>
+        _labels.Select((label, i) => (label, _catalogIds?[i])).ToList();
 
     public void Dispose() => _session.Dispose();
 }

@@ -69,8 +69,21 @@
         <DockPanel Grid.Row="2" Margin="8">
             <Button DockPanel.Dock="Right" Content="All tagged" Click="AllTaggedButton_Click" Padding="8,2" VerticalAlignment="Center"
                     ToolTip="Everyone identifiable in this photo has been tagged - mark every remaining untagged (yellow) box as a bad detection, same as clicking Delete box on each one.&#10;Kept in the database for reviewing detection quality later, just hidden from view here." />
-            <TextBlock Text="Click a box to tag who it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;. Click-drag empty space to add a missed face. Scroll to zoom, middle-drag to pan."
-                       Foreground="Gray" Margin="0,0,8,0" VerticalAlignment="Center" />
+            <!-- Person/Avatar mode - which kind of box click-drag-on-empty-space creates, and
+                 which picker an existing box's own click opens (each box's hit-test rectangle
+                 has its OWN handler wired in RedrawBoxes/RedrawAvatarRegions, so this toggle
+                 only ever affects NEW boxes, never how an existing one behaves). Avatar regions
+                 are a separate box type (magenta) from face boxes, not a replacement for them -
+                 needed for group photos where more than one avatar is in frame at once, which a
+                 single whole-photo Classify Avatars guess can't represent. -->
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
+                <RadioButton x:Name="PersonModeRadio" Content="Person" GroupName="TagMode" IsChecked="True" Margin="0,0,8,0"
+                             ToolTip="Click-drag draws a face box; clicking a box tags who it is." />
+                <RadioButton x:Name="AvatarModeRadio" Content="Avatar" GroupName="TagMode"
+                             ToolTip="Click-drag draws an avatar region (magenta); clicking a region tags which avatar it shows.&#10;Separate from face boxes - use this for group photos with more than one avatar in frame." />
+            </StackPanel>
+            <TextBlock Text="Click a box to tag who/what it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;, magenta = avatar region. Click-drag empty space to add a missed face/region (per the Person/Avatar toggle). Scroll to zoom, middle-drag to pan."
+                       Foreground="Gray" Margin="0,0,8,0" VerticalAlignment="Center" TextWrapping="Wrap" />
         </DockPanel>
 
         <Popup x:Name="PersonPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True"
@@ -146,6 +159,30 @@
                             ToolTip="Remove this face's tag, leaving it untagged (yellow).&#10;The box itself stays - use Delete box to remove it instead." />
                     <Button Content="Delete box" Click="DeleteFaceButton_Click" Margin="0,4,0,0"
                             ToolTip="Hide this face box, e.g. a misplaced manual box or a false detection.&#10;It's kept in the database for reviewing detection quality later, just hidden from view." />
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!-- Avatar-region picker - deliberately much simpler than PersonPickerPopup: avatars
+             come from a fixed catalog (the classifier's own AllEntries - see
+             AvatarTypeService.AllEntries), there's no "create new"/alias/rename workflow the
+             way manual people have, so a plain search-as-you-type list is enough. -->
+        <Popup x:Name="AvatarPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True"
+               Closed="AvatarPickerPopup_Closed">
+            <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1" Padding="8" MaxWidth="260">
+                <StackPanel>
+                    <TextBlock Text="Which avatar?" Foreground="White" FontWeight="Bold" Margin="0,0,0,6" />
+                    <TextBox x:Name="AvatarSearchTextBox" Margin="0,0,0,4"
+                             ToolTip="Type to search the classifier's known avatar list."
+                             TextChanged="AvatarSearchTextBox_TextChanged" />
+                    <!-- ItemsSource is List&lt;(string Label, string? CatalogId)&gt; - named tuple
+                         element names are compile-time-only, the real runtime property is
+                         Item1, hence DisplayMemberPath="Item1" rather than "Label". -->
+                    <ListBox x:Name="AvatarSearchListBox" MaxHeight="200" DisplayMemberPath="Item1" MouseUp="AvatarSearchListBox_MouseUp" />
+                    <Button x:Name="ClearAvatarTagButton" Content="Clear tag" Click="ClearAvatarTagButton_Click" Margin="0,4,0,0"
+                            ToolTip="Remove this region's tag, leaving it untagged.&#10;The box itself stays - use Delete region to remove it instead." />
+                    <Button Content="Delete region" Click="DeleteAvatarRegionButton_Click" Margin="0,4,0,0"
+                            ToolTip="Hide this avatar region, e.g. a misplaced box.&#10;It's kept in the database, just hidden from view." />
                 </StackPanel>
             </Border>
         </Popup>

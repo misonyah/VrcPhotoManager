@@ -13,4 +13,15 @@ public static class SettingsKeys
     public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
     public const string HoverPreviewDelaySeconds = "hover_preview_delay_seconds";
     public const string SkipResolvedPhotosOnFaceScan = "skip_resolved_photos_on_face_scan";
+
+    // Session-state persistence (restore where you left off) - written once at Closing, read
+    // once at startup, deliberately not live-synced on every change (ThumbnailSize alone can
+    // change dozens of times per second during an Alt+scroll resize - see MainWindow's
+    // HandleRowScroll/MainWindow_PreviewMouseWheel - so a write-on-every-change approach would
+    // hammer SQLite for no benefit over a single write at shutdown).
+    public const string WindowWidth = "window_width";
+    public const string WindowHeight = "window_height";
+    public const string WindowMaximized = "window_maximized";
+    public const string LastThumbnailSize = "last_thumbnail_size";
+    public const string LastScrollOffset = "last_scroll_offset";
 }

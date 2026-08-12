@@ -105,6 +105,7 @@ public class PhotoRepository
                 Rating = p.Rating,
                 AvatarType = p.AvatarType,
                 AvatarTypeConfidence = p.AvatarTypeConfidence,
+                AvatarCatalogId = p.AvatarCatalogId,
                 MetadataScanned = p.MetadataScanned,
                 FacesScanned = p.FacesScanned,
                 AuthorId = p.AuthorId,
@@ -117,6 +118,7 @@ public class PhotoRepository
                 RemoteUrl = p.RemoteUrl,
                 RemoteId = p.RemoteId,
                 UploadedAt = p.UploadedAt,
+                UploadCropMode = p.UploadCropMode,
             })
             .ToList();
     }
@@ -353,11 +355,12 @@ public class PhotoRepository
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s.SetProperty(p => p.Rating, rating));
     }
 
-    public void SetAvatarType(long id, string? avatarType, float confidence)
+    public void SetAvatarType(long id, string? avatarType, string? avatarCatalogId, float confidence)
     {
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s
             .SetProperty(p => p.AvatarType, avatarType)
+            .SetProperty(p => p.AvatarCatalogId, avatarCatalogId)
             .SetProperty(p => p.AvatarTypeConfidence, confidence));
     }
 
@@ -373,6 +376,19 @@ public class PhotoRepository
             .Distinct()
             .OrderBy(t => t)
             .ToList();
+    }
+
+    /// <summary>Classified-photo count per avatar type - drives the avatar filter dropdown's
+    /// "(N)" annotation, so it reads as how many photos are actually classified into each
+    /// bucket rather than just a bare list of type names.</summary>
+    public Dictionary<string, int> GetAvatarTypeCounts()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.AvatarType != null)
+            .GroupBy(p => p.AvatarType!)
+            .Select(g => new { Type = g.Key, Count = g.Count() })
+            .ToDictionary(x => x.Type, x => x.Count);
     }
 
     public HashSet<long> GetPhotoIdsMissingAvatarType()
@@ -404,6 +420,19 @@ public class PhotoRepository
             .ExecuteUpdate(s => s.SetProperty(p => p.Rating, rating));
     }
 
+    /// <summary>Cheap single-row lookup - just RemoteUrl/RemoteId, not a full Photo (no
+    /// thumbnail blob etc.) - for a caller that only needs to see whether a specific photo's
+    /// remote identity got resolved by a just-run SyncRemoteMatches, without loading the whole
+    /// library via GetAll().</summary>
+    public (string? RemoteUrl, string? RemoteId) GetRemoteInfo(long id)
+    {
+        using var context = NewContext();
+        var row = context.Photos.AsNoTracking().Where(p => p.Id == id)
+            .Select(p => new { p.RemoteUrl, p.RemoteId })
+            .First();
+        return (row.RemoteUrl, row.RemoteId);
+    }
+
     public void UpdateRemoteStatus(long id, RemoteStatus status, string? remoteUrl = null, string? remoteId = null, string? uploadedAt = null)
     {
         using var context = NewContext();
@@ -413,6 +442,30 @@ public class PhotoRepository
         photo.RemoteId = remoteId ?? photo.RemoteId;
         photo.UploadedAt = uploadedAt ?? photo.UploadedAt;
         context.SaveChanges();
+    }
+
+    /// <summary>Separate from UpdateRemoteStatus (whose null-coalescing update only ever adds
+    /// values, never clears them) since this needs to unconditionally set-or-clear: re-uploading
+    /// a photo uncropped after a previous cropped upload must actually null this back out, not
+    /// silently keep the stale crop label.</summary>
+    public void SetUploadCropMode(long id, string? uploadCropMode)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id)
+            .ExecuteUpdate(s => s.SetProperty(p => p.UploadCropMode, uploadCropMode));
+    }
+
+    /// <summary>Distinct "Uploaded as" values currently on record, for the filter dropdown -
+    /// same shape as GetDistinctAvatarTypes.</summary>
+    public List<string> GetDistinctUploadCropModes()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.UploadCropMode != null)
+            .Select(p => p.UploadCropMode!)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
     }
 
     /// <summary>
@@ -429,16 +482,21 @@ public class PhotoRepository
         photo.RemoteUrl = null;
         photo.RemoteId = null;
         photo.UploadedAt = null;
+        photo.UploadCropMode = null;
         context.SaveChanges();
     }
 
-    // Objects uploaded by this app keep the real local filename verbatim, so a literal
-    // suffix match handles those. Objects uploaded by the older Python pipeline
-    // (vrcdn_upload.py) were staged under a reformatted name first - lowercased, dashes and
-    // colons stripped - so ~76% of the 2,339 pre-existing uploads look like
-    // "vrchat_20251009_234906933_7680x4320.jpg" instead of the real
-    // "VRChat_2025-10-09_23-49-06.933_7680x4320.png". Neither name is a substring of the
-    // other, so those need matching on the embedded date+time+resolution instead.
+    // The exact-suffix match above only ever succeeds for a source file that was ALREADY
+    // .jpg (VRCDN echoes an already-jpg name back verbatim) - VRCDN's own backend reformats
+    // every OTHER uploaded filename server-side into this lowercased/no-punctuation shape
+    // regardless of which pipeline uploaded it (confirmed live via a real report: a fresh
+    // upload from this app's own UploadSelectedAsync, sending
+    // "VRChat_2026-07-11_23-30-14.050_7680x4320.jpg", came back from ListObjects as
+    // "vrchat_20260711_233014050_7680x4320.jpg" - not this app pre-transforming anything,
+    // VRCDN did it). This is therefore the path that resolves the overwhelming majority of
+    // this app's own .png/.jpeg-sourced uploads (re-encoded to .jpg before sending, so almost
+    // never already-jpg), not just the older Python pipeline's (vrcdn_upload.py)
+    // already-reformatted pre-existing uploads it was originally written for.
     private static readonly Regex UploadedNamePattern = new(
         @"^vrchat_(?<date>\d{8})_(?<time>\d{9})_(?<res>\d+x\d+)\.jpg$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -450,6 +508,17 @@ public class PhotoRepository
     private static readonly Regex LocalNameResFirstPattern = new(
         @"^VRChat_(?<res>\d+x\d+)_(?<y>\d{4})-(?<mo>\d{2})-(?<d>\d{2})_(?<h>\d{2})-(?<mi>\d{2})-(?<s>\d{2})\.(?<ms>\d{3})\.",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // MainViewModel.UploadSelectedAsync appends "_<width>x<height>" to a cropped upload's
+    // filename (crop-on-upload) - one more segment than the exact-suffix match above expects,
+    // and the wrong resolution for UploadedNamePattern's date/time/res key (that would extract
+    // the CROP's resolution, not the original file's, so it'd never key-match a local row
+    // either). Stripped, what's left must equal a local file's own name-without-extension
+    // exactly - deliberately checked AFTER the exact-suffix match (an uncropped upload's name
+    // also happens to end in "_<res>.jpg", since VRChat's own native filenames always carry a
+    // resolution suffix, so this only ever gets a chance once that's already been ruled out).
+    private static readonly Regex CroppedUploadSuffixPattern = new(
+        @"_\d+x\d+\.jpg$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>Normalized "date-time-resolution" key so an uploaded name and a local
     /// filename can be compared even though neither is a substring of the other.</summary>
@@ -494,9 +563,9 @@ public class PhotoRepository
         // translate to SQL, and re-querying per remote object would be thousands of round trips.
         var candidates = context.Photos
             .OrderBy(p => p.Id)
-            .Select(p => new { p.Id, p.LocalPath, p.RemoteStatus })
+            .Select(p => new { p.Id, p.LocalPath, p.RemoteStatus, p.RemoteUrl })
             .ToList();
-        var statusById = candidates.ToDictionary(c => c.Id, c => c.RemoteStatus);
+        var hasRemoteUrlById = candidates.ToDictionary(c => c.Id, c => !string.IsNullOrEmpty(c.RemoteUrl));
         var byNormalizedKey = candidates
             .Select(c => (c.Id, c.LocalPath, Key: TryParseLocalNameKey(c.LocalPath)))
             .Where(c => c.Key is not null)
@@ -508,6 +577,29 @@ public class PhotoRepository
         foreach (var obj in remoteObjects)
         {
             long? matchId = candidates.FirstOrDefault(c => !claimed.Contains(c.Id) && c.LocalPath.EndsWith(obj.OriginalFileName))?.Id;
+
+            if (matchId is null && CroppedUploadSuffixPattern.IsMatch(obj.OriginalFileName))
+            {
+                // VRCDN's own backend reformats the uploaded filename server-side into the same
+                // lowercase/no-punctuation "vrchat_DATE_TIME_RES.jpg" shape UploadedNamePattern
+                // already parses (confirmed live: uploading
+                // "VRChat_2026-07-11_23-30-14.050_7680x4320_1536x1152.jpg" came back as
+                // "vrchat_20260711_233014050_7680x4320_1536x1152.jpg") - it does this
+                // regardless of which pipeline uploaded it, not just the older Python one the
+                // comment above originally assumed. So the stripped base needs the SAME
+                // normalized-key comparison as the legacy-pipeline path below, not a literal
+                // string match against the local filename - it's just as reformatted as
+                // everything else that path was built for.
+                string strippedBase = CroppedUploadSuffixPattern.Replace(obj.OriginalFileName, "");
+                string? croppedKey = TryParseUploadedNameKey(strippedBase + ".jpg");
+                if (croppedKey is not null)
+                {
+                    matchId = byNormalizedKey[croppedKey]
+                        .Where(c => !claimed.Contains(c.Id))
+                        .Select(c => (long?)c.Id)
+                        .FirstOrDefault();
+                }
+            }
 
             if (matchId is null)
             {
@@ -528,7 +620,11 @@ public class PhotoRepository
             }
 
             claimed.Add(matchId.Value);
-            if (statusById[matchId.Value] == RemoteStatus.Uploaded) continue; // already correct from a prior sync
+            // Status alone isn't proof the URL was ever set - the app's own upload path marks a
+            // row Uploaded immediately, before this sync resolves its RemoteUrl, so a status-only
+            // check here skipped rows a broken older sync had already marked Uploaded but never
+            // actually filled in (the original bug this method exists to fix).
+            if (hasRemoteUrlById[matchId.Value]) continue; // already resolved by a prior sync
 
             var photo = context.Photos.First(p => p.Id == matchId.Value);
             photo.RemoteStatus = RemoteStatus.Uploaded;

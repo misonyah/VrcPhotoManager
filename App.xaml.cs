@@ -1,6 +1,7 @@
 using System.Configuration;
 using System.Data;
 using System.IO;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -8,9 +9,21 @@ namespace VrcPhotoManager;
 
 public partial class App : Application
 {
+    private Mutex? _singleInstanceMutex;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        _singleInstanceMutex = new Mutex(true, "Local\\VrcPhotoManager_SingleInstance", out bool isNewInstance);
+        if (!isNewInstance)
+        {
+            MessageBox.Show(
+                "VRC Photo Manager is already running (or a diagnostic command is using its database) - only one instance can run at a time to avoid database lock conflicts.",
+                "VRC Photo Manager", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-classify")
         {
@@ -59,10 +72,18 @@ public partial class App : Application
 
         // Unhandled exceptions on the UI thread (e.g. from an async void command handler)
         // would otherwise take the whole app down with no explanation - show them instead.
+        // Walks InnerException too - EF Core's "An error occurred while saving the entity
+        // changes" wraps the actually-useful detail (e.g. the real SQLite error) one level
+        // down, and the outer message alone isn't enough to diagnose a real report.
         DispatcherUnhandledException += (_, args) =>
         {
+            var messages = new List<string>();
+            for (Exception? ex = args.Exception; ex is not null; ex = ex.InnerException)
+            {
+                messages.Add($"{ex.GetType().Name}: {ex.Message}");
+            }
             MessageBox.Show(
-                $"Unexpected error:\n\n{args.Exception.Message}",
+                $"Unexpected error:\n\n{string.Join("\n\n", messages)}",
                 "VRC Photo Manager", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
@@ -92,9 +113,10 @@ public partial class App : Application
             long photoId = long.Parse(e.Args[2]);
             var photos = new Data.PhotoRepository(dbPath);
             var faces = new Data.FaceRepository(dbPath);
+            var avatarRegions = new Data.AvatarRegionRepository(dbPath);
             var photo = photos.GetAll().First(p => p.Id == photoId);
             var lookup = Services.VrcxProfileLookupService.TryCreate(out _);
-            new Views.TagFacesWindow(faces, photos, lookup, photo).ShowDialog();
+            new Views.TagFacesWindow(faces, photos, avatarRegions, null, lookup, photo).ShowDialog();
             Shutdown();
             return;
         }
@@ -315,6 +337,10 @@ public partial class App : Application
                 var unresolved = repo.SyncRemoteMatches(
                     objects.Select(o => (o.Original, o.Id, o.Extension, o.Size)), username);
                 Console.WriteLine($"Matched {objects.Count - unresolved.Count}/{objects.Count}, {unresolved.Count} unresolved.");
+                foreach (string name in unresolved)
+                {
+                    Console.WriteLine($"  UNRESOLVED: {name}");
+                }
             }).GetAwaiter().GetResult();
         }
         catch (Exception ex)
@@ -333,5 +359,11 @@ public partial class App : Application
         }
         string rating = tagger.ClassifyRating(imagePath);
         Console.WriteLine($"RATING: {rating}");
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _singleInstanceMutex?.ReleaseMutex();
+        base.OnExit(e);
     }
 }

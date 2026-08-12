@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using System.Windows.Media.Imaging;
 
 namespace VrcPhotoManager.Services;
@@ -21,13 +22,21 @@ public class ThumbnailService
     /// </summary>
     private const int UploadMaxSide = 2048;
 
-    public Task<byte[]> GenerateThumbnailAsync(string localPath, CancellationToken ct = default) =>
-        ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, ct);
+    public async Task<byte[]> GenerateThumbnailAsync(string localPath, CancellationToken ct = default) =>
+        (await ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, cropAspectRatio: null, ct)).Bytes;
 
-    public Task<byte[]> PrepareForUploadAsync(string localPath, CancellationToken ct = default) =>
-        ResizeAsync(localPath, UploadMaxSide, quality: 92, ct);
+    /// <summary>cropAspectRatio is Width/Height (e.g. 0.75 for a 3:4 portrait crop) - null
+    /// uploads the photo at its original aspect ratio, unchanged from before crop-on-upload
+    /// existed. Returns the final pixel dimensions alongside the encoded bytes so the caller
+    /// can encode them into the uploaded filename (see MainViewModel.UploadSelectedAsync) -
+    /// only meaningful to show for a cropped upload, since an uncropped one already keeps its
+    /// original filename verbatim.</summary>
+    public Task<(byte[] Bytes, int Width, int Height)> PrepareForUploadAsync(
+        string localPath, double? cropAspectRatio, CancellationToken ct = default) =>
+        ResizeAsync(localPath, UploadMaxSide, quality: 92, cropAspectRatio, ct);
 
-    private static Task<byte[]> ResizeAsync(string localPath, int maxSide, int quality, CancellationToken ct)
+    private static Task<(byte[] Bytes, int Width, int Height)> ResizeAsync(
+        string localPath, int maxSide, int quality, double? cropAspectRatio, CancellationToken ct)
     {
         return Task.Run(() =>
         {
@@ -55,12 +64,37 @@ public class ThumbnailService
             bmp.EndInit();
             bmp.Freeze();
 
+            BitmapSource final = bmp;
+            if (cropAspectRatio is double targetRatio)
+            {
+                int w = bmp.PixelWidth, h = bmp.PixelHeight;
+                double currentRatio = (double)w / h;
+                int cropWidth, cropHeight, x, y;
+                if (currentRatio > targetRatio)
+                {
+                    // Wider than the target ratio - crop the sides, keep full height centered.
+                    cropHeight = h;
+                    cropWidth = Math.Max(1, (int)Math.Round(h * targetRatio));
+                    x = (w - cropWidth) / 2;
+                    y = 0;
+                }
+                else
+                {
+                    // Taller than the target ratio - crop top/bottom, keep full width centered.
+                    cropWidth = w;
+                    cropHeight = Math.Max(1, (int)Math.Round(w / targetRatio));
+                    x = 0;
+                    y = (h - cropHeight) / 2;
+                }
+                final = new CroppedBitmap(bmp, new Int32Rect(x, y, cropWidth, cropHeight));
+            }
+
             var encoder = new JpegBitmapEncoder { QualityLevel = quality };
-            encoder.Frames.Add(BitmapFrame.Create(bmp));
+            encoder.Frames.Add(BitmapFrame.Create(final));
 
             using var stream = new MemoryStream();
             encoder.Save(stream);
-            return stream.ToArray();
+            return (stream.ToArray(), final.PixelWidth, final.PixelHeight);
         }, ct);
     }
 }

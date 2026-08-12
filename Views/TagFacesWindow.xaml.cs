@@ -16,8 +16,17 @@ public partial class TagFacesWindow : Window
 {
     private readonly FaceRepository _faces;
     private readonly PhotoRepository _photos;
+    private readonly AvatarRegionRepository _avatarRegionRepo;
+    private readonly AvatarTypeService? _avatarClassifier;
     private readonly VrcxProfileLookupService? _profileLookup;
     private readonly Photo _photo;
+
+    private List<AvatarRegion> _avatarRegionsList = [];
+    private long _activeAvatarRegionId;
+
+    /// <summary>Same "backed out without tagging" cleanup as _pendingManualFaceId, for a
+    /// freshly-drawn avatar region instead of a face box.</summary>
+    private long? _pendingManualAvatarRegionId;
 
     private List<DetectedFace> _detectedFaces = [];
     private Dictionary<long, FaceLabel> _labelsByFaceId = [];
@@ -126,17 +135,21 @@ public partial class TagFacesWindow : Window
 
     private record ManualPersonMergeSuggestion(long ManualPersonId, string ManualName, string VrcUserId, string VrcDisplayName);
 
-    public TagFacesWindow(FaceRepository faces, PhotoRepository photos, VrcxProfileLookupService? profileLookup, Photo photo)
+    public TagFacesWindow(FaceRepository faces, PhotoRepository photos, AvatarRegionRepository avatarRegions,
+        AvatarTypeService? avatarClassifier, VrcxProfileLookupService? profileLookup, Photo photo)
     {
         InitializeComponent();
         DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
         // The person-picker Popup is a transparent, separately-hwnd'd child window - it taking
         // keyboard focus (e.g. typing a new name) can itself trigger Deactivated on this window
         // even though the user never clicked away, so skip the close while it's open.
-        DialogWindowBehavior.CloseOnDeactivated(this, stillOpenGuard: () => PersonPickerPopup.IsOpen);
+        DialogWindowBehavior.CloseOnDeactivated(this,
+            stillOpenGuard: () => PersonPickerPopup.IsOpen || AvatarPickerPopup.IsOpen);
         DialogWindowBehavior.OpenNearCursor(this);
         _faces = faces;
         _photos = photos;
+        _avatarRegionRepo = avatarRegions;
+        _avatarClassifier = avatarClassifier;
         _profileLookup = profileLookup;
         _photo = photo;
         Title = $"Tag Faces - {photo.FileName}";
@@ -387,6 +400,7 @@ public partial class TagFacesWindow : Window
         // Gamelog-inferred fallback only ever has rows when there's no real VRCX player data
         // for this photo (GamelogCorrelationService's scope), so only bother loading it then.
         _gamelogPlayers = _photoPlayers.Count == 0 ? _photos.GetGamelogInferredPlayersForPhoto(_photo.Id) : [];
+        _avatarRegionsList = _avatarRegionRepo.GetRegionsForPhoto(_photo.Id);
     }
 
     private void PhotoImage_SizeChanged(object sender, SizeChangedEventArgs e) => RedrawBoxes();
@@ -539,12 +553,82 @@ public partial class TagFacesWindow : Window
                 FaceCanvas.Children.Add(nameLabel);
             }
         }
+
+        // Avatar regions - same hit-target/visual-border/name-label shape as the face loop
+        // above, just their own color (magenta, distinct from every face-box color already in
+        // use) and their own click handler (AvatarBox_MouseLeftButtonUp), so an existing
+        // region's click always opens the avatar picker regardless of which mode (Person/
+        // Avatar) is currently selected - only NEW box creation is mode-gated.
+        foreach (var region in _avatarRegionsList)
+        {
+            Brush regionColor = region.AvatarCatalogId is not null ? Brushes.Magenta : Brushes.Yellow;
+
+            double left = offsetX + region.X * scale;
+            double top = offsetY + region.Y * scale;
+            double width = region.Width * scale;
+            double height = region.Height * scale;
+
+            var hitTarget = new Rectangle
+            {
+                Width = width + hitPadding * 2,
+                Height = height + hitPadding * 2,
+                Fill = Brushes.Transparent,
+                // Negated: DetectedFace.Id and AvatarRegion.Id are independent auto-increment
+                // sequences that can (and do) collide in value - both kinds of hit-target
+                // Rectangle share this same FaceCanvas.Children collection tagged with a bare
+                // long, so a same-valued face/region pair would be ambiguous to a Tag-based
+                // lookup otherwise. SQLite autoincrement ids are always positive, so negative
+                // unambiguously means "this Tag is an AvatarRegion.Id" - see AvatarBox_
+                // MouseLeftButtonUp and the post-creation lookup in FaceCanvas_MouseLeftButtonUp
+                // for the matching negation back.
+                Tag = -region.Id,
+                Cursor = Cursors.Hand,
+            };
+            hitTarget.MouseLeftButtonUp += AvatarBox_MouseLeftButtonUp;
+            Canvas.SetLeft(hitTarget, left - hitPadding);
+            Canvas.SetTop(hitTarget, top - hitPadding);
+            FaceCanvas.Children.Add(hitTarget);
+
+            var visualBorder = new Rectangle
+            {
+                Width = width,
+                Height = height,
+                Stroke = regionColor,
+                StrokeThickness = strokeThickness,
+                StrokeDashArray = [4, 2], // dashed - visually distinct from solid face boxes at a glance
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(visualBorder, left);
+            Canvas.SetTop(visualBorder, top);
+            FaceCanvas.Children.Add(visualBorder);
+
+            if (region.AvatarDisplayName is not null)
+            {
+                var nameLabel = new TextBlock
+                {
+                    Text = region.AvatarDisplayName,
+                    Background = regionColor,
+                    Foreground = Brushes.Black,
+                    FontSize = labelFontSize,
+                    Padding = new Thickness(labelPaddingH, 0, labelPaddingH, 0),
+                };
+                Canvas.SetLeft(nameLabel, left);
+                Canvas.SetTop(nameLabel, top + height);
+                FaceCanvas.Children.Add(nameLabel);
+            }
+        }
     }
 
     private void FaceBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         var box = (Rectangle)sender;
         OpenPicker((long)box.Tag, box);
+    }
+
+    private void AvatarBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var box = (Rectangle)sender;
+        OpenAvatarPicker(-(long)box.Tag, box); // see RedrawBoxes' avatar-region loop for why Tag is negated
     }
 
     /// <summary>
@@ -567,7 +651,7 @@ public partial class TagFacesWindow : Window
             // at a real 0 makes a plain click correctly measure as a zero-size box.
             Width = 0,
             Height = 0,
-            Stroke = Brushes.Cyan,
+            Stroke = AvatarModeRadio.IsChecked == true ? Brushes.Magenta : Brushes.Cyan,
             StrokeThickness = 1.0 / CurrentZoomScale(),
             Fill = Brushes.Transparent,
             IsHitTestVisible = false,
@@ -620,6 +704,20 @@ public partial class TagFacesWindow : Window
         int width = (int)Math.Clamp(canvasWidth / scale, 1, imgWidth - x);
         int height = (int)Math.Clamp(canvasHeight / scale, 1, imgHeight - y);
 
+        if (AvatarModeRadio.IsChecked == true)
+        {
+            var newRegion = _avatarRegionRepo.AddRegion(_photo.Id, x, y, width, height);
+            LoadFaceData();
+            RedrawBoxes();
+
+            if (FaceCanvas.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag is long id && id == -newRegion.Id) is Rectangle newRegionTarget)
+            {
+                _pendingManualAvatarRegionId = newRegion.Id;
+                OpenAvatarPicker(newRegion.Id, newRegionTarget);
+            }
+            return;
+        }
+
         var newFace = _faces.AddManualFace(_photo.Id, new FaceBox(x, y, width, height));
         LoadFaceData();
         RedrawBoxes();
@@ -643,6 +741,78 @@ public partial class TagFacesWindow : Window
         if (_pendingManualFaceId is not long pendingId) return;
         _pendingManualFaceId = null;
         _faces.DeleteDetectedFace(pendingId);
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    /// <summary>Same "backed out without tagging" cleanup as PersonPickerPopup_Closed, for a
+    /// freshly-drawn avatar region instead of a face box.</summary>
+    private void AvatarPickerPopup_Closed(object? sender, EventArgs e)
+    {
+        if (_pendingManualAvatarRegionId is not long pendingId) return;
+        _pendingManualAvatarRegionId = null;
+        _avatarRegionRepo.DeleteRegion(pendingId);
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void OpenAvatarPicker(long regionId, Rectangle box)
+    {
+        _activeAvatarRegionId = regionId;
+        var region = _avatarRegionsList.FirstOrDefault(r => r.Id == regionId);
+        ClearAvatarTagButton.Visibility = region?.AvatarCatalogId is not null ? Visibility.Visible : Visibility.Collapsed;
+
+        AvatarSearchTextBox.Text = "";
+        AvatarSearchListBox.ItemsSource = SearchAvatarEntries("");
+
+        AvatarPickerPopup.PlacementTarget = box;
+        AvatarPickerPopup.IsOpen = true;
+        AvatarSearchTextBox.Focus();
+    }
+
+    /// <summary>Substring match against the classifier's full known-avatar list (see
+    /// AvatarTypeService.AllEntries) - simpler than the person picker's FuzzyNameSearch/alias
+    /// matching, since avatar names don't have the "stylized Unicode display name" problem VRC
+    /// usernames do. Empty query returns everything, same "browse the full list" convention as
+    /// SearchPlayerFilterOptions.</summary>
+    private List<(string Label, string? CatalogId)> SearchAvatarEntries(string query)
+    {
+        var all = _avatarClassifier?.AllEntries ?? [];
+        if (string.IsNullOrWhiteSpace(query)) return all.ToList();
+        return all.Where(e => e.Label.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private void AvatarSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        AvatarSearchListBox.ItemsSource = SearchAvatarEntries(AvatarSearchTextBox.Text);
+    }
+
+    private void AvatarSearchListBox_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (AvatarSearchListBox.SelectedItem is not ValueTuple<string, string?> selected) return;
+        string label = selected.Item1;
+        string? catalogId = selected.Item2;
+        _pendingManualAvatarRegionId = null; // resolved - not a backed-out draw
+        _avatarRegionRepo.SetRegionTag(_activeAvatarRegionId, catalogId, label);
+        AvatarPickerPopup.IsOpen = false;
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void ClearAvatarTagButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingManualAvatarRegionId = null;
+        _avatarRegionRepo.SetRegionTag(_activeAvatarRegionId, null, null);
+        AvatarPickerPopup.IsOpen = false;
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void DeleteAvatarRegionButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingManualAvatarRegionId = null; // explicit delete, not the auto-cleanup path
+        _avatarRegionRepo.DeleteRegion(_activeAvatarRegionId);
+        AvatarPickerPopup.IsOpen = false;
         LoadFaceData();
         RedrawBoxes();
     }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VrcPhotoManager.Data;
 
@@ -10,9 +11,11 @@ using VrcPhotoManager.Data;
 namespace VrcPhotoManager.Migrations
 {
     [DbContext(typeof(VrcdnDbContext))]
-    partial class VrcdnDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260811162102_AddAvatarCatalogId")]
+    partial class AddAvatarCatalogId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -30,58 +33,6 @@ namespace VrcPhotoManager.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("settings", (string)null);
-                });
-
-            modelBuilder.Entity("VrcPhotoManager.Models.AvatarRegion", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("id");
-
-                    b.Property<string>("AvatarCatalogId")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("avatar_catalog_id");
-
-                    b.Property<string>("AvatarDisplayName")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("avatar_display_name");
-
-                    b.Property<bool>("Deleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false)
-                        .HasColumnName("deleted");
-
-                    b.Property<int>("Height")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("height");
-
-                    b.Property<long>("PhotoId")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("photo_id");
-
-                    b.Property<DateTime>("TaggedAt")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("tagged_at");
-
-                    b.Property<int>("Width")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("width");
-
-                    b.Property<int>("X")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("x");
-
-                    b.Property<int>("Y")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("y");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PhotoId");
-
-                    b.ToTable("avatar_regions", (string)null);
                 });
 
             modelBuilder.Entity("VrcPhotoManager.Models.DetectedFace", b =>
@@ -335,10 +286,6 @@ namespace VrcPhotoManager.Migrations
                     b.Property<byte[]>("Thumbnail")
                         .HasColumnType("BLOB")
                         .HasColumnName("thumbnail");
-
-                    b.Property<string>("UploadCropMode")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("upload_crop_mode");
 
                     b.Property<string>("UploadedAt")
                         .HasColumnType("TEXT")
