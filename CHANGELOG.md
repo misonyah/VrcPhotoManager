@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Add an installer and automatic background updates via [Velopack](https://velopack.io) -
+  releases now publish to GitHub Releases via CI on a version tag push. See the README's
+  Installing/Releasing sections.
+
 ## 1.0.0
 
 First versioned release.
