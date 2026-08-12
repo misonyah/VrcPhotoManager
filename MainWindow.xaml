@@ -17,6 +17,8 @@
         <views:RemoteStatusToVisibilityConverter x:Key="RemoteStatusToVisibilityConverter" />
         <views:CropOverlayVisibilityConverter x:Key="CropOverlayVisibilityConverter" />
         <views:CropOverlayMarginConverter x:Key="CropOverlayMarginConverter" />
+        <views:PendingCropLabelVisibilityConverter x:Key="PendingCropLabelVisibilityConverter" />
+        <views:EffectiveCropLabelConverter x:Key="EffectiveCropLabelConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <!-- The always-1px frame drawn around the actual photo cell (fixed Width/Height below) -
              constant regardless of selection, so the inner content area (and the crop-line
@@ -95,17 +97,18 @@
                            MouseLeftButtonUp="PhotoImage_Click"
                            MouseUp="PhotoImage_MiddleClick" />
                     <!-- Crop-line preview: for an already-Uploaded photo, shows the ratio it was
-                         actually uploaded as (from UploadCropMode); for anything else, shows what
-                         the currently-selected dropdown preset would cut on upload - see
-                         CropOverlayRatioResolver. Shown while selected, or on hover for an
-                         already-Uploaded photo (see CropOverlayVisibilityConverter). The Margin
-                         marks the same centered-crop rectangle ThumbnailService.PrepareForUploadAsync
-                         applies at upload time - see CropOverlayMarginConverter's doc comment for
-                         why it also has to account for the Image's own Uniform-stretch
-                         letterboxing. Container size comes from PhotoGrid's own ActualWidth
-                         (the fixed-size inner Border's content area, unaffected by
-                         PhotoSelectionOuterStyle's outward-growing selection border) rather than
-                         DataContext.ThumbnailSize. -->
+                         actually uploaded as (from UploadCropMode); for anything else, shows this
+                         photo's own CropRatioOverride (set via [ / ] while hovering) if one's
+                         set - see CropOverlayRatioResolver. No override, no crop lines: there's
+                         no batch-wide default crop ratio anymore, only per-photo. Shown while
+                         selected, or on hover for an already-Uploaded photo (see
+                         CropOverlayVisibilityConverter). The Margin marks the same centered-crop
+                         rectangle ThumbnailService.PrepareForUploadAsync applies at upload time -
+                         see CropOverlayMarginConverter's doc comment for why it also has to
+                         account for the Image's own Uniform-stretch letterboxing. Container size
+                         comes from PhotoGrid's own ActualWidth (the fixed-size inner Border's
+                         content area, unaffected by PhotoSelectionOuterStyle's outward-growing
+                         selection border) rather than DataContext.ThumbnailSize. -->
                     <!-- No DropShadowEffect here (unlike the other badges) - its blur radiates
                          both sides of the line, softening/darkening a band of the photo just
                          inside the crop boundary and reading as the preview having shrunk by a
@@ -120,7 +123,7 @@
                                 <Binding Path="ActualWidth" ElementName="PhotoGrid" />
                                 <Binding Path="RemoteStatus" />
                                 <Binding Path="UploadCropMode" />
-                                <Binding Path="DataContext.EffectiveCropAspectRatio" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="CropRatioOverride" />
                                 <Binding Path="CropOffsetX" />
                                 <Binding Path="CropOffsetY" />
                             </MultiBinding>
@@ -131,7 +134,7 @@
                                 <Binding Path="IsMouseOver" ElementName="PhotoBorder" />
                                 <Binding Path="RemoteStatus" />
                                 <Binding Path="UploadCropMode" />
-                                <Binding Path="DataContext.EffectiveCropAspectRatio" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="CropRatioOverride" />
                                 <Binding Path="Thumbnail" />
                             </MultiBinding>
                         </Rectangle.Visibility>
@@ -169,6 +172,27 @@
                             </Path.Effect>
                         </Path>
                     </StackPanel>
+                    <!-- Same corner as the "Uploaded as" badge above (mutually exclusive by
+                         RemoteStatus, so never both at once) - names whichever crop setting is
+                         CURRENTLY in effect for a not-yet-uploaded photo: this photo's own
+                         CropRatioOverride if [ / ] has set one, otherwise "Original (no crop)" -
+                         there's no batch-wide default anymore, so no override really does mean
+                         no crop. Needed because "no override" and "override explicitly set to
+                         Original (no crop)" would otherwise look identical in the crop-line
+                         overlay itself (no lines either way) - see
+                         PendingCropLabelVisibilityConverter's doc comment. -->
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="4" Padding="4,1" CornerRadius="3" Background="#CC1B3A5E">
+                        <Border.Visibility>
+                            <MultiBinding Converter="{StaticResource PendingCropLabelVisibilityConverter}">
+                                <Binding Path="Selected" />
+                                <Binding Path="IsMouseOver" ElementName="PhotoBorder" />
+                                <Binding Path="RemoteStatus" />
+                            </MultiBinding>
+                        </Border.Visibility>
+                        <TextBlock Text="{Binding CropRatioOverride, Converter={StaticResource EffectiveCropLabelConverter}}"
+                                   FontSize="10" Foreground="White" />
+                    </Border>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
                             Margin="4" Padding="4,1" CornerRadius="3"
                             Background="{Binding RemoteStatus, Converter={StaticResource StatusToBrushConverter}}"
@@ -388,14 +412,10 @@
                         ToolTip="{Binding CropPrintSelectedTooltip}" />
 
                 <Separator Margin="0,0,0,8" />
-                <TextBlock Text="Upload crop:" Margin="0,0,0,4"
-                           ToolTip="Crops each photo to this aspect ratio (centered) before uploading.&#10;&quot;Original (no crop)&quot; uploads unchanged, same as before this existed.&#10;A cropped upload's filename gets its final resolution appended, so you can tell which crop was used from the filename alone." />
-                <ComboBox ItemsSource="{x:Static vm:MainViewModel.UploadCropPresets}" DisplayMemberPath="Name"
-                          SelectedItem="{Binding SelectedUploadCropPreset}" Margin="0,0,0,4"
-                          ToolTip="Crops each photo to this aspect ratio (centered) before uploading.&#10;&quot;Original (no crop)&quot; uploads unchanged, same as before this existed.&#10;A cropped upload's filename gets its final resolution appended, so you can tell which crop was used from the filename alone." />
-                <TextBox Text="{Binding CustomCropRatioText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"
-                         Visibility="{Binding IsCustomCropRatioVisible, Converter={StaticResource BoolToVisibilityConverter}}"
-                         ToolTip="Custom crop ratio as Width:Height, e.g. 5:7." />
+                <!-- No batch-wide crop dropdown anymore - uploads at the original resolution
+                     (uncropped) by default. Hover a photo and press [ / ] to cycle it through a
+                     crop ratio individually (see README's Keyboard Shortcuts section and
+                     Settings' Upload Crop Presets reference panel) before uploading it. -->
                 <Button Content="Upload Selected" Command="{Binding UploadSelectedCommand}" Padding="8,4" Margin="0,0,0,8" FontWeight="Bold"
                         ToolTip="{Binding UploadSelectedTooltip}" />
                 <Button Content="Sync VRCDN Metadata" Command="{Binding SyncMetadataCommand}" Padding="8,4" Margin="0,0,0,8"

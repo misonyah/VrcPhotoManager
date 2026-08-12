@@ -71,6 +71,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.UploadCropMode).HasColumnName("upload_crop_mode");
             entity.Property(p => p.CropOffsetX).HasColumnName("crop_offset_x");
             entity.Property(p => p.CropOffsetY).HasColumnName("crop_offset_y");
+            entity.Property(p => p.CropRatioOverride).HasColumnName("crop_ratio_override");
         });
 
         modelBuilder.Entity<AppSetting>(entity =>

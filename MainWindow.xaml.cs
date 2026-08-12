@@ -140,20 +140,37 @@ public partial class MainWindow : Window
             if (DataContext is MainViewModel vm) OpenFilterWindow(vm);
         }
 
-        // Nudges the not-yet-uploaded crop position on whichever photo is currently hovered
-        // (see PhotoViewModel.NudgeCropOffset) - _hoverTarget is the same FrameworkElement
+        // Nudges the upload crop position on whichever photo is currently hovered (see
+        // PhotoViewModel.NudgeCropOffset, which reverts an already-Uploaded photo back to
+        // NotUploaded first rather than no-opping) - _hoverTarget is the same FrameworkElement
         // ResetHoverTimer/HidePreviewOverlay already track for the hover-preview popup, so
         // there's no separate "which photo is under the cursor" bookkeeping to add. Skipped
         // while typing in a text box (e.g. the custom crop-ratio field) so arrow keys still
         // move the text cursor there instead of being hijacked just because a photo happens
-        // to be hovered at the same time.
+        // to be hovered at the same time. Also dismisses the hover-preview popup (without
+        // clearing _hoverTarget - see HidePreviewOverlay's doc comment) since it covers the
+        // thumbnail grid, right where you'd want to see the crop lines actually move.
         if ((e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
             && Keyboard.FocusedElement is not TextBox
             && _hoverTarget?.DataContext is PhotoViewModel hoveredPhoto)
         {
+            HidePreviewOverlay(clearHoverTarget: false);
             int dx = e.Key == Key.Left ? -1 : e.Key == Key.Right ? 1 : 0;
             int dy = e.Key == Key.Up ? -1 : e.Key == Key.Down ? 1 : 0;
             hoveredPhoto.NudgeCropOffset(dx, dy);
+            e.Handled = true;
+        }
+
+        // [ / ] cycle the hovered photo's own crop-ratio preset instead of the position within
+        // it - see PhotoViewModel.CycleCropRatioOverride. Same hover-target/text-box/popup
+        // handling as the arrow-key nudge above.
+        if ((e.Key is Key.OemOpenBrackets or Key.OemCloseBrackets)
+            && Keyboard.FocusedElement is not TextBox
+            && _hoverTarget?.DataContext is PhotoViewModel hoveredForRatio)
+        {
+            HidePreviewOverlay(clearHoverTarget: false);
+            int direction = e.Key == Key.OemCloseBrackets ? 1 : -1;
+            hoveredForRatio.CycleCropRatioOverride(direction, MainViewModel.UploadCropPresets);
             e.Handled = true;
         }
     }
@@ -538,11 +555,16 @@ public partial class MainWindow : Window
 
     /// <summary>Also called before opening any secondary window (About/Settings/Metadata/Tag
     /// Faces) - those windows now open positioned near the cursor (DialogWindowBehavior.
-    /// OpenNearCursor), and popping up right on top of the hover preview looked cluttered.</summary>
-    private void HidePreviewOverlay()
+    /// OpenNearCursor), and popping up right on top of the hover preview looked cluttered.
+    /// clearHoverTarget=false is for the crop-nudge keyboard handler: the big preview popup
+    /// obscures the thumbnail grid, so a crop nudge dismisses it too, but MUST keep _hoverTarget
+    /// intact - clearing it would make the very next arrow-key press find no hovered photo at
+    /// all, breaking repeated nudges (no MouseEnter fires again just from holding still and
+    /// pressing keys).</summary>
+    private void HidePreviewOverlay(bool clearHoverTarget = true)
     {
         _hoverTimer.Stop();
-        _hoverTarget = null;
+        if (clearHoverTarget) _hoverTarget = null;
         _currentPreviewPhoto = null;
         PreviewOverlay.Visibility = Visibility.Collapsed;
         // Clear any in-flight show animation so a rapid hover-away doesn't leave the overlay

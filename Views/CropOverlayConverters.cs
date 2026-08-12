@@ -4,39 +4,44 @@ using System.Windows.Data;
 using System.Windows.Media.Imaging;
 using VrcPhotoManager.Models;
 using VrcPhotoManager.Services;
+using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager.Views;
 
-/// <summary>Resolves which crop ratio the preview overlay should show for a given photo - the
-/// actual ratio it was uploaded as (parsed from its own UploadCropMode) once it's Uploaded,
-/// rather than whatever preset happens to be selected in the dropdown right now. The two can
-/// disagree (you can select a different preset after uploading, or a re-sync backfilled a
-/// crop from a resolution the dropdown never had selected), and the preview on an already-
-/// uploaded photo should show what's really live on VRCDN, not what a fresh upload would do.
-/// Not-yet-uploaded photos still preview the dropdown's ratio, since that's what a future
-/// upload would actually apply.</summary>
+/// <summary>Resolves which crop ratio the preview overlay should show for a given photo. There's
+/// no batch-wide default crop anymore - only a per-photo CropRatioOverride (set via [ / ] while
+/// hovering, see Photo.CropRatioOverride) or, once Uploaded, the ratio it was actually uploaded
+/// as (parsed from UploadCropMode, which can differ from the current override if it was changed
+/// since - the preview on an already-uploaded photo should show what's really live on VRCDN, not
+/// what a fresh re-upload would do).</summary>
 internal static class CropOverlayRatioResolver
 {
-    public static double? Resolve(RemoteStatus status, string? uploadCropMode, double? dropdownRatio) =>
-        status == RemoteStatus.Uploaded
-            ? (uploadCropMode is null ? null : CropRatioLabels.ParseRatio(uploadCropMode))
-            : dropdownRatio;
-
-    /// <summary>The crop nudge (see Photo.CropOffsetX) only ever applies to a not-yet-uploaded
-    /// photo's preview - an already-uploaded photo's crop position isn't tracked (only its
-    /// ratio is, via UploadCropMode), so its preview always shows centered.</summary>
-    public static (double X, double Y) ResolveOffset(RemoteStatus status, double offsetX, double offsetY) =>
-        status == RemoteStatus.Uploaded ? (0, 0) : (offsetX, offsetY);
+    /// <summary>cropRatioOverride is a preset Name (or null - "no crop"), parsed the same way
+    /// UploadCropMode is. "Original (no crop)" isn't in CropRatioLabels.KnownRatios and isn't a
+    /// "Custom ..." shape either, so ParseRatio naturally returns null for it - correctly showing
+    /// no crop lines for a photo overridden to that preset (same outcome as no override at all).</summary>
+    public static double? Resolve(RemoteStatus status, string? uploadCropMode, string? cropRatioOverride)
+    {
+        if (status == RemoteStatus.Uploaded)
+        {
+            return uploadCropMode is null ? null : CropRatioLabels.ParseRatio(uploadCropMode);
+        }
+        return cropRatioOverride is null ? null : CropRatioLabels.ParseRatio(cropRatioOverride);
+    }
 }
 
 /// <summary>Shows the crop-line preview overlay when selected (preview of what a future upload
-/// would cut), or on hover ONLY for a photo that's already Uploaded (the real crop it's live
-/// with) - hovering a not-yet-uploaded, unselected photo shouldn't show a crop guess nobody
-/// asked for. Also requires the resolved ratio (see CropOverlayRatioResolver) to be set and the
-/// thumbnail to have actually loaded (needed to compute where the lines go). Values:
-/// [0] Selected (bool), [1] IsMouseOver of the photo's outer Border (bool), [2] RemoteStatus,
-/// [3] UploadCropMode (string?), [4] MainViewModel.EffectiveCropAspectRatio - the dropdown's
-/// ratio (double?), [5] Thumbnail (BitmapImage?).</summary>
+/// would cut) or on hover (same preview, or the real uploaded crop once Uploaded) - hover has to
+/// show it for a not-yet-uploaded, unselected photo too now that arrow keys nudge whichever
+/// photo is hovered (MainWindow's PreviewKeyDown -> PhotoViewModel.NudgeCropOffset): an earlier
+/// version only showed hover-preview for already-Uploaded photos, so nudging an unselected photo
+/// actually worked but gave no visible feedback at all - confusing enough that it read as
+/// "cursor keys don't work until I deselect the other photo" (the other photo's own, unrelated,
+/// still-visible-because-Selected overlay was the only thing on screen). Also requires the
+/// resolved ratio (see CropOverlayRatioResolver) to be set and the thumbnail to have actually
+/// loaded (needed to compute where the lines go). Values: [0] Selected (bool), [1] IsMouseOver
+/// of the photo's outer Border (bool), [2] RemoteStatus, [3] UploadCropMode (string?),
+/// [4] CropRatioOverride (string?), [5] Thumbnail (BitmapImage?).</summary>
 public class CropOverlayVisibilityConverter : IMultiValueConverter
 {
     public object Convert(object[] values, Type targetType, object? parameter, CultureInfo culture)
@@ -51,9 +56,9 @@ public class CropOverlayVisibilityConverter : IMultiValueConverter
         }
 
         string? uploadCropMode = values[3] as string;
-        double? dropdownRatio = values[4] as double?;
-        double? ratio = CropOverlayRatioResolver.Resolve(status, uploadCropMode, dropdownRatio);
-        bool show = selected || (isMouseOver && status == RemoteStatus.Uploaded);
+        string? cropRatioOverride = values[4] as string;
+        double? ratio = CropOverlayRatioResolver.Resolve(status, uploadCropMode, cropRatioOverride);
+        bool show = selected || isMouseOver;
         return show && ratio is not null ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -70,8 +75,8 @@ public class CropOverlayVisibilityConverter : IMultiValueConverter
 /// Values: [0] Thumbnail (BitmapImage?), [1] container size (double - the Grid's own
 /// ActualWidth, NOT the outer Border's bound Width, since selection changes that Border's
 /// BorderThickness and shrinks the actual content area), [2] RemoteStatus, [3] UploadCropMode
-/// (string?), [4] MainViewModel's dropdown ratio (double?), [5] CropOffsetX (double),
-/// [6] CropOffsetY (double).</summary>
+/// (string?), [4] CropRatioOverride (string?), [5] CropOffsetX (double), [6] CropOffsetY
+/// (double).</summary>
 public class CropOverlayMarginConverter : IMultiValueConverter
 {
     /// <summary>Nudges the whole overlay up by 1px versus the mathematically-centered position -
@@ -94,10 +99,9 @@ public class CropOverlayMarginConverter : IMultiValueConverter
         }
 
         string? uploadCropMode = values[3] as string;
-        double? dropdownRatio = values[4] as double?;
-        double? targetRatio = CropOverlayRatioResolver.Resolve(status, uploadCropMode, dropdownRatio);
+        string? cropRatioOverride = values[4] as string;
+        double? targetRatio = CropOverlayRatioResolver.Resolve(status, uploadCropMode, cropRatioOverride);
         if (targetRatio is not double ratio) return new Thickness(0);
-        (double offX, double offY) = CropOverlayRatioResolver.ResolveOffset(status, offsetX, offsetY);
 
         // Matches Image's Stretch="Uniform": scale by whichever axis is more constraining.
         double scale = Math.Min(containerSize / thumbnail.PixelWidth, containerSize / thumbnail.PixelHeight);
@@ -119,18 +123,59 @@ public class CropOverlayMarginConverter : IMultiValueConverter
             cropHeight = dispWidth / ratio;
         }
 
-        // offX/offY (-1..1) position the crop within its available slack on each axis instead
-        // of always centering it (0 = centered) - matches ThumbnailService.PrepareForUploadAsync's
-        // same-shaped formula, so the preview lines land exactly where the real upload would crop.
+        // offsetX/Y (-1..1) position the crop within its available slack on each axis instead of
+        // always centering it (0 = centered) - matches ThumbnailService.PrepareForUploadAsync's
+        // same-shaped formula, so the preview lines land exactly where the real upload would
+        // crop. Used regardless of RemoteStatus - CropOffsetX/Y are no longer reset on upload
+        // (see UploadSelectedAsync), so they keep meaning "where the crop actually is" even for
+        // an already-Uploaded photo.
         double slackX = dispWidth - cropWidth;
         double slackY = dispHeight - cropHeight;
-        double left = dispLeft + slackX / 2 * (1 + offX);
-        double top = dispTop + slackY / 2 * (1 + offY) + VerticalNudge;
+        double left = dispLeft + slackX / 2 * (1 + offsetX);
+        double top = dispTop + slackY / 2 * (1 + offsetY) + VerticalNudge;
         double right = containerSize - (left + cropWidth);
         double bottom = containerSize - (top + cropHeight);
         return new Thickness(left, top, right, bottom);
     }
 
     public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Shows a small text badge naming the crop setting that's CURRENTLY actually in effect
+/// for a not-yet-uploaded photo - this photo's own CropRatioOverride if [ / ] has set one,
+/// otherwise "Original (no crop)" (there's no batch-wide default anymore, so no override really
+/// does mean no crop). Exists because "no override" and "override explicitly set to Original (no
+/// crop)" would otherwise look identical in the crop-line overlay itself (no lines either way),
+/// making it impossible to tell from the overlay alone whether cycling with [ / ] actually did
+/// anything. Shown at the same corner an already-Uploaded photo's real "Uploaded as" badge
+/// occupies (they're mutually exclusive by RemoteStatus, so never both at once).</summary>
+public class PendingCropLabelVisibilityConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (values.Length < 3
+            || values[0] is not bool selected
+            || values[1] is not bool isMouseOver
+            || values[2] is not RemoteStatus status)
+        {
+            return Visibility.Collapsed;
+        }
+        return (selected || isMouseOver) && status != RemoteStatus.Uploaded ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>The short label text for PendingCropLabelVisibilityConverter's badge - see its own
+/// doc comment. Value: CropRatioOverride (string?) - null displays as "Original (no crop)"'s
+/// short form, matching what actually happens on upload with no override set.</summary>
+public class EffectiveCropLabelConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        CropRatioLabels.ShortLabel(value as string ?? MainViewModel.UploadCropModeOriginal);
+
+    public object ConvertBack(object value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }

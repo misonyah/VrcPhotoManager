@@ -56,5 +56,16 @@ public static class CropRatioLabels
         return null;
     }
 
+    /// <summary>Trims a full preset/UploadCropMode label down to just the ratio for a small
+    /// thumbnail badge, e.g. "4:3" out of "4:3 (Landscape)" - the full label is still shown via
+    /// the badge's own ToolTip. Shared so PhotoViewModel.UploadCropModeShort and the per-photo
+    /// pending-crop badge (CropOverlayConverters.EffectiveCropLabelConverter) display the same
+    /// shortening for the same label shapes.</summary>
+    public static string ShortLabel(string fullLabel)
+    {
+        int parenIndex = fullLabel.IndexOf(" (", StringComparison.Ordinal);
+        return parenIndex > 0 ? fullLabel[..parenIndex] : fullLabel;
+    }
+
     private static int Gcd(int a, int b) => b == 0 ? a : Gcd(b, a % b);
 }

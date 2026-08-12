@@ -2,6 +2,8 @@
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/misonyah)
 
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
 A Windows desktop tool for curating and uploading VRChat photos to [VRCDN](https://vrcdn.live)
 object storage — browse a thumbnail grid, pick what goes up and what doesn't, and track
 upload status per photo, instead of blanket-uploading a whole library by filter alone.
@@ -70,18 +72,51 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **SQLite-backed, EF Core 10** — tracks local file metadata, ratings, and per-photo upload
   status, with automatic migrations on startup.
 - **Session login via embedded WebView2** — no external browser required; the login flow
-  happens inside the app.
+  happens inside the app. If the session expires, the app automatically retries in the
+  background (reusing the still-valid underlying Patreon login) before falling back to asking
+  you to log in again — see the Login button's tooltip/red highlight if it can't recover.
 - **Sync Metadata** — reconciles the local index against what's actually on VRCDN (matching by
   filename, with a fallback for objects uploaded under a reformatted name by an older tool), so
   a fresh install doesn't risk re-uploading photos that already made it up some other way.
   Safe to re-run any time.
-- **Upload Selected / Remove from VRCDN** — upload picks resize to fit VRChat's image-loader
-  limits before going up; Remove deletes selected, already-uploaded photos from VRCDN's storage
-  (confirmed first — there's no undo except re-uploading).
+- **Upload Selected / Remove from VRCDN** — upload resizes to fit VRChat's image-loader limits
+  before going up, with an optional per-photo crop (see [Keyboard shortcuts](#keyboard-shortcuts)
+  below); Remove deletes selected, already-uploaded photos from VRCDN's storage (confirmed first
+  — there's no undo except re-uploading).
 - **Settings screen** — configure where each local model's files live, with a one-click
   download straight from Hugging Face that checks the current version first and skips
   re-downloading if you already have it, and shows whether/when each model was last downloaded
   (see [Local model setup](#local-model-setup)).
+
+## Keyboard shortcuts
+
+| Keys | Action |
+| --- | --- |
+| `Ctrl+F` | Open the standalone Filter window |
+| Arrow keys, while hovering a photo | Nudge where its upload crop sits within the photo (see [Upload crop](#upload-crop-position--per-photo-ratio) below) |
+| `[` / `]`, while hovering a photo | Cycle that photo's own crop-ratio preset backward/forward |
+
+### Upload crop position & per-photo ratio
+
+There's no batch-wide crop setting - every photo uploads at its own original resolution
+(uncropped) unless you give it a crop individually:
+
+- **Hover a photo** to see white crop lines showing what will actually be cut (or, for an
+  already-uploaded photo, what was actually cut) - a small badge in the corner names the ratio
+  currently in effect for it.
+- **`[` / `]`** cycle that photo through the crop-ratio presets (1:1, 3:4, 4:3, 9:16, 16:9,
+  Original) - see Settings' "Upload Crop Presets" panel for the exact ratios and example
+  resolutions. Cycling past the last preset (or before the first) passes through "no crop" so
+  you can always get back to the default without counting presses.
+- **Arrow keys** nudge the crop's position within the photo (left/right and up/down), instead of
+  always centering it.
+- Adjusting an already-**Uploaded** photo reverts it back to Not Uploaded first (its live VRCDN
+  copy isn't touched) so the new crop can actually be uploaded - select it and click **Upload
+  Selected** again when ready.
+
+Both the position and the per-photo ratio are remembered (persisted locally, and NOT reset after
+upload) so you can adjust several photos before hitting **Upload Selected**, and the preview
+keeps reflecting the real crop even after it's live.
 
 ## Requirements
 

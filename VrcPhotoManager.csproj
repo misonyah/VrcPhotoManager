@@ -11,6 +11,10 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <!-- Project metadata only (GenerateAssemblyInfo=false above means this does NOT get
+         embedded into the built exe's file properties) - single source of truth for what
+         release a given commit/tag corresponds to. See CHANGELOG.md. -->
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

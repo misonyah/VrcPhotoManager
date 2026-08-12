@@ -127,6 +127,14 @@ public partial class LoginWindow : Window
         _checking = true;
         try
         {
+            // A real report: the redirect chain back from Patreon (after clicking Allow) can
+            // sit for a noticeable while with the window looking completely idle - no title
+            // change, no spinner, nothing to suggest it's still working rather than stuck. Set
+            // as soon as any post-click navigation happens, not just once panel.vrcdn.live is
+            // reached, since the Patreon-side leg of the redirect is the slow part being
+            // reported. No-op for the silent/off-screen window (Title is never seen there).
+            if (!_silent) Title = "Log in to VRCDN — finishing sign-in, please wait...";
+
             string currentUrl = Browser.CoreWebView2.Source;
             if (!currentUrl.StartsWith("https://panel.vrcdn.live", StringComparison.OrdinalIgnoreCase))
                 return; // still mid-flow through id.vrcdn.live / Patreon

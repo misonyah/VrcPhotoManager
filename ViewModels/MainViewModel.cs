@@ -160,10 +160,11 @@ public class MainViewModel : INotifyPropertyChanged
         UploadCropModeFilterOptions = options;
     }
 
-    /// <summary>One entry in the Upload crop-mode dropdown (above the Upload Selected button) -
-    /// AspectRatio is Width/Height, null for "don't crop, keep the original aspect ratio".
-    /// IsCustom marks the one entry whose ratio instead comes from CustomCropRatioText at
-    /// upload time, since an arbitrary user-typed ratio can't be a fixed preset value.</summary>
+    /// <summary>One entry a photo can be cycled through via the [ / ] keys while hovering (see
+    /// PhotoViewModel.CycleCropRatioOverride) - AspectRatio is Width/Height, null for "don't
+    /// crop, keep the original aspect ratio". There's no batch-wide crop dropdown anymore (a
+    /// per-photo override via [ / ] fully replaced it), so IsCustom's free-text ratio has no way
+    /// to be entered and this list intentionally has no "Custom..." entry.</summary>
     public record UploadCropPreset(string Name, double? AspectRatio, bool IsCustom = false);
 
     public static readonly List<UploadCropPreset> UploadCropPresets =
@@ -174,87 +175,7 @@ public class MainViewModel : INotifyPropertyChanged
         new("4:3 (Landscape)", 4.0 / 3.0),
         new("9:16 (Portrait)", 9.0 / 16.0),
         new("16:9 (Landscape)", 16.0 / 9.0),
-        new("Custom...", null, IsCustom: true),
     ];
-
-    private UploadCropPreset _selectedUploadCropPreset = UploadCropPresets[0];
-    public UploadCropPreset SelectedUploadCropPreset
-    {
-        get => _selectedUploadCropPreset;
-        set
-        {
-            _selectedUploadCropPreset = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(IsCustomCropRatioVisible));
-            OnPropertyChanged(nameof(EffectiveCropAspectRatio));
-        }
-    }
-
-    /// <summary>Drives the custom-ratio TextBox's Visibility next to the crop-preset dropdown -
-    /// only meaningful (and only shown) when "Custom..." is the selected preset.</summary>
-    public bool IsCustomCropRatioVisible => SelectedUploadCropPreset.IsCustom;
-
-    private string _customCropRatioText = "5:7";
-    public string CustomCropRatioText
-    {
-        get => _customCropRatioText;
-        set
-        {
-            _customCropRatioText = value;
-            OnPropertyChanged();
-            if (SelectedUploadCropPreset.IsCustom) OnPropertyChanged(nameof(EffectiveCropAspectRatio));
-        }
-    }
-
-    /// <summary>Width/Height the selected crop preset would apply, or null for "Original (no
-    /// crop)" - drives the white crop-line preview overlay on selected thumbnails in the grid
-    /// (see PhotoCellTemplate's crop-overlay Rectangle). Best-effort for Custom: an unparseable
-    /// ratio just shows no preview rather than an error, since this is preview-only - the real
-    /// validation/error happens in TryResolveUploadCropAspectRatio at actual upload time.</summary>
-    public double? EffectiveCropAspectRatio =>
-        SelectedUploadCropPreset.IsCustom ? TryParseCropRatio(CustomCropRatioText) : SelectedUploadCropPreset.AspectRatio;
-
-    /// <summary>W:H (or WxH) - null if unparseable or non-positive, so callers can tell "typed
-    /// something invalid" apart from a legitimate ratio.</summary>
-    private static double? TryParseCropRatio(string text)
-    {
-        var parts = text.Split([':', 'x', 'X'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 2
-            && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out double w)
-            && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out double h)
-            && w > 0 && h > 0)
-        {
-            return w / h;
-        }
-        return null;
-    }
-
-    /// <summary>The actual crop ratio UploadSelectedAsync should apply - resolves the selected
-    /// preset's fixed ratio, or parses CustomCropRatioText for the Custom preset. Null means
-    /// "don't crop" UNLESS the Custom preset is selected with unparseable text, in which case
-    /// the caller must treat this as an error, not as "no crop" - see
-    /// TryResolveUploadCropAspectRatio.</summary>
-    private bool TryResolveUploadCropAspectRatio(out double? aspectRatio, out string? error)
-    {
-        error = null;
-        var preset = SelectedUploadCropPreset;
-        if (!preset.IsCustom)
-        {
-            aspectRatio = preset.AspectRatio;
-            return true;
-        }
-
-        aspectRatio = TryParseCropRatio(CustomCropRatioText);
-        if (aspectRatio is null)
-        {
-            error = $"Invalid custom crop ratio \"{CustomCropRatioText}\" - use W:H, e.g. 5:7.";
-            return false;
-        }
-        return true;
-    }
-
-    private string? ResolveUploadCropModeLabel(double? aspectRatio) =>
-        aspectRatio is null ? null : SelectedUploadCropPreset.IsCustom ? $"Custom {CustomCropRatioText}" : SelectedUploadCropPreset.Name;
 
     private string _faceCountFilter = "Any";
     public string FaceCountFilter
@@ -844,6 +765,15 @@ public class MainViewModel : INotifyPropertyChanged
     private void AddPhoto(PhotoViewModel vm)
     {
         vm.SelectionChanged += (_, _) => RaiseSelectionDependentCommands();
+        // See PhotoViewModel.RevertForRecrop - adjusting an already-Uploaded photo's crop
+        // reverts it back to NotUploaded (so Upload Selected can pick it back up), which needs
+        // the Upload/Remove commands' enabled state re-evaluated same as any other status change,
+        // plus a status message since the cloud badge quietly disappearing needs an explanation.
+        vm.RevertedForRecrop += (_, _) =>
+        {
+            RaiseSelectionDependentCommands();
+            StatusMessage = $"{vm.FileName} reverted to Not Uploaded so its new crop can be uploaded.";
+        };
         _allPhotos.Add(vm);
     }
 
@@ -1664,12 +1594,18 @@ public class MainViewModel : INotifyPropertyChanged
         var toUpload = _allPhotos.Where(p => p.Selected && p.RemoteStatus != RemoteStatus.Uploaded).ToList();
         if (toUpload.Count == 0) { StatusMessage = "Nothing selected to upload."; return; }
 
-        if (!TryResolveUploadCropAspectRatio(out double? cropRatio, out string? cropError))
+        // No batch-wide crop dropdown anymore - each photo uploads at its original resolution
+        // unless it has its own CropRatioOverride (set via the [ / ] keys while hovering, see
+        // Photo.CropRatioOverride). A stale/unrecognized override label (shouldn't normally
+        // happen) falls back to no crop rather than crashing the upload. AspectRatio is null for
+        // the "Original (no crop)" preset, which is also this method's own "no override" default -
+        // both correctly mean "don't crop".
+        (double? Ratio, string? Label) ResolvePhotoCrop(PhotoViewModel photo)
         {
-            StatusMessage = cropError!;
-            return;
+            if (photo.Model.CropRatioOverride is null) return (null, null);
+            var preset = UploadCropPresets.FirstOrDefault(p => p.Name == photo.Model.CropRatioOverride);
+            return preset is null ? (null, null) : (preset.AspectRatio, preset.AspectRatio is null ? null : preset.Name);
         }
-        string? cropModeLabel = ResolveUploadCropModeLabel(cropRatio);
 
         // Fetched once, not per-photo - only used to build the RemoteUrl string below, which
         // is the same for every photo in this batch.
@@ -1684,19 +1620,20 @@ public class MainViewModel : INotifyPropertyChanged
 
             try
             {
+                var (photoCropRatio, photoCropLabel) = ResolvePhotoCrop(vm);
                 var (resized, width, height) = await _thumbnails.PrepareForUploadAsync(
-                    vm.Model.LocalPath, cropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY);
+                    vm.Model.LocalPath, photoCropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY);
                 // Only a cropped upload gets a resolution suffix - an uncropped one keeps its
                 // filename exactly as before crop-on-upload existed, so existing uploads/
                 // filename-matching (SyncRemoteMatches) aren't affected.
                 string baseFileName = Path.GetFileNameWithoutExtension(vm.FileName);
-                string uploadFileName = cropRatio is not null ? $"{baseFileName}_{width}x{height}.jpg" : $"{baseFileName}.jpg";
+                string uploadFileName = photoCropRatio is not null ? $"{baseFileName}_{width}x{height}.jpg" : $"{baseFileName}.jpg";
                 await _api.UploadBytesAsync(uploadFileName, resized);
                 vm.Model.RemoteStatus = RemoteStatus.Uploaded;
                 vm.Model.UploadedAt = DateTime.UtcNow.ToString("o");
-                vm.Model.UploadCropMode = cropModeLabel;
+                vm.Model.UploadCropMode = photoCropLabel;
                 _repo.UpdateRemoteStatus(vm.Model.Id, RemoteStatus.Uploaded, uploadedAt: vm.Model.UploadedAt);
-                _repo.SetUploadCropMode(vm.Model.Id, cropModeLabel);
+                _repo.SetUploadCropMode(vm.Model.Id, photoCropLabel);
 
                 // UploadBytesAsync only returns a job id, not the object's final id/URL - VRCDN
                 // resolves that asynchronously, AND reformats the filename server-side
@@ -1712,12 +1649,13 @@ public class MainViewModel : INotifyPropertyChanged
                 _repo.SyncRemoteMatches(remoteObjects.Select(o => (o.Original, o.Id, o.Extension, o.Size)), username);
                 (vm.Model.RemoteUrl, vm.Model.RemoteId) = _repo.GetRemoteInfo(vm.Model.Id);
 
-                // The crop nudge (if any) has already been baked into the uploaded file - reset
-                // it so a future re-crop of this same photo starts from centered again, not from
-                // wherever it happened to be left.
-                vm.Model.CropOffsetX = 0;
-                vm.Model.CropOffsetY = 0;
-                _repo.SetCropOffset(vm.Model.Id, 0, 0);
+                // CropOffsetX/Y and CropRatioOverride are deliberately NOT reset here - they now
+                // double as the record of what this upload actually used, so the preview overlay
+                // (see CropOverlayRatioResolver) can keep showing the real, actually-live crop
+                // instead of snapping back to "centered" the moment the upload finishes. An
+                // earlier version reset them, which also meant re-adjusting the same photo later
+                // (via NudgeCropOffset/CycleCropRatioOverride's RevertForRecrop) started from
+                // scratch instead of from what was actually last uploaded.
 
                 // Clear selection on success (so the button correctly disables once nothing
                 // eligible remains, and the next batch starts from an empty selection) - but
@@ -1812,6 +1750,22 @@ public class MainViewModel : INotifyPropertyChanged
 
         Application.Current.Dispatcher.Invoke(() =>
         {
+            // A filter change (this is every filter setter's own RebuildRows call, not just a
+            // sort/thumbnail-size-driven one) can hide photos that were Selected - previously
+            // they stayed selected but invisible, so "Upload Selected" could silently act on
+            // photos you could no longer see or reason about. Membership-only check (not a
+            // sort-only RebuildRows call check) - a sort-only rebuild's filtered set has the
+            // exact same members as before, just reordered, so this is always a safe no-op then.
+            var filteredSet = new HashSet<PhotoViewModel>(filtered);
+            foreach (var p in _allPhotos)
+            {
+                if (p.Selected && !filteredSet.Contains(p))
+                {
+                    p.Selected = false;
+                    _repo.SetSelected(p.Model.Id, false);
+                }
+            }
+
             Rows.Clear();
             foreach (var chunk in Chunk(filtered, columns))
             {

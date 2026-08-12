@@ -92,6 +92,15 @@ public class Photo
     public double CropOffsetX { get; set; }
     public double CropOffsetY { get; set; }
 
+    /// <summary>Per-photo override of which preset (see MainViewModel.UploadCropPreset.Name,
+    /// e.g. "4:3 (Landscape)" or "Original (no crop)") this specific photo uploads as, instead
+    /// of whatever the global dropdown has selected - cycled via the [ / ] keys while hovering
+    /// (see PhotoViewModel.CycleCropRatioOverride), same "remembered until actually uploaded,
+    /// then reset" lifecycle as CropOffsetX/Y. Null means "use the dropdown", the previous
+    /// one-ratio-for-the-whole-batch behavior. Never set to "Custom..." - a keyboard cycle can't
+    /// usefully drive that preset's free-text ratio, so it's skipped when cycling.</summary>
+    public string? CropRatioOverride { get; set; }
+
     /// <summary>
     /// Only ever populated by a query that deliberately projects it (never loading the
     /// Thumbnail blob for the whole library at once) - not a real column.

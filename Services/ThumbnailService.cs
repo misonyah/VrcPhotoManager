@@ -18,9 +18,11 @@ public class ThumbnailService
     /// <summary>
     /// VRChat's Udon image loader hard-caps at 2048x2048 (creators.vrchat.com/worlds/udon/
     /// image-loading) - matches what the original prepare_upload_batch.py did before any
-    /// photo goes to VRCDN. Re-encodes as JPEG q92 regardless of source format.
+    /// photo goes to VRCDN. Re-encodes as JPEG q92 regardless of source format. Public so
+    /// SettingsWindow's crop-presets reference list can compute the same example max
+    /// resolutions from one source of truth instead of a second hardcoded 2048.
     /// </summary>
-    private const int UploadMaxSide = 2048;
+    public const int UploadMaxSide = 2048;
 
     public async Task<byte[]> GenerateThumbnailAsync(string localPath, CancellationToken ct = default) =>
         (await ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, cropAspectRatio: null, cropOffsetX: 0, cropOffsetY: 0, ct)).Bytes;

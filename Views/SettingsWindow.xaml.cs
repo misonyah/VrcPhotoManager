@@ -4,6 +4,7 @@ using System.Windows;
 using Microsoft.Win32;
 using VrcPhotoManager.Data;
 using VrcPhotoManager.Services;
+using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager.Views;
 
@@ -57,6 +58,26 @@ public partial class SettingsWindow : Window
         DownloadStatusText.Text = GetModelStatusText(ModelDirTextBox.Text, "model.onnx", "selected_tags.csv");
         DownloadClipStatusText.Text = GetModelStatusText(ClipModelDirTextBox.Text, "model.onnx");
         DownloadAvatarStatusText.Text = GetModelStatusText(AvatarModelDirTextBox.Text, "model.onnx", "labels.txt");
+
+        CropPresetsList.ItemsSource = MainViewModel.UploadCropPresets.Select(DescribeCropPreset).ToList();
+    }
+
+    /// <summary>Name + a human-readable ratio/example-resolution line for the read-only crop-
+    /// presets reference panel - reads MainViewModel.UploadCropPresets directly (not a separate
+    /// hardcoded list) so this can't silently drift out of sync with the real preset values.</summary>
+    private static (string Name, string Detail) DescribeCropPreset(MainViewModel.UploadCropPreset preset)
+    {
+        if (preset.AspectRatio is not double ratio)
+        {
+            return (preset.Name, "Uploads at the photo's own resolution, uncropped.");
+        }
+
+        // Same cap ThumbnailService.PrepareForUploadAsync actually applies - the larger side
+        // hits UploadMaxSide exactly, the other side follows the ratio.
+        (int w, int h) = ratio >= 1
+            ? (ThumbnailService.UploadMaxSide, (int)Math.Round(ThumbnailService.UploadMaxSide / ratio))
+            : ((int)Math.Round(ThumbnailService.UploadMaxSide * ratio), ThumbnailService.UploadMaxSide);
+        return (preset.Name, $"Ratio {ratio:0.###} - up to {w}x{h}.");
     }
 
     /// <summary>Reports what's already on disk for a model folder, so the window shows real

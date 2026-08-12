@@ -466,6 +466,15 @@ public class PhotoRepository
                 .SetProperty(p => p.CropOffsetY, offsetY));
     }
 
+    /// <summary>Persists a per-photo pre-upload crop-ratio override (see Photo.CropRatioOverride's
+    /// doc comment) so it survives an app restart before the photo actually gets uploaded.</summary>
+    public void SetCropRatioOverride(long id, string? cropRatioOverride)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id)
+            .ExecuteUpdate(s => s.SetProperty(p => p.CropRatioOverride, cropRatioOverride));
+    }
+
     /// <summary>Distinct "Uploaded as" values currently on record, for the filter dropdown -
     /// same shape as GetDistinctAvatarTypes.</summary>
     public List<string> GetDistinctUploadCropModes()
