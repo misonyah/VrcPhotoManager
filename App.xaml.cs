@@ -4,12 +4,30 @@ using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
+using Velopack;
 
 namespace VrcPhotoManager;
 
 public partial class App : Application
 {
     private Mutex? _singleInstanceMutex;
+
+    /// <summary>Velopack (installer + auto-update, see .github/workflows/release.yml) needs to
+    /// run as literally the first thing in the process - before WPF, the single-instance mutex,
+    /// or any diagnostic --test-* argument handling - so it can apply a staged update and/or
+    /// respond to install/uninstall hook invocations without any of that other startup logic
+    /// running first. That means it can't live in OnStartup (which already runs reasonably
+    /// early, but after WPF itself has spun up); it needs its own Main(), which requires turning
+    /// off the SDK's auto-generated WPF entry point - see the csproj's StartupObject/
+    /// ApplicationDefinition-to-Page override.</summary>
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        VelopackApp.Build().Run();
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -156,6 +174,37 @@ public partial class App : Application
             return;
         }
 
+        // Only reached by a real app launch (every diagnostic branch above returns early).
+        // Fire-and-forget: never block startup on a network check, and never let a failure
+        // (offline, GitHub unreachable, no releases published yet) surface as an error - this
+        // is silent best-effort by design.
+        _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>Checks GitHub Releases (see .github/workflows/release.yml) for a newer version
+    /// and downloads it if found - Velopack then applies it automatically the NEXT time the app
+    /// cold-starts (VelopackApp.Build().Run() in Main, before anything else), so no explicit
+    /// "restart now" prompt is needed here. UpdateManager.IsInstalled is false when running from
+    /// `dotnet run`/a raw build output folder (not through the Velopack-installed app), which is
+    /// every dev/debug session - skip entirely rather than erroring on a nonexistent install.</summary>
+    private static async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var mgr = new UpdateManager(new Velopack.Sources.GithubSource(
+                "https://github.com/misonyah/VrcPhotoManager", null, false));
+            if (!mgr.IsInstalled) return;
+
+            var newVersion = await mgr.CheckForUpdatesAsync();
+            if (newVersion is null) return;
+
+            await mgr.DownloadUpdatesAsync(newVersion);
+        }
+        catch
+        {
+            // Best-effort - offline, rate-limited, no releases yet, etc. are all fine; the app
+            // just runs at its current version until the next successful check.
+        }
     }
 
     private static void RunClipSimilarityDiagnostic(string dir1, string dir2)

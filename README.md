@@ -130,7 +130,19 @@ keeps reflecting the real crop even after it's live.
   search, VRCX metadata capture, and the gamelog-based features — everything else works without
   it, just with less player-identification data available
 
-## Building & running
+## Installing
+
+Download the latest installer from the [Releases page](https://github.com/misonyah/VrcPhotoManager/releases)
+(`VrcPhotoManagerSetup.exe`) and run it - it installs to your user profile (no admin rights
+needed) and adds Start Menu/Desktop shortcuts. **The installer and updates are currently
+unsigned**, so Windows SmartScreen will show an "unknown publisher" warning the first time you
+run it — click "More info" → "Run anyway". This is normal for small independently-published
+Windows apps without a paid code-signing certificate.
+
+The app checks for updates in the background on startup and downloads them automatically;
+a downloaded update is applied the next time you restart the app - no separate updater step.
+
+## Building & running from source
 
 ```powershell
 dotnet build
@@ -139,6 +151,27 @@ dotnet run
 
 On first run, click **Login** to authenticate via the embedded browser, then **Scan Library**
 to index a folder of photos.
+
+### Releasing
+
+CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)) compiles every push/PR as a
+fast sanity check. An actual release only happens when a `v*.*.*` tag is pushed
+([`.github/workflows/release.yml`](.github/workflows/release.yml)), which publishes a
+self-contained win-x64 build, packages it with [Velopack](https://velopack.io) (installer +
+delta-update feed), and uploads it to a GitHub Release.
+
+To cut a release:
+
+1. Bump `<Version>` in `VrcPhotoManager.csproj` and add an entry to `CHANGELOG.md`.
+2. Commit that change.
+3. Tag it and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z` (also push the commit
+   itself if it isn't already on the remote).
+4. The Release workflow does the rest - watch the Actions tab, then check the Releases page.
+
+To add code signing later (see the CHANGELOG/commit history for why it's currently skipped):
+add a signing step to `release.yml` before the `vpk pack` step (or pass `--signParams`/
+`--azureTrustedSignFile` directly to `vpk pack`, per [Velopack's signing docs](https://docs.velopack.io/packaging/signing)) -
+nothing else in this workflow needs to change.
 
 ## Local model setup
 

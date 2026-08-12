@@ -1,0 +1,65 @@
+name: Release
+
+# Triggered by pushing a tag like v1.2.3 (see README's "Releasing" section for the full flow:
+# bump VrcPhotoManager.csproj's <Version>, update CHANGELOG.md, commit, tag, push tag). Publishes
+# a self-contained win-x64 build, packages it with Velopack (installer + delta-update feed), and
+# uploads everything to a GitHub Release matching the tag.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install vpk (Velopack CLI)
+        run: dotnet tool install -g vpk
+
+      - name: Publish self-contained win-x64 build
+        # Version comes from the tag via vpk pack's --packVersion below, not from this publish
+        # step - GenerateAssemblyInfo is off in the csproj (works around a wpftmp CS0579
+        # collision, see its comment), so a -p:Version here wouldn't embed into the exe anyway.
+        run: >
+          dotnet publish VrcPhotoManager.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=false
+          --output publish
+
+      # No --signParams here - unsigned installer/exe for now (Windows SmartScreen will show an
+      # "unknown publisher" warning on first run). See README's Releasing section for how to add
+      # signing later without otherwise restructuring this workflow.
+      - name: Package with Velopack
+        run: >
+          vpk pack
+          --packId VrcPhotoManager
+          --packVersion ${{ steps.version.outputs.version }}
+          --packDir publish
+          --mainExe VrcPhotoManager.exe
+          --icon Assets\app.ico
+          --shortcuts Desktop,StartMenu
+          --outputDir Releases
+
+      - name: Upload to GitHub Release
+        run: >
+          vpk upload github
+          --repoUrl https://github.com/misonyah/VrcPhotoManager
+          --token ${{ secrets.GITHUB_TOKEN }}
+          --tag ${{ github.ref_name }}
+          --outputDir Releases
+          --publish

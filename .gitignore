@@ -3,6 +3,11 @@ obj/
 *.user
 .vs/
 
+# Local Velopack pack/release output if `dotnet publish` + `vpk pack` are ever run outside CI
+# (.github/workflows/release.yml does both in a throwaway runner, never committing these).
+publish/
+Releases/
+
 # Transient WPF markup-compile temp project - normally lives under obj/, occasionally leaks
 # to the repo root during a build.
 *_wpftmp.csproj

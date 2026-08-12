@@ -1,0 +1,27 @@
+name: Build
+
+# Fast compile-check on every push/PR - separate from release.yml (which only runs on a
+# version tag and does the much slower publish+pack+installer work). Catches a broken build
+# immediately instead of only at release time.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
