@@ -133,11 +133,13 @@ keeps reflecting the real crop even after it's live.
 ## Installing
 
 Download the latest installer from the [Releases page](https://github.com/misonyah/VrcPhotoManager/releases)
-(`VrcPhotoManagerSetup.exe`) and run it - it installs to your user profile (no admin rights
+(`VrcPhotoManager-win-Setup.exe`) and run it - it installs to your user profile (no admin rights
 needed) and adds Start Menu/Desktop shortcuts. **The installer and updates are currently
 unsigned**, so Windows SmartScreen will show an "unknown publisher" warning the first time you
 run it — click "More info" → "Run anyway". This is normal for small independently-published
-Windows apps without a paid code-signing certificate.
+Windows apps without a paid code-signing certificate. Once code signing is enabled, release
+builds will be signed using the free-for-open-source
+[SignPath Foundation](https://signpath.org/) code signing service.
 
 The app checks for updates in the background on startup and downloads them automatically;
 a downloaded update is applied the next time you restart the app - no separate updater step.
