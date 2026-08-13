@@ -137,9 +137,9 @@ Download the latest installer from the [Releases page](https://github.com/misony
 needed) and adds Start Menu/Desktop shortcuts. **The installer and updates are currently
 unsigned**, so Windows SmartScreen will show an "unknown publisher" warning the first time you
 run it — click "More info" → "Run anyway". This is normal for small independently-published
-Windows apps without a paid code-signing certificate. Once code signing is enabled, release
-builds will be signed using the free-for-open-source
-[SignPath Foundation](https://signpath.org/) code signing service.
+Windows apps without a paid code-signing certificate. See [CODE_SIGNING.md](CODE_SIGNING.md) for
+this project's **Code signing policy** (applying for [SignPath Foundation](https://signpath.org/)
+- not yet active) and [PRIVACY.md](PRIVACY.md) for what data this app does and doesn't transmit.
 
 The app checks for updates in the background on startup and downloads them automatically;
 a downloaded update is applied the next time you restart the app - no separate updater step.
