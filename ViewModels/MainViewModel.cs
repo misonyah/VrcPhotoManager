@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using VrcPhotoManager.Data;
@@ -394,6 +395,7 @@ public class MainViewModel : INotifyPropertyChanged
     public RelayCommand RemoveFromVrcdnCommand { get; }
     public ICommand CropPrintSelectedCommand { get; }
     public RelayCommand DeselectAllCommand { get; }
+    public ICommand UpdateVrcdnIndexCommand { get; }
 
     /// <summary>Drives the Deselect button's "Deselect {n} photos" label - kept up to date by
     /// RaiseSelectionDependentCommands, the same place Upload/Remove-from-VRCDN's CanExecute
@@ -495,6 +497,7 @@ public class MainViewModel : INotifyPropertyChanged
             IsSessionExpired = false;
             StatusMessage = "VRCDN session refreshed automatically.";
             RaiseSelectionDependentCommands();
+            _ = RefreshQuotaAsync();
         }
         finally
         {
@@ -561,6 +564,8 @@ public class MainViewModel : INotifyPropertyChanged
         "Check which photos are already uploaded to VRCDN and fix their status badge.\nFor VRCX metadata (author/world/players), use Scan Library instead.");
     public string RemoveFromVrcdnTooltip => GetActionTooltip("RemoveFromVrcdn",
         "Delete selected photos from VRCDN's storage and mark them Not Uploaded here.");
+    public string UpdateVrcdnIndexTooltip => GetActionTooltip("UpdateVrcdnIndex",
+        "Publishes a list of every currently-uploaded photo's URL to a GitHub Gist, for a Udon world script to randomly pick from.\nNeeds a GitHub gist-scope token, set in Settings. The gist's URL never changes across updates - copied to your clipboard here.");
 
     /// <summary>Exposed so the Settings window (opened from code-behind, like AboutWindow/
     /// MetadataWindow) can read/write the WD14 model path settings.</summary>
@@ -630,6 +635,7 @@ public class MainViewModel : INotifyPropertyChanged
         RemoveFromVrcdnCommand = new RelayCommand(RemoveFromVrcdnAsync, CanRemoveFromVrcdn);
         CropPrintSelectedCommand = new RelayCommand(CropPrintSelectedAsync);
         DeselectAllCommand = new RelayCommand(DeselectAllAsync, () => _allPhotos.Any(p => p.Selected));
+        UpdateVrcdnIndexCommand = new RelayCommand(UpdateVrcdnIndexAsync);
         EnsurePlayerFilterCriteriaShape();
 
         _statusMessage = "Loading...";
@@ -719,6 +725,51 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private long _quotaUsed;
+    private long _quotaTotal;
+    private bool _hasQuota;
+    private bool _quotaIsEstimate;
+
+    /// <summary>null until the first successful quota fetch (hides the display entirely rather
+    /// than showing "0 / 0" before login). The "~" prefix marks UploadSelectedAsync's running
+    /// local estimate (each photo's own resized upload size added as it completes) - replaced
+    /// with the real server-reported value once RefreshQuotaAsync runs again after the batch, or
+    /// after login/re-login.</summary>
+    public string? QuotaDisplay => _hasQuota
+        ? $"{(_quotaIsEstimate ? "~" : "")}{FormatBytes(_quotaUsed)} / {FormatBytes(_quotaTotal)}"
+        : null;
+
+    private static string FormatBytes(long bytes)
+    {
+        double gb = bytes / 1024.0 / 1024.0 / 1024.0;
+        if (gb >= 1) return $"{gb:0.#} GB";
+        return $"{bytes / 1024.0 / 1024.0:0.#} MB";
+    }
+
+    /// <summary>Fetches the real, authoritative quota from VRCDN - called after login/re-login
+    /// and before/after an upload batch. Best-effort: a failure just leaves the last known
+    /// value (or the display hidden, if there's never been a successful fetch) rather than
+    /// erroring out anything that called it.</summary>
+    private async Task RefreshQuotaAsync()
+    {
+        var api = _api;
+        if (api is null) return;
+        try
+        {
+            var quota = await api.GetQuotaAsync();
+            _quotaUsed = quota.QuotaUsed;
+            _quotaTotal = quota.Quota;
+            _hasQuota = true;
+            _quotaIsEstimate = false;
+            OnPropertyChanged(nameof(QuotaDisplay));
+        }
+        catch
+        {
+            // Best-effort - offline/expired-session/etc. Not worth surfacing as an error for a
+            // purely informational display.
+        }
+    }
+
     private void TryAutoLogin()
     {
         try
@@ -731,6 +782,7 @@ public class MainViewModel : INotifyPropertyChanged
                 StartSessionKeepAlive();
                 StatusMessage = "Logged in (restored session).";
                 RaiseSelectionDependentCommands();
+                _ = RefreshQuotaAsync();
             }
         }
         catch (InvalidOperationException)
@@ -756,7 +808,7 @@ public class MainViewModel : INotifyPropertyChanged
         StatusMessage = "Logged in.";
         RecordActionSuccess("Login", nameof(LoginTooltip));
         RaiseSelectionDependentCommands();
-        await Task.CompletedTask;
+        await RefreshQuotaAsync();
     }
 
     /// <summary>Registers a photo with the library and wires its selection changes through
@@ -765,20 +817,18 @@ public class MainViewModel : INotifyPropertyChanged
     private void AddPhoto(PhotoViewModel vm)
     {
         vm.SelectionChanged += (_, _) => RaiseSelectionDependentCommands();
-        // See PhotoViewModel.RevertForRecrop - adjusting an already-Uploaded photo's crop
-        // reverts it back to NotUploaded (so Upload Selected can pick it back up), which needs
-        // the Upload/Remove commands' enabled state re-evaluated same as any other status change,
-        // plus a status message since the cloud badge quietly disappearing needs an explanation.
-        vm.RevertedForRecrop += (_, _) =>
+        vm.PrintCropBlocked += (_, _) =>
         {
-            RaiseSelectionDependentCommands();
-            StatusMessage = $"{vm.FileName} reverted to Not Uploaded so its new crop can be uploaded.";
+            StatusMessage = $"{vm.FileName} looks like a VRChat Print - run Crop Print Borders on it before cropping/uploading.";
         };
         _allPhotos.Add(vm);
     }
 
+    /// <summary>A Selected+Uploaded photo is upload-eligible too when its crop has diverged from
+    /// what's actually live (HasPendingCropEdit) - see PhotoViewModel.PrepareForReupload's doc
+    /// comment.</summary>
     private bool CanUploadSelected() =>
-        _api is not null && _allPhotos.Any(p => p.Selected && p.RemoteStatus != RemoteStatus.Uploaded);
+        _api is not null && _allPhotos.Any(p => p.Selected && (p.RemoteStatus != RemoteStatus.Uploaded || p.HasPendingCropEdit));
 
     private bool CanRemoveFromVrcdn() =>
         _api is not null && _allPhotos.Any(p => p.Selected && p.RemoteStatus == RemoteStatus.Uploaded);
@@ -1591,8 +1641,15 @@ public class MainViewModel : INotifyPropertyChanged
     {
         if (_api is null) { StatusMessage = "Log in first."; return; }
 
-        var toUpload = _allPhotos.Where(p => p.Selected && p.RemoteStatus != RemoteStatus.Uploaded).ToList();
+        // Selected+Uploaded photos whose crop has diverged from what's live (HasPendingCropEdit)
+        // are eligible too - PrepareForReupload below reverts them to NotUploaded right before
+        // this loop processes them, same as any other not-yet-uploaded photo.
+        var toUpload = _allPhotos.Where(p => p.Selected && (p.RemoteStatus != RemoteStatus.Uploaded || p.HasPendingCropEdit)).ToList();
         if (toUpload.Count == 0) { StatusMessage = "Nothing selected to upload."; return; }
+        foreach (var pending in toUpload.Where(p => p.RemoteStatus == RemoteStatus.Uploaded && p.HasPendingCropEdit))
+        {
+            pending.PrepareForReupload();
+        }
 
         // No batch-wide crop dropdown anymore - each photo uploads at its original resolution
         // unless it has its own CropRatioOverride (set via the [ / ] keys while hovering, see
@@ -1611,6 +1668,16 @@ public class MainViewModel : INotifyPropertyChanged
         // is the same for every photo in this batch.
         string username = await _api.GetUsernameAsync();
 
+        // Settings' "Upload Image Format" section - see SettingsKeys.UploadImageFormat.
+        string uploadFormat = _repo.GetStringSetting(SettingsKeys.UploadImageFormat) == "png" ? "png" : "jpg";
+        string uploadContentType = uploadFormat == "png" ? "image/png" : "image/jpeg";
+
+        // Real baseline before the batch starts - each photo's own resized upload size is added
+        // to this locally as it completes (see below) for a live-updating estimate during the
+        // run, without hitting the quota endpoint once per photo. Replaced by another real fetch
+        // once the whole batch finishes.
+        await RefreshQuotaAsync();
+
         int done = 0;
         foreach (var vm in toUpload)
         {
@@ -1622,18 +1689,39 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 var (photoCropRatio, photoCropLabel) = ResolvePhotoCrop(vm);
                 var (resized, width, height) = await _thumbnails.PrepareForUploadAsync(
-                    vm.Model.LocalPath, photoCropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY);
+                    vm.Model.LocalPath, photoCropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY, uploadFormat);
                 // Only a cropped upload gets a resolution suffix - an uncropped one keeps its
                 // filename exactly as before crop-on-upload existed, so existing uploads/
                 // filename-matching (SyncRemoteMatches) aren't affected.
                 string baseFileName = Path.GetFileNameWithoutExtension(vm.FileName);
-                string uploadFileName = photoCropRatio is not null ? $"{baseFileName}_{width}x{height}.jpg" : $"{baseFileName}.jpg";
-                await _api.UploadBytesAsync(uploadFileName, resized);
+                string uploadFileName = photoCropRatio is not null ? $"{baseFileName}_{width}x{height}.{uploadFormat}" : $"{baseFileName}.{uploadFormat}";
+                await _api.UploadBytesAsync(uploadFileName, resized, uploadContentType);
+
+                // Live estimate: the real VRCDN-reported figure would need a round trip per
+                // photo, which is wasteful for a purely informational display - accumulate
+                // locally instead, using the exact byte count just uploaded, and mark it as an
+                // estimate (see QuotaDisplay's "~" prefix) until RefreshQuotaAsync confirms the
+                // real value at the end of the batch.
+                if (_hasQuota)
+                {
+                    _quotaUsed += resized.Length;
+                    _quotaIsEstimate = true;
+                    OnPropertyChanged(nameof(QuotaDisplay));
+                }
+
                 vm.Model.RemoteStatus = RemoteStatus.Uploaded;
                 vm.Model.UploadedAt = DateTime.UtcNow.ToString("o");
                 vm.Model.UploadCropMode = photoCropLabel;
+                vm.Model.UploadedFormat = uploadFormat;
+                // Snapshot the "what's really live" baseline (see Photo.UploadedOffsetX's doc
+                // comment) so HasPendingCropEdit correctly reads false until the crop is nudged
+                // again.
+                vm.Model.UploadedOffsetX = vm.Model.CropOffsetX;
+                vm.Model.UploadedOffsetY = vm.Model.CropOffsetY;
                 _repo.UpdateRemoteStatus(vm.Model.Id, RemoteStatus.Uploaded, uploadedAt: vm.Model.UploadedAt);
                 _repo.SetUploadCropMode(vm.Model.Id, photoCropLabel);
+                _repo.SetUploadedFormat(vm.Model.Id, uploadFormat);
+                _repo.SetUploadedOffset(vm.Model.Id, vm.Model.CropOffsetX, vm.Model.CropOffsetY);
 
                 // UploadBytesAsync only returns a job id, not the object's final id/URL - VRCDN
                 // resolves that asynchronously, AND reformats the filename server-side
@@ -1649,13 +1737,32 @@ public class MainViewModel : INotifyPropertyChanged
                 _repo.SyncRemoteMatches(remoteObjects.Select(o => (o.Original, o.Id, o.Extension, o.Size)), username);
                 (vm.Model.RemoteUrl, vm.Model.RemoteId) = _repo.GetRemoteInfo(vm.Model.Id);
 
+                // A previous crop of this same photo left an old VRCDN object behind (see
+                // PhotoViewModel.PrepareForReupload) - now that the replacement has actually
+                // uploaded successfully, delete it so re-cropping/re-uploading really does
+                // replace the old copy instead of leaving an orphaned, quota-consuming
+                // duplicate. Best-effort: a removal failure just leaves PendingRemovalRemoteId
+                // set for a future attempt, rather than failing this otherwise-successful upload.
+                if (vm.Model.PendingRemovalRemoteId is string oldRemoteId)
+                {
+                    try
+                    {
+                        await _api.RemoveObjectAsync(oldRemoteId);
+                        vm.Model.PendingRemovalRemoteId = null;
+                        _repo.SetPendingRemovalRemoteId(vm.Model.Id, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"Uploaded {vm.FileName}, but couldn't remove its old VRCDN copy: {ex.Message}";
+                    }
+                }
+
                 // CropOffsetX/Y and CropRatioOverride are deliberately NOT reset here - they now
                 // double as the record of what this upload actually used, so the preview overlay
                 // (see CropOverlayRatioResolver) can keep showing the real, actually-live crop
                 // instead of snapping back to "centered" the moment the upload finishes. An
                 // earlier version reset them, which also meant re-adjusting the same photo later
-                // (via NudgeCropOffset/CycleCropRatioOverride's RevertForRecrop) started from
-                // scratch instead of from what was actually last uploaded.
+                // started from scratch instead of from what was actually last uploaded.
 
                 // Clear selection on success (so the button correctly disables once nothing
                 // eligible remains, and the next batch starts from an empty selection) - but
@@ -1681,6 +1788,7 @@ public class MainViewModel : INotifyPropertyChanged
         RecordActionSuccess("UploadSelected", nameof(UploadSelectedTooltip));
         RaiseSelectionDependentCommands();
         RefreshUploadCropModeFilterOptions();
+        await RefreshQuotaAsync();
         // Fallback safety net for anything the per-photo lookup above missed (VRCDN still
         // processing at the time), not the primary resolution path anymore.
         await SyncMetadataAsync();
@@ -1720,6 +1828,11 @@ public class MainViewModel : INotifyPropertyChanged
                 vm.Model.RemoteUrl = null;
                 vm.Model.RemoteId = null;
                 vm.Model.UploadedAt = null;
+                // ClearRemoteStatus also nulls this in the database - was missing here, leaving
+                // the in-memory Photo (and therefore the grid's crop badge and the "Uploaded as"
+                // filter, which both read this live object rather than re-querying the db) still
+                // showing the photo under its old crop mode after removal.
+                vm.Model.UploadCropMode = null;
                 vm.RefreshStatus();
                 done++;
             }
@@ -1739,8 +1852,111 @@ public class MainViewModel : INotifyPropertyChanged
         if (done > 0)
         {
             RecordActionSuccess("RemoveFromVrcdn", nameof(RemoveFromVrcdnTooltip));
+            // Neither of these ran before - a removed photo could stay visible under a "Status:
+            // Uploaded" or "Uploaded as: <its old crop>" filter until some unrelated action
+            // happened to trigger a rebuild, and a crop-mode option nothing uses anymore lingered
+            // in the "Uploaded as" dropdown.
+            RefreshUploadCropModeFilterOptions();
+            RebuildRows();
         }
         RaiseSelectionDependentCommands();
+    }
+
+    /// <summary>First-use default for the gist's filename base - a random GUID, generated once
+    /// and persisted, deliberately not tied to anything meaningful (it's just a label; VRCDN
+    /// isn't even involved here, unlike Photo.CropRatioOverride's similar-sounding but unrelated
+    /// naming concern) - see Settings for how to change it.</summary>
+    private string ResolveIndexFileNameBase()
+    {
+        string? saved = _repo.GetStringSetting(SettingsKeys.IndexFileNameBase);
+        if (!string.IsNullOrWhiteSpace(saved)) return saved;
+
+        string generated = Guid.NewGuid().ToString("N");
+        _repo.SetStringSetting(SettingsKeys.IndexFileNameBase, generated);
+        return generated;
+    }
+
+    /// <summary>csv (default - "url,width,height,worldname" per line, no header) is the easiest
+    /// for a Udon script to parse (String.Split('\n') then Split(',') - no JSON library
+    /// dependency) while still letting it size a display quad to the right aspect ratio before
+    /// the image loads. txt is url-only, one per line (no world name - it's inherently one field
+    /// per line). json is an array of {Url,Width,Height,WorldName} objects, parseable via
+    /// VRChat's VRCJson.TryDeserializeFromJson if that structure is preferred. World name is
+    /// sanitized (see SanitizeCsvField) for the csv/json cases too, for consistency and because
+    /// a raw comma in it would still break a naive Udon Split(',') even inside quoted JSON
+    /// content once round-tripped through a simple parser that doesn't understand CSV quoting.</summary>
+    private static string BuildIndexContent(List<(string Url, int? Width, int? Height, string? WorldName)> photos, string format) => format switch
+    {
+        "json" => JsonSerializer.Serialize(photos.Select(p => new { p.Url, p.Width, p.Height, WorldName = SanitizeCsvField(p.WorldName) })),
+        "txt" => string.Join('\n', photos.Select(p => p.Url)),
+        _ => string.Join('\n', photos.Select(p => $"{p.Url},{p.Width},{p.Height},{SanitizeCsvField(p.WorldName)}")),
+    };
+
+    /// <summary>Replaces characters that would break a naive (non-CSV-quoting-aware) Udon
+    /// Split(',')-based parser - the field delimiter itself, semicolons (a common alternate
+    /// delimiter some parsers use), double quotes (real CSV's own escape mechanism, which this
+    /// simple format doesn't implement), and newlines (would silently split one row into two) -
+    /// with spaces. World names are free-form VRChat text and can contain any of these. UTF-8
+    /// characters (e.g. Japanese world titles) pass through untouched - only these specific
+    /// ASCII punctuation characters are touched, and the gist API transmits the content as UTF-8
+    /// regardless (System.Net.Http.Json defaults to UTF-8 JSON).</summary>
+    private static string SanitizeCsvField(string? value) =>
+        string.IsNullOrEmpty(value) ? "" : value.Replace(',', ' ').Replace(';', ' ').Replace('"', ' ').Replace('\n', ' ').Replace('\r', ' ');
+
+    /// <summary>Publishes every currently-uploaded photo's URL (see
+    /// PhotoRepository.GetUploadedPhotoUrlsForIndex) to a GitHub Gist for a Udon world script to
+    /// randomly select from - see GistIndexService's doc comment for why a gist (not VRCDN
+    /// itself) hosts this: VRCDN mints a brand-new object/URL on every upload with no way to
+    /// overwrite in place, which would break a world's hardcoded reference on every regeneration;
+    /// a gist's raw URL stays the same across content updates instead. Creates the gist on first
+    /// use (persisting its id), updates it in place on every later call.</summary>
+    private async Task UpdateVrcdnIndexAsync()
+    {
+        string? token = _credentials.LoadGistToken();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            StatusMessage = "Set a GitHub gist-scope token in Settings first (VRCDN Photo Index section).";
+            return;
+        }
+
+        var photos = _repo.GetUploadedPhotoUrlsForIndex();
+        if (photos.Count == 0)
+        {
+            StatusMessage = "Nothing uploaded yet - nothing to index.";
+            return;
+        }
+
+        string format = _repo.GetStringSetting(SettingsKeys.IndexFileFormat) is string f && !string.IsNullOrWhiteSpace(f) ? f : "csv";
+        string extension = format is "json" or "txt" ? format : "csv";
+        string fileName = $"{ResolveIndexFileNameBase()}.{extension}";
+        string content = BuildIndexContent(photos, format);
+
+        try
+        {
+            var gist = new GistIndexService(token);
+            string? gistId = _repo.GetStringSetting(SettingsKeys.GistId);
+            string url;
+            if (gistId is null)
+            {
+                (gistId, url) = await gist.CreateGistAsync(fileName, content,
+                    "VRC Photo Manager - VRCDN photo index for a Udon world script");
+                _repo.SetStringSetting(SettingsKeys.GistId, gistId);
+                _repo.SetStringSetting(SettingsKeys.GistIndexUrl, url);
+            }
+            else
+            {
+                await gist.UpdateGistAsync(gistId, fileName, content);
+                url = _repo.GetStringSetting(SettingsKeys.GistIndexUrl) ?? "";
+            }
+
+            if (!string.IsNullOrEmpty(url)) Clipboard.SetText(url);
+            StatusMessage = $"VRCDN index updated ({photos.Count} photos) - URL copied to clipboard.";
+            RecordActionSuccess("UpdateVrcdnIndex", nameof(UpdateVrcdnIndexTooltip));
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to update VRCDN index: {ex.Message}";
+        }
     }
 
     private void RebuildRows()
@@ -1771,8 +1987,21 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 Rows.Add(new PhotoRow(chunk));
             }
+            RowsRebuilt?.Invoke(this, EventArgs.Empty);
         });
     }
+
+    /// <summary>Raised at the end of RebuildRows (not RebuildRowsWithLeadingPadding - that one's
+    /// specifically built to keep the same photo under the cursor across a resize, which this
+    /// would defeat) - MainWindow resets its cached hover-target FrameworkElement in response.
+    /// PhotoGrid's ItemsControl uses VirtualizingPanel.VirtualizationMode="Recycling", so a stale
+    /// reference to a container from before a rebuild can get silently reassigned to a DIFFERENT
+    /// photo's DataContext as the recycled containers get reused - a real report: pressing [ / ]
+    /// right after an upload finished (which rebuilds the grid) appeared to do nothing to the
+    /// photo actually being hovered, because it was quietly mutating a different, off-screen one
+    /// instead. Forcing a fresh MouseEnter to re-establish the hover target after every rebuild
+    /// closes that gap.</summary>
+    public event EventHandler? RowsRebuilt;
 
     /// <summary>Rebuilds Rows the same way RebuildRows does, but with leadingBlankCount null
     /// entries prepended to the flat filtered/sorted list before chunking - all real photos

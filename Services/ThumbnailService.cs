@@ -25,24 +25,28 @@ public class ThumbnailService
     public const int UploadMaxSide = 2048;
 
     public async Task<byte[]> GenerateThumbnailAsync(string localPath, CancellationToken ct = default) =>
-        (await ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, cropAspectRatio: null, cropOffsetX: 0, cropOffsetY: 0, ct)).Bytes;
+        (await ResizeAsync(localPath, ThumbnailMaxSide, quality: 85, cropAspectRatio: null, cropOffsetX: 0, cropOffsetY: 0, format: "jpg", ct)).Bytes;
 
     /// <summary>cropAspectRatio is Width/Height (e.g. 0.75 for a 3:4 portrait crop) - null
     /// uploads the photo at its original aspect ratio, unchanged from before crop-on-upload
     /// existed. cropOffsetX/Y are -1..1 fractions of the available slack on each axis (0 =
-    /// centered - see Photo.CropOffsetX's doc comment for how they get set). Returns the final
-    /// pixel dimensions alongside the encoded bytes so the caller can encode them into the
-    /// uploaded filename (see MainViewModel.UploadSelectedAsync) - only meaningful to show for
-    /// a cropped upload, since an uncropped one already keeps its original filename
-    /// verbatim.</summary>
+    /// centered - see Photo.CropOffsetX's doc comment for how they get set). format is "jpg"
+    /// (default) or "png" - see SettingsKeys.UploadImageFormat's doc comment (Settings' "Upload
+    /// Image Format" section). PNG is lossless (larger files, no compression artifacts) but
+    /// otherwise behaves identically, including staying just as metadata-free as JPEG (neither
+    /// encoder is ever given a BitmapMetadata to attach, regardless of format or whether a crop
+    /// is applied). Returns the final pixel dimensions alongside the encoded bytes so the caller
+    /// can encode them into the uploaded filename (see
+    /// MainViewModel.UploadSelectedAsync) - only meaningful to show for a cropped upload, since
+    /// an uncropped one already keeps its original filename verbatim.</summary>
     public Task<(byte[] Bytes, int Width, int Height)> PrepareForUploadAsync(
         string localPath, double? cropAspectRatio, double cropOffsetX = 0, double cropOffsetY = 0,
-        CancellationToken ct = default) =>
-        ResizeAsync(localPath, UploadMaxSide, quality: 92, cropAspectRatio, cropOffsetX, cropOffsetY, ct);
+        string format = "jpg", CancellationToken ct = default) =>
+        ResizeAsync(localPath, UploadMaxSide, quality: 92, cropAspectRatio, cropOffsetX, cropOffsetY, format, ct);
 
     private static Task<(byte[] Bytes, int Width, int Height)> ResizeAsync(
         string localPath, int maxSide, int quality, double? cropAspectRatio,
-        double cropOffsetX, double cropOffsetY, CancellationToken ct)
+        double cropOffsetX, double cropOffsetY, string format, CancellationToken ct)
     {
         return Task.Run(() =>
         {
@@ -92,7 +96,10 @@ public class ThumbnailService
                 final = new CroppedBitmap(bmp, new Int32Rect(x, y, cropWidth, cropHeight));
             }
 
-            var encoder = new JpegBitmapEncoder { QualityLevel = quality };
+            // PngBitmapEncoder has no quality/compression-level knob to set - PNG compression
+            // is always lossless. Neither encoder is ever handed a BitmapMetadata, so both
+            // formats come out equally metadata-free.
+            BitmapEncoder encoder = format == "png" ? new PngBitmapEncoder() : new JpegBitmapEncoder { QualityLevel = quality };
             encoder.Frames.Add(BitmapFrame.Create(final));
 
             using var stream = new MemoryStream();

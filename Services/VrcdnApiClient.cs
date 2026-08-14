@@ -119,12 +119,13 @@ public class VrcdnApiClient
     /// cap - see ThumbnailService.PrepareForUploadAsync): requests a presigned URL, then
     /// PUTs the bytes with a matching Content-Type header. The Content-Type header on the
     /// PUT is the one gotcha that silently fails uploads - S3 returns 200 regardless, but
-    /// the backend job processor marks it "Failed" without it.
+    /// the backend job processor marks it "Failed" without it. contentType defaults to
+    /// "image/jpeg" for the common photo-upload case (PrepareForUploadAsync always re-encodes
+    /// as JPEG) - MainViewModel.GenerateVrcdnIndexAsync passes a text/csv, application/json, or
+    /// text/plain override for the index file instead.
     /// </summary>
-    public async Task<string> UploadBytesAsync(string fileName, byte[] bytes, CancellationToken ct = default)
+    public async Task<string> UploadBytesAsync(string fileName, byte[] bytes, string contentType = "image/jpeg", CancellationToken ct = default)
     {
-        const string contentType = "image/jpeg"; // PrepareForUploadAsync always re-encodes as JPEG
-
         using var presignDoc = await PostAsync(new
         {
             type = "upload",

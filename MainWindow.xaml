@@ -52,6 +52,26 @@
                     <Setter Property="BorderThickness" Value="3" />
                     <Setter Property="Margin" Value="1" />
                 </DataTrigger>
+                <!-- Cyan instead of gold when selected AND either this photo's crop has a real
+                     pending edit against what's actually live (PhotoViewModel.HasPendingCropEdit
+                     - browsed/nudged since its last upload, not yet re-uploaded) or it still has
+                     an old VRCDN copy pending removal (PhotoViewModel.PrepareForReupload, set
+                     right before a re-upload starts) - a hint that uploading it will
+                     replace/remove that old copy, not just add a fresh one. -->
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Selected}" Value="True" />
+                        <Condition Binding="{Binding HasPendingCropEdit}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderBrush" Value="Cyan" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Selected}" Value="True" />
+                        <Condition Binding="{Binding PendingRemovalRemoteId, Converter={StaticResource StringNotEmptyToBoolConverter}}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderBrush" Value="Cyan" />
+                </MultiDataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -163,10 +183,24 @@
                                 ToolTip="{Binding UploadCropMode}">
                             <TextBlock Text="{Binding UploadCropModeShort}" FontSize="10" Foreground="White" />
                         </Border>
-                        <Path Width="18" Height="18" Stretch="Uniform" Fill="Cyan" Cursor="Hand"
+                        <Path Width="18" Height="18" Stretch="Uniform" Cursor="Hand"
                               Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"
                               ToolTip="Uploaded to VRCDN - click to copy the URL"
                               MouseLeftButtonUp="CloudIcon_MouseLeftButtonUp">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <!-- Gray instead of the usual cyan when the actual VRCDN object
+                                         is a .png - either this app's own PNG upload option or an
+                                         older, non-JPEG upload matched by Sync VRCDN Metadata (see
+                                         PhotoViewModel.IsUploadedAsPng's doc comment). -->
+                                    <Setter Property="Fill" Value="Cyan" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsUploadedAsPng}" Value="True">
+                                            <Setter Property="Fill" Value="Gray" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
                             <Path.Effect>
                                 <DropShadowEffect Color="Black" ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
                             </Path.Effect>
@@ -426,6 +460,9 @@
                         Content="{Binding SelectedCount}" ContentStringFormat="Deselect {0} photos"
                         ToolTip="Clear the current photo selection - the thick gold border marks which photos are selected." />
 
+                <Button Content="Update VRCDN Index" Command="{Binding UpdateVrcdnIndexCommand}" Padding="8,4" Margin="0,0,0,8"
+                        ToolTip="{Binding UpdateVrcdnIndexTooltip}" />
+
                 <Separator Margin="0,0,0,8" />
                 <Button Content="Settings" Click="SettingsButton_Click" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="App preferences, including the WD14, CLIP, and avatar-classifier model folders." />
@@ -445,8 +482,15 @@
             </StackPanel>
         </Grid>
 
-        <!-- Status bar -->
-        <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Margin="8,4" />
+        <!-- Status bar - QuotaDisplay docked right so it doesn't get pushed off-screen by a
+             long StatusMessage; null (not yet logged in / no successful fetch yet) collapses it
+             entirely instead of showing a misleading "0 / 0". -->
+        <DockPanel Grid.Row="2" Margin="8,4">
+            <TextBlock DockPanel.Dock="Right" Text="{Binding QuotaDisplay}" Margin="8,0,0,0"
+                       Visibility="{Binding QuotaDisplay, Converter={StaticResource NullToVisibilityConverter}}"
+                       ToolTip="VRCDN storage used / total. Refreshes after login and after each upload batch; a '~' prefix during an upload run means it's a local estimate (this batch's own upload sizes added as they complete), not yet confirmed by VRCDN." />
+            <TextBlock Text="{Binding StatusMessage}" />
+        </DockPanel>
 
         <!-- Hover preview overlay. Used to be a Popup - a real separate OS window - anchored
              beside the hovered thumbnail (Placement="Right") instead of at the cursor, to keep

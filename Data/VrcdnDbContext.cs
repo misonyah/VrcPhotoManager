@@ -69,9 +69,13 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.RemoteId).HasColumnName("remote_id");
             entity.Property(p => p.UploadedAt).HasColumnName("uploaded_at");
             entity.Property(p => p.UploadCropMode).HasColumnName("upload_crop_mode");
+            entity.Property(p => p.UploadedFormat).HasColumnName("uploaded_format");
+            entity.Property(p => p.UploadedOffsetX).HasColumnName("uploaded_offset_x");
+            entity.Property(p => p.UploadedOffsetY).HasColumnName("uploaded_offset_y");
             entity.Property(p => p.CropOffsetX).HasColumnName("crop_offset_x");
             entity.Property(p => p.CropOffsetY).HasColumnName("crop_offset_y");
             entity.Property(p => p.CropRatioOverride).HasColumnName("crop_ratio_override");
+            entity.Property(p => p.PendingRemovalRemoteId).HasColumnName("pending_removal_remote_id");
         });
 
         modelBuilder.Entity<AppSetting>(entity =>

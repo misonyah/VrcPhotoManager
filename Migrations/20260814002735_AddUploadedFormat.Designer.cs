@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VrcPhotoManager.Data;
 
@@ -10,9 +11,11 @@ using VrcPhotoManager.Data;
 namespace VrcPhotoManager.Migrations
 {
     [DbContext(typeof(VrcdnDbContext))]
-    partial class VrcdnDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260814002735_AddUploadedFormat")]
+    partial class AddUploadedFormat
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -363,14 +366,6 @@ namespace VrcPhotoManager.Migrations
                     b.Property<string>("UploadedFormat")
                         .HasColumnType("TEXT")
                         .HasColumnName("uploaded_format");
-
-                    b.Property<double>("UploadedOffsetX")
-                        .HasColumnType("REAL")
-                        .HasColumnName("uploaded_offset_x");
-
-                    b.Property<double>("UploadedOffsetY")
-                        .HasColumnType("REAL")
-                        .HasColumnName("uploaded_offset_y");
 
                     b.Property<int?>("Width")
                         .HasColumnType("INTEGER")

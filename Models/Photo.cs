@@ -81,6 +81,15 @@ public class Photo
     /// without re-deriving it from the remote filename's resolution suffix.</summary>
     public string? UploadCropMode { get; set; }
 
+    /// <summary>The image format ("jpg" or "png" - see SettingsKeys.UploadImageFormat) this app
+    /// actually encoded and sent for this photo's current upload. Null means either not
+    /// uploaded, or uploaded before this field existed. NOT derived from RemoteUrl's extension -
+    /// confirmed live that VRCDN's ListObjects API reports ".png" for every object regardless of
+    /// what was actually uploaded (every one of this app's own uploads is genuinely JPEG, yet
+    /// 100% of RemoteUrls end in .png), so the URL is not a reliable signal of the real format.
+    /// Drives the cloud badge's gray-vs-cyan color (PhotoViewModel.IsUploadedAsPng).</summary>
+    public string? UploadedFormat { get; set; }
+
     /// <summary>Where within the source image the not-yet-applied upload crop is positioned,
     /// as a -1..1 fraction of the available slack on each axis (0 = centered, the previous
     /// fixed behavior; -1/+1 = pinned to one edge). Adjusted per-photo via arrow keys while
@@ -92,6 +101,16 @@ public class Photo
     public double CropOffsetX { get; set; }
     public double CropOffsetY { get; set; }
 
+    /// <summary>Snapshot of CropOffsetX/Y at the moment this photo's current upload actually
+    /// happened - the "what's really live" baseline. CropOffsetX/Y itself keeps moving as you
+    /// nudge (even on an Uploaded photo - see PhotoViewModel.NudgeCropOffset), so comparing it
+    /// against this baseline is how the app tells "just browsing, matches what's live" apart
+    /// from "a real pending edit" (PhotoViewModel.HasPendingCropEdit) - the trigger for both the
+    /// cyan selection-border hint and for Upload Selected re-uploading it. Reset to match
+    /// CropOffsetX/Y again on a fresh successful upload.</summary>
+    public double UploadedOffsetX { get; set; }
+    public double UploadedOffsetY { get; set; }
+
     /// <summary>Per-photo override of which preset (see MainViewModel.UploadCropPreset.Name,
     /// e.g. "4:3 (Landscape)" or "Original (no crop)") this specific photo uploads as, instead
     /// of whatever the global dropdown has selected - cycled via the [ / ] keys while hovering
@@ -100,6 +119,15 @@ public class Photo
     /// one-ratio-for-the-whole-batch behavior. Never set to "Custom..." - a keyboard cycle can't
     /// usefully drive that preset's free-text ratio, so it's skipped when cycling.</summary>
     public string? CropRatioOverride { get; set; }
+
+    /// <summary>The VRCDN RemoteId this photo used to have before a re-upload (see
+    /// PhotoViewModel.PrepareForReupload) reverted it to NotUploaded - kept around (rather than
+    /// just discarded) so the NEXT successful upload of this photo can actually delete the old
+    /// VRCDN object afterward (see MainViewModel.UploadSelectedAsync), instead of silently
+    /// leaving it behind as an orphaned, quota-consuming duplicate. Cleared once that removal
+    /// succeeds. Also drives the orange (vs. gold) selection-border hint in MainWindow.xaml -
+    /// "this selected photo will replace something already on VRCDN when uploaded".</summary>
+    public string? PendingRemovalRemoteId { get; set; }
 
     /// <summary>
     /// Only ever populated by a query that deliberately projects it (never loading the

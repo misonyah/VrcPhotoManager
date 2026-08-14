@@ -45,6 +45,39 @@ public class PhotoViewModel : INotifyPropertyChanged
     public double CropOffsetX => Model.CropOffsetX;
     public double CropOffsetY => Model.CropOffsetY;
     public string? CropRatioOverride => Model.CropRatioOverride;
+    public string? PendingRemovalRemoteId => Model.PendingRemovalRemoteId;
+    public string? UploadedFormat => Model.UploadedFormat;
+
+    /// <summary>Drives the cloud badge's color (gray instead of the usual cyan). Deliberately
+    /// NOT derived from RemoteUrl's extension - confirmed live that VRCDN's ListObjects API
+    /// reports ".png" for every object regardless of what was actually uploaded (every one of
+    /// this app's own uploads is genuinely JPEG, yet 100% of RemoteUrls end in .png), so the URL
+    /// is not a reliable signal of the real format. UploadedFormat instead records what THIS APP
+    /// actually encoded and sent, at upload time (see MainViewModel.UploadSelectedAsync).</summary>
+    public bool IsUploadedAsPng => UploadedFormat == "png";
+
+    /// <summary>True when this Uploaded photo's live crop (ratio + offset) has diverged from
+    /// what's actually on VRCDN - i.e. the user has cycled/nudged the crop since the upload,
+    /// so this photo needs a real re-upload to make those baked-in pixels match. Distinguishes
+    /// "just browsing/previewing a candidate crop" (CropRatioOverride/CropOffsetX/Y moved but
+    /// still equal the Uploaded* baseline - a no-op) from "a real pending edit" - the trigger
+    /// for both the cyan selection-border hint and for Upload Selected re-uploading it. Always
+    /// false once RemoteStatus leaves Uploaded (NotUploaded/Failed photos are just "not
+    /// uploaded", not "pending edit").</summary>
+    public bool HasPendingCropEdit =>
+        Model.RemoteStatus == RemoteStatus.Uploaded &&
+        (Model.CropRatioOverride != Model.UploadCropMode ||
+         Model.CropOffsetX != Model.UploadedOffsetX ||
+         Model.CropOffsetY != Model.UploadedOffsetY);
+
+    /// <summary>Used to block [ / ]/arrow-key crop adjustment on a Print-format photo before its
+    /// white border has been cropped off (CropPrintService.HasWhiteBorder does a real pixel
+    /// check for that specific case; LooksLikePrintFormat is a cheap resolution-only proxy,
+    /// deliberately not doing an image decode on every keypress just to gate an interaction). A
+    /// genuine non-Print photo that happens to share this exact resolution is a rare, low-cost
+    /// false positive - it just can't be per-photo cropped via the keyboard, same as it
+    /// couldn't be miscropped by Crop Print Borders either.</summary>
+    public bool IsPrintFormat => CropPrintService.LooksLikePrintFormat(Model.Width, Model.Height);
 
     /// <summary>Per-keypress nudge amount - a -1..1 fraction of the crop's available slack per
     /// axis, so 50 presses moves the crop from centered to a pinned edge. 0.1 (10 presses full
@@ -52,41 +85,44 @@ public class PhotoViewModel : INotifyPropertyChanged
     /// jump, per a real report.</summary>
     private const double CropNudgeStep = 0.02;
 
-    /// <summary>Raised when adjusting the crop on an already-Uploaded photo reverts it back to
-    /// NotUploaded (see RevertForRecrop) - MainWindow uses this to surface a status message,
-    /// since the cloud/uploaded badge quietly disappearing with no other explanation would be
-    /// confusing on its own.</summary>
-    public event EventHandler? RevertedForRecrop;
+    /// <summary>Raised when [ / ] is pressed on a Print-format photo and refused (see
+    /// IsPrintFormat/CycleCropRatioOverride) - MainWindow surfaces this as a status message so
+    /// the keypress doesn't just silently do nothing.</summary>
+    public event EventHandler? PrintCropBlocked;
 
-    /// <summary>Adjusting an already-Uploaded photo's crop only makes sense as "I want to
-    /// re-crop and re-upload this" - the crop that's actually live on VRCDN can't be changed in
-    /// place. Reverting to NotUploaded (mirroring RemoveFromVrcdnAsync's own ClearRemoteStatus
-    /// call, though this doesn't touch VRCDN itself - only local tracking) makes the photo
-    /// eligible for Upload Selected again and switches the preview overlay back to showing the
-    /// pending edit instead of the old live crop. A previous version just silently blocked any
-    /// adjustment once Uploaded, which read as "the keys stopped working" rather than "you need
-    /// to re-upload to change this" - now the very act of adjusting IS how you start doing
-    /// that.</summary>
-    private void RevertForRecrop()
+    /// <summary>Called by MainViewModel.UploadSelectedAsync right before re-uploading a
+    /// Selected+Uploaded photo whose crop has diverged from what's live (HasPendingCropEdit).
+    /// Reverting to NotUploaded (mirroring RemoveFromVrcdnAsync's own ClearRemoteStatus call,
+    /// though this doesn't touch VRCDN itself - only local tracking) makes the existing upload
+    /// flow treat it like any other not-yet-uploaded photo. The old RemoteId is kept (not just
+    /// discarded) as PendingRemovalRemoteId so the upload that follows can actually delete the
+    /// old VRCDN object afterward (see MainViewModel.UploadSelectedAsync) - otherwise
+    /// re-uploading would just leave the old copy behind as an orphaned, quota-consuming
+    /// duplicate rather than replacing it. Unlike the old RevertForRecrop, this is no longer
+    /// called on every keypress - just browsing/cycling a candidate crop on an Uploaded photo no
+    /// longer un-uploads it (see NudgeCropOffset/CycleCropRatioOverride's doc comments and
+    /// HasPendingCropEdit) - only an actual re-upload commits to it.</summary>
+    public void PrepareForReupload()
     {
+        string? oldRemoteId = Model.RemoteId;
         Model.RemoteStatus = RemoteStatus.NotUploaded;
         Model.RemoteUrl = null;
         Model.RemoteId = null;
         Model.UploadedAt = null;
         Model.UploadCropMode = null;
-        _repo.ClearRemoteStatus(Model.Id);
+        if (oldRemoteId is not null) Model.PendingRemovalRemoteId = oldRemoteId;
+        _repo.MarkPendingReupload(Model.Id, oldRemoteId);
         RefreshStatus();
-        RevertedForRecrop?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Adjusts where the upload crop sits within the source image (see
     /// Photo.CropOffsetX's doc comment) - called from MainWindow's PreviewKeyDown while this
-    /// photo is the one currently hovered. Reverts an already-Uploaded photo back to
-    /// NotUploaded first (see RevertForRecrop) rather than no-opping.</summary>
+    /// photo is the one currently hovered. No longer reverts an already-Uploaded photo back to
+    /// NotUploaded on every nudge - it just moves the tentative candidate crop; HasPendingCropEdit
+    /// detects the divergence from what's live, and the Selected setter snaps it back on
+    /// deselect if the user backs out (see PhotoViewModel.Selected's doc comment).</summary>
     public void NudgeCropOffset(int dx, int dy)
     {
-        if (Model.RemoteStatus == RemoteStatus.Uploaded) RevertForRecrop();
-
         double newX = Math.Clamp(Model.CropOffsetX + dx * CropNudgeStep, -1, 1);
         double newY = Math.Clamp(Model.CropOffsetY + dy * CropNudgeStep, -1, 1);
         if (newX == Model.CropOffsetX && newY == Model.CropOffsetY) return;
@@ -96,6 +132,7 @@ public class PhotoViewModel : INotifyPropertyChanged
         _repo.SetCropOffset(Model.Id, newX, newY);
         OnPropertyChanged(nameof(CropOffsetX));
         OnPropertyChanged(nameof(CropOffsetY));
+        OnPropertyChanged(nameof(HasPendingCropEdit));
     }
 
     /// <summary>Cycles this photo's per-photo crop-ratio override forward (direction=+1) or
@@ -105,11 +142,20 @@ public class PhotoViewModel : INotifyPropertyChanged
     /// currently hovered - see Photo.CropRatioOverride's doc comment. Cycling wraps through a
     /// null "use the dropdown" state between the last and first preset, rather than skipping
     /// straight from last to first, so there's always an easy way back to "just use the
-    /// dropdown" without having to know which preset that currently is. Reverts an already-
-    /// Uploaded photo back to NotUploaded first (see RevertForRecrop) rather than no-opping.</summary>
+    /// dropdown" without having to know which preset that currently is. No longer reverts an
+    /// already-Uploaded photo back to NotUploaded on every cycle - see NudgeCropOffset's doc
+    /// comment and HasPendingCropEdit. Also selects the photo - picking a crop via [ / ] is a
+    /// clear signal you want it included in the next Upload Selected batch, not just
+    /// previewed.</summary>
     public void CycleCropRatioOverride(int direction, IReadOnlyList<MainViewModel.UploadCropPreset> presets)
     {
-        if (Model.RemoteStatus == RemoteStatus.Uploaded) RevertForRecrop();
+        if (IsPrintFormat)
+        {
+            PrintCropBlocked?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        Selected = true;
 
         var cyclable = presets.Where(p => !p.IsCustom).ToList();
         if (cyclable.Count == 0) return;
@@ -129,6 +175,7 @@ public class PhotoViewModel : INotifyPropertyChanged
         Model.CropRatioOverride = newOverride;
         _repo.SetCropRatioOverride(Model.Id, newOverride);
         OnPropertyChanged(nameof(CropRatioOverride));
+        OnPropertyChanged(nameof(HasPendingCropEdit));
     }
 
     /// <summary>UploadCropMode trimmed to just the ratio (e.g. "4:3" out of "4:3 (Landscape)") -
@@ -174,6 +221,24 @@ public class PhotoViewModel : INotifyPropertyChanged
         {
             if (Model.Selected == value) return;
             Model.Selected = value;
+            // Deselecting a tentative candidate crop (browsed via [ / ]/nudging while Uploaded,
+            // never actually re-uploaded) snaps it back to what's really live instead of leaving
+            // an orphaned pending edit around - see the user's own framing: "reset the crop back
+            // to the uploaded one when image is deselected". An actual Upload Selected run always
+            // clears Selected itself on success (see MainViewModel.UploadSelectedAsync), so this
+            // only ever fires for a deselect the user did on purpose.
+            if (!value && HasPendingCropEdit)
+            {
+                Model.CropRatioOverride = Model.UploadCropMode;
+                Model.CropOffsetX = Model.UploadedOffsetX;
+                Model.CropOffsetY = Model.UploadedOffsetY;
+                _repo.SetCropRatioOverride(Model.Id, Model.CropRatioOverride);
+                _repo.SetCropOffset(Model.Id, Model.CropOffsetX, Model.CropOffsetY);
+                OnPropertyChanged(nameof(CropRatioOverride));
+                OnPropertyChanged(nameof(CropOffsetX));
+                OnPropertyChanged(nameof(CropOffsetY));
+                OnPropertyChanged(nameof(HasPendingCropEdit));
+            }
             OnPropertyChanged();
             SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -273,11 +338,15 @@ public class PhotoViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(RemoteStatus));
         OnPropertyChanged(nameof(RemoteUrl));
+        OnPropertyChanged(nameof(UploadedFormat));
+        OnPropertyChanged(nameof(IsUploadedAsPng));
         OnPropertyChanged(nameof(UploadCropMode));
         OnPropertyChanged(nameof(UploadCropModeShort));
         OnPropertyChanged(nameof(CropOffsetX));
         OnPropertyChanged(nameof(CropOffsetY));
         OnPropertyChanged(nameof(CropRatioOverride));
+        OnPropertyChanged(nameof(PendingRemovalRemoteId));
+        OnPropertyChanged(nameof(HasPendingCropEdit));
     }
 
     public void NotifyRatingChanged() => OnPropertyChanged(nameof(Rating));

@@ -43,6 +43,10 @@ public partial class MainWindow : Window
         _hoverTimer.Tick += HoverTimer_Tick;
 
         viewModel.ToastRequested += ShowToast;
+        // See MainViewModel.RowsRebuilt's doc comment - container recycling can silently
+        // reassign a stale _hoverTarget to the wrong photo after a rebuild (e.g. right after an
+        // upload) without ever firing MouseLeave on it first.
+        viewModel.RowsRebuilt += (_, _) => HidePreviewOverlay();
         // The very next StatusMessage change after this subscribes is guaranteed to be
         // InitializeAsync's "N photos loaded." (MainViewModel's constructor already set
         // "Loading..." and returned before this line runs, so that first assignment doesn't

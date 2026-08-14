@@ -24,4 +24,24 @@ public static class SettingsKeys
     public const string WindowMaximized = "window_maximized";
     public const string LastThumbnailSize = "last_thumbnail_size";
     public const string LastScrollOffset = "last_scroll_offset";
+
+    // VRCDN index file (for a Udon world script to randomly pick an uploaded photo - see
+    // MainViewModel.GenerateVrcdnIndexAsync) - the base filename (no extension) and format
+    // ("csv", "json", or "txt") used the next time the index is generated. IndexFileNameBase
+    // defaults to a random GUID the first time it's read (see MainViewModel's resolver) rather
+    // than a fixed name, only to avoid accidentally colliding with a real photo's filename in
+    // VRCDN's own file list - it's otherwise just a human-readable label, since VRCDN assigns
+    // the actual object id/URL server-side regardless of what name is uploaded under.
+    public const string IndexFileNameBase = "vrcdn_index_file_name_base";
+    public const string IndexFileFormat = "vrcdn_index_file_format";
+
+    // Not secret (a gist id/URL identifies but doesn't grant access) - the GitHub token itself
+    // is stored separately via CredentialStore.SaveGistToken/LoadGistToken (DPAPI-encrypted).
+    public const string GistId = "vrcdn_index_gist_id";
+    public const string GistIndexUrl = "vrcdn_index_gist_url";
+
+    /// <summary>"jpg" (default) or "png" - set via Settings' "Upload Image Format" section
+    /// (right column). PNG uploads are just as metadata-free as jpg - see
+    /// ThumbnailService.ResizeAsync, which never attaches BitmapMetadata to either encoder.</summary>
+    public const string UploadImageFormat = "upload_image_format";
 }

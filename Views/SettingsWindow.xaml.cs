@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -11,6 +12,7 @@ namespace VrcPhotoManager.Views;
 public partial class SettingsWindow : Window
 {
     private readonly PhotoRepository _repo;
+    private readonly CredentialStore _credentials;
     private readonly ModelDownloadService _downloader = new();
     private CancellationTokenSource? _downloadCts;
     private bool _isDownloading;
@@ -18,6 +20,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow(PhotoRepository repo)
     {
         InitializeComponent();
+        _credentials = new CredentialStore(repo);
         DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
         // A download in progress must not be silently orphaned: the accidental "click the
         // main window while a download is running" case is blocked outright (stillOpenGuard
@@ -55,6 +58,21 @@ public partial class SettingsWindow : Window
         HoverDelaySlider.Value = _repo.GetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, 0.25);
         SkipResolvedPhotosCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, true);
 
+        // GistTokenBox is deliberately left blank rather than showing the saved token - it's
+        // only used to CHANGE the token (see SaveButton_Click, which leaves the stored token
+        // untouched if this stays empty), same "don't echo back a secret" spirit as never
+        // displaying the VRCDN cookie anywhere either.
+        string? savedIndexFileNameBase = _repo.GetStringSetting(SettingsKeys.IndexFileNameBase);
+        IndexFileNameBox.Text = string.IsNullOrWhiteSpace(savedIndexFileNameBase)
+            ? Guid.NewGuid().ToString("N")
+            : savedIndexFileNameBase;
+        string? savedIndexFormat = _repo.GetStringSetting(SettingsKeys.IndexFileFormat);
+        IndexFormatBox.SelectedIndex = savedIndexFormat switch { "txt" => 1, "json" => 2, _ => 0 };
+        string? indexUrl = _repo.GetStringSetting(SettingsKeys.GistIndexUrl);
+        IndexUrlText.Text = indexUrl is null ? "Current index URL: (none published yet)" : $"Current index URL: {indexUrl}";
+
+        UploadFormatBox.SelectedIndex = _repo.GetStringSetting(SettingsKeys.UploadImageFormat) == "png" ? 1 : 0;
+
         DownloadStatusText.Text = GetModelStatusText(ModelDirTextBox.Text, "model.onnx", "selected_tags.csv");
         DownloadClipStatusText.Text = GetModelStatusText(ClipModelDirTextBox.Text, "model.onnx");
         DownloadAvatarStatusText.Text = GetModelStatusText(AvatarModelDirTextBox.Text, "model.onnx", "labels.txt");
@@ -62,14 +80,21 @@ public partial class SettingsWindow : Window
         CropPresetsList.ItemsSource = MainViewModel.UploadCropPresets.Select(DescribeCropPreset).ToList();
     }
 
+    /// <summary>A real class rather than a (string Name, string Detail) tuple - WPF data
+    /// binding can't reach named ValueTuple element names at runtime (they're compile-time-only
+    /// syntactic sugar; the actual members are Item1/Item2), so {Binding Name}/{Binding Detail}
+    /// in the ItemsControl's DataTemplate would silently fail and render every row blank. Same
+    /// class of bug this codebase already hit once before in AvatarSearchListBox_MouseUp.</summary>
+    private sealed record CropPresetDisplay(string Name, string Detail);
+
     /// <summary>Name + a human-readable ratio/example-resolution line for the read-only crop-
     /// presets reference panel - reads MainViewModel.UploadCropPresets directly (not a separate
     /// hardcoded list) so this can't silently drift out of sync with the real preset values.</summary>
-    private static (string Name, string Detail) DescribeCropPreset(MainViewModel.UploadCropPreset preset)
+    private static CropPresetDisplay DescribeCropPreset(MainViewModel.UploadCropPreset preset)
     {
         if (preset.AspectRatio is not double ratio)
         {
-            return (preset.Name, "Uploads at the photo's own resolution, uncropped.");
+            return new CropPresetDisplay(preset.Name, "Uploads at the photo's own resolution, uncropped.");
         }
 
         // Same cap ThumbnailService.PrepareForUploadAsync actually applies - the larger side
@@ -77,7 +102,7 @@ public partial class SettingsWindow : Window
         (int w, int h) = ratio >= 1
             ? (ThumbnailService.UploadMaxSide, (int)Math.Round(ThumbnailService.UploadMaxSide / ratio))
             : ((int)Math.Round(ThumbnailService.UploadMaxSide * ratio), ThumbnailService.UploadMaxSide);
-        return (preset.Name, $"Ratio {ratio:0.###} - up to {w}x{h}.");
+        return new CropPresetDisplay(preset.Name, $"Ratio {ratio:0.###} - up to {w}x{h}.");
     }
 
     /// <summary>Reports what's already on disk for a model folder, so the window shows real
@@ -289,8 +314,33 @@ public partial class SettingsWindow : Window
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, HoverDelaySlider.Value);
         _repo.SetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, SkipResolvedPhotosCheckBox.IsChecked == true);
+
+        // GistTokenBox left empty means "don't change the saved token" - only overwrite it when
+        // something was actually typed, so reopening Settings and clicking Save without touching
+        // this box (the common case) can't accidentally wipe out an already-configured token.
+        if (GistTokenBox.Password.Length > 0)
+        {
+            _credentials.SaveGistToken(GistTokenBox.Password);
+        }
+        _repo.SetStringSetting(SettingsKeys.IndexFileNameBase, IndexFileNameBox.Text.Trim());
+        string format = (IndexFormatBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Content as string ?? "csv";
+        _repo.SetStringSetting(SettingsKeys.IndexFileFormat, format);
+
+        string uploadFormat = (UploadFormatBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Content as string ?? "jpg";
+        _repo.SetStringSetting(SettingsKeys.UploadImageFormat, uploadFormat);
+
         DialogResult = true;
         Close();
+    }
+
+    /// <summary>Pre-selects the "gist" scope and a descriptive name via query params, so
+    /// generating a correctly (and minimally) scoped token is close to one click - see the
+    /// VRCDN Photo Index section's explanation text.</summary>
+    private void GenerateGistTokenLink_Click(object sender, RoutedEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo(
+            "https://github.com/settings/tokens/new?scopes=gist&description=VRC+Photo+Manager+Index")
+        { UseShellExecute = true });
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)

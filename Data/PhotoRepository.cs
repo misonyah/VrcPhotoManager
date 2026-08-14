@@ -119,6 +119,18 @@ public class PhotoRepository
                 RemoteId = p.RemoteId,
                 UploadedAt = p.UploadedAt,
                 UploadCropMode = p.UploadCropMode,
+                UploadedFormat = p.UploadedFormat,
+                // Previously missing from this explicit projection - object initializers leave
+                // unlisted properties at their type default, so every app load/reload silently
+                // reset these four to 0/null in memory even though the database had real values.
+                // Position (CropOffsetX/Y) looked like it "forgot" itself across a restart while
+                // the crop ratio (UploadCropMode, listed above) stayed correct - a real report.
+                CropOffsetX = p.CropOffsetX,
+                CropOffsetY = p.CropOffsetY,
+                CropRatioOverride = p.CropRatioOverride,
+                PendingRemovalRemoteId = p.PendingRemovalRemoteId,
+                UploadedOffsetX = p.UploadedOffsetX,
+                UploadedOffsetY = p.UploadedOffsetY,
             })
             .ToList();
     }
@@ -433,6 +445,21 @@ public class PhotoRepository
         return (row.RemoteUrl, row.RemoteId);
     }
 
+    /// <summary>Every currently-uploaded photo's live URL, pixel dimensions, and world name -
+    /// the data source for MainViewModel.UpdateVrcdnIndexAsync's Udon-world index file.
+    /// AsNoTracking + a narrow projection (no Thumbnail blob) since this can run against the
+    /// whole library.</summary>
+    public List<(string Url, int? Width, int? Height, string? WorldName)> GetUploadedPhotoUrlsForIndex()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.RemoteStatus == RemoteStatus.Uploaded && p.RemoteUrl != null)
+            .Select(p => new { p.RemoteUrl, p.Width, p.Height, p.WorldName })
+            .AsEnumerable()
+            .Select(p => (p.RemoteUrl!, p.Width, p.Height, p.WorldName))
+            .ToList();
+    }
+
     public void UpdateRemoteStatus(long id, RemoteStatus status, string? remoteUrl = null, string? remoteId = null, string? uploadedAt = null)
     {
         using var context = NewContext();
@@ -453,6 +480,28 @@ public class PhotoRepository
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id)
             .ExecuteUpdate(s => s.SetProperty(p => p.UploadCropMode, uploadCropMode));
+    }
+
+    /// <summary>The image format ("jpg"/"png") this app actually encoded for this photo's
+    /// current upload - see Photo.UploadedFormat's doc comment for why this exists (VRCDN's own
+    /// RemoteUrl extension isn't a reliable signal of the real format).</summary>
+    public void SetUploadedFormat(long id, string? uploadedFormat)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id)
+            .ExecuteUpdate(s => s.SetProperty(p => p.UploadedFormat, uploadedFormat));
+    }
+
+    /// <summary>Snapshots CropOffsetX/Y into UploadedOffsetX/Y - the "what's really live"
+    /// baseline (see Photo.UploadedOffsetX's doc comment), set right after a successful
+    /// upload.</summary>
+    public void SetUploadedOffset(long id, double offsetX, double offsetY)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id)
+            .ExecuteUpdate(s => s
+                .SetProperty(p => p.UploadedOffsetX, offsetX)
+                .SetProperty(p => p.UploadedOffsetY, offsetY));
     }
 
     /// <summary>Persists a per-photo pre-upload crop nudge (see Photo.CropOffsetX's doc comment)
@@ -503,7 +552,37 @@ public class PhotoRepository
         photo.RemoteId = null;
         photo.UploadedAt = null;
         photo.UploadCropMode = null;
+        photo.UploadedFormat = null;
         context.SaveChanges();
+    }
+
+    /// <summary>Same field resets as ClearRemoteStatus, plus stashing the just-cleared RemoteId
+    /// into PendingRemovalRemoteId (unless it was already null) - used when
+    /// PhotoViewModel.PrepareForReupload reverts an Uploaded photo (with a pending crop edit)
+    /// back to NotUploaded right before re-uploading it, so the old VRCDN object can actually be
+    /// deleted once the new upload succeeds, instead of left behind as an orphan. Deliberately
+    /// does NOT touch an existing PendingRemovalRemoteId if oldRemoteId is null (e.g. re-cropping
+    /// a photo a second time before ever re-uploading it the first time - the original pending
+    /// removal must still happen).</summary>
+    public void MarkPendingReupload(long id, string? oldRemoteId)
+    {
+        using var context = NewContext();
+        var photo = context.Photos.First(p => p.Id == id);
+        photo.RemoteStatus = RemoteStatus.NotUploaded;
+        photo.RemoteUrl = null;
+        photo.RemoteId = null;
+        photo.UploadedAt = null;
+        photo.UploadCropMode = null;
+        photo.UploadedFormat = null;
+        if (oldRemoteId is not null) photo.PendingRemovalRemoteId = oldRemoteId;
+        context.SaveChanges();
+    }
+
+    public void SetPendingRemovalRemoteId(long id, string? pendingRemovalRemoteId)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == id)
+            .ExecuteUpdate(s => s.SetProperty(p => p.PendingRemovalRemoteId, pendingRemovalRemoteId));
     }
 
     // The exact-suffix match above only ever succeeds for a source file that was ALREADY

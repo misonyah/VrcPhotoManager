@@ -82,7 +82,24 @@ upload status per photo, instead of blanket-uploading a whole library by filter 
 - **Upload Selected / Remove from VRCDN** — upload resizes to fit VRChat's image-loader limits
   before going up, with an optional per-photo crop (see [Keyboard shortcuts](#keyboard-shortcuts)
   below); Remove deletes selected, already-uploaded photos from VRCDN's storage (confirmed first
-  — there's no undo except re-uploading).
+  — there's no undo except re-uploading). Uploads are re-encoded as JPEG by default (Settings'
+  "Upload Image Format" section also offers lossless PNG), regardless of the local file's own
+  format, and carry no metadata — no VRCX author/world/player data, no EXIF/XMP; none of that is
+  attached to what actually goes to VRCDN. Your original file on disk is never modified. **Note:**
+  VRCDN's own API reports every object's URL as ending in `.png` regardless of what was actually
+  uploaded (confirmed live - this app's own JPEG uploads all come back as `.png` URLs too), so the
+  URL's extension is not a reliable way to tell what format a photo was really uploaded as; the
+  cloud badge's gray-vs-cyan color reflects what this app actually sent instead.
+- **VRCDN photo index for Udon** — **Update VRCDN Index** publishes a list of every currently-
+  uploaded photo's URL (and pixel dimensions) to a GitHub Gist, for a Udon world script to
+  randomly pick one from (e.g. a photo-frame prop). Needs a GitHub token scoped to `gist` only
+  (Settings has a one-click link to generate one correctly scoped) - no repository is created or
+  touched. The gist's URL never changes across updates (unlike VRCDN itself, which mints a new
+  URL on every upload), so your world's reference to it is set once. Default format is CSV
+  (`url,width,height` per line, no header) - the easiest shape to parse in Udon
+  (`VRCStringDownloader.LoadUrl` → `string.Split`), while still letting your script size a
+  display quad to the right aspect ratio before the image loads; `txt` (URL-only) and `json`
+  are also available in Settings.
 - **Settings screen** — configure where each local model's files live, with a one-click
   download straight from Hugging Face that checks the current version first and skips
   re-downloading if you already have it, and shows whether/when each model was last downloaded

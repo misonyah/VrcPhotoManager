@@ -11,22 +11,21 @@ namespace VrcPhotoManager.Views;
 /// <summary>Resolves which crop ratio the preview overlay should show for a given photo. There's
 /// no batch-wide default crop anymore - only a per-photo CropRatioOverride (set via [ / ] while
 /// hovering, see Photo.CropRatioOverride) or, once Uploaded, the ratio it was actually uploaded
-/// as (parsed from UploadCropMode, which can differ from the current override if it was changed
-/// since - the preview on an already-uploaded photo should show what's really live on VRCDN, not
-/// what a fresh re-upload would do).</summary>
+/// as (parsed from UploadCropMode).</summary>
 internal static class CropOverlayRatioResolver
 {
     /// <summary>cropRatioOverride is a preset Name (or null - "no crop"), parsed the same way
     /// UploadCropMode is. "Original (no crop)" isn't in CropRatioLabels.KnownRatios and isn't a
     /// "Custom ..." shape either, so ParseRatio naturally returns null for it - correctly showing
-    /// no crop lines for a photo overridden to that preset (same outcome as no override at all).</summary>
+    /// no crop lines for a photo overridden to that preset (same outcome as no override at all).
+    /// cropRatioOverride wins whenever it's set (even on an Uploaded photo) so a tentative
+    /// browsed-but-not-yet-reuploaded candidate (see PhotoViewModel.HasPendingCropEdit) previews
+    /// correctly; uploadCropMode is only the fallback for Uploaded photos with no override at all
+    /// (e.g. backfilled by SyncRemoteMatches) - it reflects what's really live on VRCDN.</summary>
     public static double? Resolve(RemoteStatus status, string? uploadCropMode, string? cropRatioOverride)
     {
-        if (status == RemoteStatus.Uploaded)
-        {
-            return uploadCropMode is null ? null : CropRatioLabels.ParseRatio(uploadCropMode);
-        }
-        return cropRatioOverride is null ? null : CropRatioLabels.ParseRatio(cropRatioOverride);
+        string? effective = cropRatioOverride ?? (status == RemoteStatus.Uploaded ? uploadCropMode : null);
+        return effective is null ? null : CropRatioLabels.ParseRatio(effective);
     }
 }
 

@@ -15,6 +15,7 @@ public class CredentialStore
     private const string CookieKey = "vrcdn_session_cookie";
     private const string PasswordSaltKey = "password_salt";
     private const int Pbkdf2Iterations = 200_000;
+    private const string GistTokenKey = "github_gist_token";
 
     private readonly PhotoRepository _repo;
 
@@ -64,6 +65,25 @@ public class CredentialStore
         }
 
         byte[] plain = ProtectedData.Unprotect(dpapiProtected, null, DataProtectionScope.CurrentUser);
+        return Encoding.UTF8.GetString(plain);
+    }
+
+    /// <summary>DPAPI-only (no password layer, unlike SaveCookie/LoadCookie) - the gist-scope
+    /// GitHub token is real but lower-stakes than the VRCDN session (it can only read/write this
+    /// app's own gists, nothing else), so YAGNI on the extra password-protection option unless
+    /// asked for later.</summary>
+    public void SaveGistToken(string token)
+    {
+        byte[] plain = Encoding.UTF8.GetBytes(token);
+        byte[] dpapiProtected = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
+        _repo.SetSetting(GistTokenKey, dpapiProtected);
+    }
+
+    public string? LoadGistToken()
+    {
+        byte[]? stored = _repo.GetSetting(GistTokenKey);
+        if (stored is null) return null;
+        byte[] plain = ProtectedData.Unprotect(stored, null, DataProtectionScope.CurrentUser);
         return Encoding.UTF8.GetString(plain);
     }
 

@@ -59,6 +59,41 @@
                 ToolTip="Downloads model.onnx and labels.txt into the folder above." />
         <TextBlock x:Name="DownloadAvatarStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
+        <TextBlock Text="VRCDN Photo Index (for a Udon world script)" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,8">
+            "Update VRCDN Index" (main window) publishes a list of every currently-uploaded
+            photo's URL to a GitHub Gist, so a Udon world script can randomly pick one - see the
+            README's Keyboard Shortcuts section. Needs a GitHub token with ONLY the "gist" scope
+            (not repository access) - click below to generate one with that scope pre-selected,
+            then paste it here.
+        </TextBlock>
+        <TextBlock Margin="0,0,0,4">
+            <Hyperlink Click="GenerateGistTokenLink_Click">Generate a gist-scope token on GitHub...</Hyperlink>
+        </TextBlock>
+        <PasswordBox x:Name="GistTokenBox" Margin="0,0,0,8"
+                     ToolTip="Pasted here only to save it (DPAPI-encrypted, tied to your Windows account) - never shown again in plain text after Save." />
+        <Grid Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="140" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Index filename (no extension):" Margin="0,0,0,4" />
+                <TextBox x:Name="IndexFileNameBox"
+                         ToolTip="Just a label in the gist - VRCDN isn't involved, and the gist's URL doesn't depend on this. Defaults to a random id the first time you open Settings after using this feature." />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="Format:" Margin="0,0,0,4" />
+                <ComboBox x:Name="IndexFormatBox" SelectedIndex="0">
+                    <ComboBoxItem Content="csv" ToolTip="url,width,height per line, no header - easiest to parse in Udon, and lets a display quad size itself before the image loads." />
+                    <ComboBoxItem Content="txt" ToolTip="One URL per line." />
+                    <ComboBoxItem Content="json" ToolTip="Array of {Url,Width,Height} objects - needs VRChat's VRCJson.TryDeserializeFromJson node in Udon." />
+                </ComboBox>
+            </StackPanel>
+        </Grid>
+        <TextBlock x:Name="IndexUrlText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" />
+
         <TextBlock Text="General" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
         <CheckBox x:Name="AutoCopyUrlCheckBox" Content="Automatically copy VRCDN URL to clipboard when hovering a photo"
                   Margin="0,0,0,12"
@@ -88,6 +123,18 @@
     </StackPanel>
 
     <StackPanel Grid.Column="2">
+        <TextBlock Text="Upload Image Format" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
+        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,8">
+            JPEG (default) is smaller and uses less of your VRCDN quota. PNG is lossless (larger
+            files, no compression artifacts) but otherwise behaves identically - still no
+            metadata attached, same resize/crop handling. The cloud badge on a PNG upload shows
+            gray instead of cyan as a reminder which one it is.
+        </TextBlock>
+        <ComboBox x:Name="UploadFormatBox" Margin="0,0,0,12">
+            <ComboBoxItem Content="jpg" ToolTip="Smaller files, lossy compression - the default." />
+            <ComboBoxItem Content="png" ToolTip="Lossless, larger files - uses more VRCDN quota per photo." />
+        </ComboBox>
+
         <TextBlock Text="Upload Crop Presets" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
             Reference only for now, not editable here. While hovering a photo, press [ / ] to
