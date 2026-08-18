@@ -1020,16 +1020,18 @@ public class MainViewModel : INotifyPropertyChanged
             photos = photos.Where(p => !p.Model.FacesScanned || unresolvedIds.Contains(p.Model.Id)).ToList();
         }
 
-        int processed = 0, totalFaces = 0;
+        int processed = 0, totalExisting = 0, totalNew = 0, totalRemoved = 0;
         foreach (var vm in photos)
         {
             try
             {
                 var faces = await Task.Run(() => _faceDetector.DetectFaces(vm.Model.LocalPath));
-                _faces.InsertDetectedFaces(vm.Model.Id, faces);
+                var result = _faces.InsertDetectedFaces(vm.Model.Id, faces);
                 _repo.SetFacesScanned(vm.Model.Id);
                 vm.Model.FacesScanned = true;
-                totalFaces += faces.Count;
+                totalExisting += result.Existing;
+                totalNew += result.New;
+                totalRemoved += result.Removed;
             }
             catch (Exception ex)
             {
@@ -1039,12 +1041,17 @@ public class MainViewModel : INotifyPropertyChanged
             processed++;
             if (processed % 25 == 0 || processed == photos.Count)
             {
-                StatusMessage = $"Scanning for faces... {processed}/{photos.Count} photos, {totalFaces} faces found so far";
+                StatusMessage = $"Scanning for faces... {processed}/{photos.Count} photos, {totalNew} new, {totalExisting} existing so far";
             }
         }
 
         ApplyFaceCounts();
-        StatusMessage = $"Face scan complete: {totalFaces} faces found across {photos.Count} photos.";
+        // Existing = already-reviewed (or still-unreviewed but re-found) faces left untouched;
+        // New = fresh detections actually inserted; Removed = stale, never-reviewed boxes an
+        // earlier, less accurate pass left behind that this pass no longer found anywhere - see
+        // FaceRepository.InsertDetectedFaces's FaceInsertResult doc comment.
+        StatusMessage = $"Face scan complete: {totalNew} new faces, {totalExisting} existing across {photos.Count} photos"
+            + (totalRemoved > 0 ? $" ({totalRemoved} stale untagged boxes removed)." : ".");
         RecordActionSuccess("DetectFaces", nameof(ScanFacesTooltip));
         SuggestFacesCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(SuggestFacesTooltip));

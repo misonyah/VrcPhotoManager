@@ -99,15 +99,41 @@ public partial class TagFacesWindow : Window
         /// tooltip shown - WPF suppresses a null ToolTip binding) when VrcUserId is null or
         /// VRCX has neither a note nor a bio for this person.</summary>
         public string? NoteTooltip { get; init; }
+
+        /// <summary>True when this row's person already has a Confirmed FaceLabel on some
+        /// OTHER face in this same photo (see WithNoteTooltips, which also stamps this) -
+        /// bolds the row so the "who is left to tag" list is easy to scan for names that
+        /// still need a click versus ones already accounted for elsewhere in the photo.</summary>
+        public bool AlreadyConfirmedInPhoto { get; init; }
     }
 
-    /// <summary>Single point where a built PickerItem list gets its NoteTooltip filled in -
-    /// called from both places a suggestion list is assembled (OpenPicker's static list,
-    /// NewPersonNameTextBox_TextChanged's search results) so the live VRCX lookup only ever
-    /// needs to know about "whatever VrcUserIds are in this list", not which of the 8
-    /// construction sites they came from.</summary>
+    /// <summary>Single point where a built PickerItem list gets its NoteTooltip and
+    /// AlreadyConfirmedInPhoto filled in - called from both places a suggestion list is
+    /// assembled (OpenPicker's static list, NewPersonNameTextBox_TextChanged's search results)
+    /// so per-row VRCX/confirmed-state lookups only ever need to know about "whatever's in this
+    /// list", not which of the 8 construction sites they came from.</summary>
     private List<PickerItem> WithNoteTooltips(List<PickerItem> items)
     {
+        // A row can be identified either by RegisteredPerson id (ExistingPersonId) or by raw
+        // VrcUserId (VRCX player/friend/cached rows not yet linked to a RegisteredPerson) - a
+        // confirmed label only ever carries a PersonId, so the VrcUserId set below is derived
+        // from resolving each confirmed PersonId back to its person's VrcUserId (null for a
+        // manually-created person, which just never matches a VrcUserId-only row).
+        var confirmedPersonIds = _labelsByFaceId.Values
+            .Where(l => l.Confirmed && l.PersonId is not null)
+            .Select(l => l.PersonId!.Value)
+            .ToHashSet();
+        var confirmedVrcUserIds = confirmedPersonIds
+            .Select(id => _personsById.TryGetValue(id, out var p) ? p.VrcUserId : null)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .ToHashSet();
+        items = items.Select(i => i with
+        {
+            AlreadyConfirmedInPhoto = (i.ExistingPersonId is long personId && confirmedPersonIds.Contains(personId))
+                || (i.VrcUserId is string userId && confirmedVrcUserIds.Contains(userId))
+        }).ToList();
+
         if (_profileLookup is null) return items;
         var ids = items.Where(i => i.VrcUserId is not null).Select(i => i.VrcUserId!).Distinct().ToList();
         if (ids.Count == 0) return items;

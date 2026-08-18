@@ -8,6 +8,18 @@ public class FaceRepository(string dbPath)
 {
     private VrcdnDbContext NewContext() => new(dbPath);
 
+    /// <summary>Result of InsertDetectedFaces - lets ScanFacesAsync report how much of a
+    /// re-scan actually found something new versus just confirming what was already known.
+    /// Existing is the count of previously-detected faces on this photo that were kept as-is
+    /// (already reviewed, or a prior scan's still-unreviewed box the detector re-found and
+    /// therefore didn't need to duplicate); New is the count of faces this call actually
+    /// inserted as fresh DetectedFace rows; Removed is the count of previously-detected,
+    /// never-reviewed boxes this call cleared because the current detection pass no longer
+    /// found anything there - in practice these were false-positive boxes from an earlier,
+    /// less accurate pass (a real reviewed box is never touched here, see the preserved-set
+    /// logic below).</summary>
+    public readonly record struct FaceInsertResult(int Existing, int New, int Removed);
+
     /// <summary>
     /// Replaces this photo's previously-detected faces - but only the ones nobody has reviewed
     /// yet. A face with ANY label (confirmed tag, &lt;unknown&gt;, or an unconfirmed suggestion) is
@@ -20,7 +32,7 @@ public class FaceRepository(string dbPath)
     /// preserved face is skipped rather than inserted, so re-scanning an already-reviewed photo
     /// doesn't stack a duplicate untagged box directly on top of it.
     /// </summary>
-    public void InsertDetectedFaces(long photoId, IEnumerable<FaceBox> faces)
+    public FaceInsertResult InsertDetectedFaces(long photoId, IEnumerable<FaceBox> faces)
     {
         using var context = NewContext();
         var labeledFaceIds = context.FaceLabels.Select(l => l.DetectedFaceId).ToHashSet();
@@ -28,8 +40,10 @@ public class FaceRepository(string dbPath)
         // Deleted rows are preserved (never resurrected/overwritten) just like labeled ones -
         // deleting a box is as deliberate a review decision as marking it <unknown>.
         var preserved = existing.Where(f => labeledFaceIds.Contains(f.Id) || f.Deleted).ToList();
-        context.DetectedFaces.RemoveRange(existing.Where(f => !labeledFaceIds.Contains(f.Id) && !f.Deleted));
+        var stale = existing.Where(f => !labeledFaceIds.Contains(f.Id) && !f.Deleted).ToList();
+        context.DetectedFaces.RemoveRange(stale);
 
+        int inserted = 0;
         foreach (var f in faces)
         {
             if (preserved.Any(p => Overlaps(p, f))) continue;
@@ -41,8 +55,10 @@ public class FaceRepository(string dbPath)
                 Width = f.Width,
                 Height = f.Height,
             });
+            inserted++;
         }
         context.SaveChanges();
+        return new FaceInsertResult(preserved.Count, inserted, stale.Count);
     }
 
     /// <summary>IoU (intersection over union) > 0.3 counts as "the same face" for re-scan

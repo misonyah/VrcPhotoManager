@@ -104,6 +104,15 @@
                                     <TextBlock Grid.Column="0" Text="{Binding DisplayText}" VerticalAlignment="Center"
                                                ToolTipService.IsEnabled="{Binding NoteTooltip, Converter={StaticResource StringNotEmptyToBoolConverter}}"
                                                ToolTipService.ShowDuration="15000">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding AlreadyConfirmedInPhoto}" Value="True">
+                                                        <Setter Property="FontWeight" Value="Bold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
                                         <TextBlock.ToolTip>
                                             <ToolTip Content="{Binding NoteTooltip}" MaxWidth="400">
                                                 <ToolTip.ContentTemplate>
