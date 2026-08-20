@@ -174,6 +174,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 && e.Args[0] == "--run-suggest-faces")
+        {
+            RunSuggestFacesDiagnostic();
+            Shutdown();
+            return;
+        }
+
         // Only reached by a real app launch (every diagnostic branch above returns early).
         // Fire-and-forget: never block startup on a network check, and never let a failure
         // (offline, GitHub unreachable, no releases published yet) surface as an error - this
@@ -279,6 +286,53 @@ public partial class App : Application
         Console.WriteLine($"First 5 values: {string.Join(", ", embedding.Take(5).Select(v => v.ToString("F4")))}");
         float norm = MathF.Sqrt(embedding.Sum(v => v * v));
         Console.WriteLine($"L2 norm (should be ~1.0): {norm:F4}");
+    }
+
+    /// <summary>Headless equivalent of clicking "Suggest Faces" in the running app - runs
+    /// against the real live database (no scratch-copy convention here, unlike
+    /// --debug-tag-faces/--test-face-repo, since this is exactly the same write the button
+    /// itself performs), so the single-instance mutex check above already guarantees the real
+    /// app isn't running concurrently. Shares FaceSuggestionService.RunAsync with
+    /// MainViewModel.SuggestFacesAsync so this never drifts from the actual button's logic.</summary>
+    private static void RunSuggestFacesDiagnostic()
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        string dbPath = Path.Combine(dataDir, "vrcdn_manager.db");
+        var photoRepo = new Data.PhotoRepository(dbPath);
+        var faceRepo = new Data.FaceRepository(dbPath);
+
+        string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.ClipModelDir);
+        if (modelDir is null)
+        {
+            Console.WriteLine("CLIP model dir not configured (set it via Settings first).");
+            return;
+        }
+        var clip = Services.ClipEmbeddingService.TryCreate(modelDir, out string? error);
+        if (clip is null)
+        {
+            Console.WriteLine($"Unavailable: {error}");
+            return;
+        }
+
+        var photos = photoRepo.GetAll();
+        var pathById = photos.ToDictionary(p => p.Id, p => p.LocalPath);
+        var avatarTypeById = photos.ToDictionary(p => p.Id, p => p.AvatarType);
+
+        // Same Task.Run(...).GetAwaiter().GetResult() pattern as RunVrcdnSyncDiagnostic -
+        // OnStartup runs on the WPF Dispatcher thread; blocking directly on an async chain
+        // that resumes on that same SynchronizationContext deadlocks.
+        Task.Run(async () =>
+        {
+            var result = await Services.FaceSuggestionService.RunAsync(
+                faceRepo, clip, pathById, avatarTypeById, msg => Console.WriteLine(msg));
+            if (result.NoEligiblePeople)
+            {
+                Console.WriteLine($"No registered person has enough reference photos yet (need >= {Services.FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).");
+                return;
+            }
+            Console.WriteLine($"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people.");
+        }).GetAwaiter().GetResult();
     }
 
     private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)

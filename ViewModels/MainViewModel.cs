@@ -1190,141 +1190,18 @@ public class MainViewModel : INotifyPropertyChanged
     {
         if (_clipEmbedder is null) { StatusMessage = "CLIP face-matching model not available."; return; }
 
-        StatusMessage = "Computing face embeddings...";
         var pathById = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath);
-        var needingEmbedding = _faces.GetDetectedFacesWithoutEmbedding();
-        int embedded = 0;
-        // See ClassifyPhotosAsync for why bounded concurrency here is safe: ClipEmbeddingService
-        // serializes its own session.Run() calls internally, so only the CPU-bound
-        // preprocessing overlaps across threads.
-        using var embedSemaphore = new SemaphoreSlim(Environment.ProcessorCount);
-        var embedTasks = needingEmbedding.Select(async face =>
-        {
-            if (!pathById.TryGetValue(face.PhotoId, out string? path)) return;
-            await embedSemaphore.WaitAsync();
-            try
-            {
-                float[] embedding = await Task.Run(() =>
-                    _clipEmbedder.ComputeEmbedding(path, face.X, face.Y, face.Width, face.Height));
-                _faces.SetEmbedding(face.Id, ClipEmbeddingService.EmbeddingToBytes(embedding));
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = $"Embedding failed for face {face.Id}: {ex.Message}";
-            }
-            finally
-            {
-                embedSemaphore.Release();
-            }
+        var avatarTypeByPhotoId = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType);
+        var result = await FaceSuggestionService.RunAsync(
+            _faces, _clipEmbedder, pathById, avatarTypeByPhotoId, msg => StatusMessage = msg);
 
-            embedded++;
-            if (embedded % 25 == 0 || embedded == needingEmbedding.Count)
-            {
-                StatusMessage = $"Computing face embeddings... {embedded}/{needingEmbedding.Count}";
-            }
-        });
-        await Task.WhenAll(embedTasks);
-
-        StatusMessage = "Building reference centroids...";
-        var persons = _faces.GetAllPersons();
-        var centroids = new Dictionary<long, float[]>();
-        var confirmedPhotoIdsByPerson = new Dictionary<long, HashSet<long>>();
-        foreach (var person in persons)
-        {
-            var refs = _faces.GetReferenceEmbeddingsForPerson(person.Id)
-                .Select(ClipEmbeddingService.BytesToEmbedding).ToList();
-            if (person.VrcProfileThumbnail is byte[] thumb)
-            {
-                try { refs.Add(await Task.Run(() => _clipEmbedder.ComputeEmbeddingFromBytes(thumb))); }
-                catch { /* corrupt/unreadable thumbnail - skip it, may still have enough tag-derived refs */ }
-            }
-
-            var centroid = FaceMatcher.TryComputeCentroid(refs);
-            if (centroid is not null)
-            {
-                centroids[person.Id] = centroid;
-                confirmedPhotoIdsByPerson[person.Id] = _faces.GetTaggedPhotoIdsForPerson(person.Id);
-            }
-        }
-
-        if (centroids.Count == 0)
+        if (result.NoEligiblePeople)
         {
             StatusMessage = $"No registered person has enough reference photos yet (need >= {FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).";
             return;
         }
 
-        StatusMessage = "Matching faces against registered people...";
-        var avatarTypeByPhotoId = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType);
-        var toScore = _faces.GetFacesNeedingSuggestion();
-        int suggested = 0;
-        foreach (var face in toScore)
-        {
-            if (face.Embedding is null) continue;
-            float[] faceEmbedding = ClipEmbeddingService.BytesToEmbedding(face.Embedding);
-
-            var scored = centroids
-                .Select(kv => (PersonId: kv.Key, Similarity: FaceMatcher.CosineSimilarity(faceEmbedding, kv.Value)))
-                .OrderByDescending(s => s.Similarity)
-                .ToList();
-
-            var best = scored[0];
-            bool accept;
-            float confidence;
-            if (scored.Count == 1)
-            {
-                accept = best.Similarity >= FaceMatcher.SingleCandidateThreshold;
-                confidence = best.Similarity;
-            }
-            else
-            {
-                float margin = best.Similarity - scored[1].Similarity;
-                accept = margin >= FaceMatcher.DifferentialMarginThreshold;
-                confidence = margin;
-            }
-
-            if (!accept) continue;
-
-            // Avatar-affinity boost: does this photo's AvatarType appear anywhere in the best
-            // candidate's own confirmed photos? No confident AvatarType on this photo, or no overlap,
-            // means zero boost - never a penalty (see Global Constraints).
-            float avatarAffinityBoost = 0f;
-            if (avatarTypeByPhotoId.TryGetValue(face.PhotoId, out string? thisPhotoAvatarType)
-                && thisPhotoAvatarType is not null
-                && confirmedPhotoIdsByPerson.TryGetValue(best.PersonId, out var bestPersonPhotoIds)
-                && bestPersonPhotoIds.Any(pid => avatarTypeByPhotoId.TryGetValue(pid, out string? knownType) && knownType == thisPhotoAvatarType))
-            {
-                avatarAffinityBoost = FaceMatcher.AvatarAffinityBoost;
-            }
-
-            // Co-occurrence boost: exactly one other person already confirmed in this photo, zero
-            // other undetermined faces remaining, and that pair has been confirmed together enough
-            // times before to trust it as a real pattern rather than one coincidental photo.
-            float coOccurrenceBoost = 0f;
-            if (_faces.GetUndeterminedFaceCountInPhoto(face.PhotoId, face.Id) == 0)
-            {
-                var otherConfirmedPersonIds = _faces.GetConfirmedPersonIdsInPhoto(face.PhotoId, face.Id);
-                if (otherConfirmedPersonIds.Count == 1
-                    && confirmedPhotoIdsByPerson.TryGetValue(best.PersonId, out var bestIds)
-                    && confirmedPhotoIdsByPerson.TryGetValue(otherConfirmedPersonIds[0], out var otherIds)
-                    && bestIds.Intersect(otherIds).Count() >= FaceMatcher.MinCoOccurrenceCount)
-                {
-                    coOccurrenceBoost = FaceMatcher.CoOccurrenceBoost;
-                }
-            }
-
-            float combinedScore = confidence + avatarAffinityBoost + coOccurrenceBoost;
-            // AutoTagThreshold is calibrated against the margin scale (DifferentialMarginThreshold-based);
-            // a single-candidate raw similarity is a different scale entirely and would always exceed it,
-            // so single-candidate suggestions are capped at ConfirmPrompt regardless of score.
-            SuggestionTier tier = scored.Count > 1 ? FaceMatcher.DetermineTier(combinedScore) : SuggestionTier.ConfirmPrompt;
-            FaceLabelSource source = tier == SuggestionTier.AutoTagged ? FaceLabelSource.AutoTagged : FaceLabelSource.EmbeddingMatch;
-
-            _faces.UpsertFaceLabel(face.Id, best.PersonId, confirmed: false, source, combinedScore);
-            _faces.UpsertSuggestionLog(face.Id, best.PersonId, combinedScore, confidence, avatarAffinityBoost, coOccurrenceBoost, tier);
-            suggested++;
-        }
-
-        StatusMessage = $"Suggest Faces done: {embedded} embeddings computed, {suggested} new suggestions across {centroids.Count} eligible people.";
+        StatusMessage = $"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people.";
         RecordActionSuccess("SuggestFaces", nameof(SuggestFacesTooltip));
     }
 

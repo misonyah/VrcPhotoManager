@@ -242,12 +242,28 @@ public partial class TagFacesWindow : Window
 
     /// <summary>Escape closes the window outright - quicker than hunting for the X, and there's
     /// no other use for either gesture anywhere in this window (no context menus, no
-    /// cancelable multi-step flow) to conflict with.</summary>
+    /// cancelable multi-step flow) to conflict with. Delete, while the person picker is open,
+    /// is the same as clicking "Delete box" (see DeleteFaceButton_Click) - handled at the
+    /// window level (not on the popup's own content) because OpenPicker never moves keyboard
+    /// focus into the popup for the plain tagging flow, so a handler attached to the popup's
+    /// Border would simply never see the key. Skipped while NewPersonNameTextBox has focus
+    /// (typing a search/new name, renaming, or adding an alias) so Delete still does its normal
+    /// "remove the next character" job there instead of unexpectedly deleting the box
+    /// mid-edit.</summary>
     private void TagFacesWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Escape) return;
-        e.Handled = true;
-        Close();
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            Close();
+            return;
+        }
+
+        if (e.Key == Key.Delete && PersonPickerPopup.IsOpen && Keyboard.FocusedElement != NewPersonNameTextBox)
+        {
+            e.Handled = true;
+            DeleteFaceButton_Click(sender, e);
+        }
     }
 
     /// <summary>
