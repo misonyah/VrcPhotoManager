@@ -66,23 +66,90 @@ public static class FaceMatcher
     public static SuggestionTier DetermineTier(float combinedScore) =>
         combinedScore >= AutoTagThreshold ? SuggestionTier.AutoTagged : SuggestionTier.ConfirmPrompt;
 
+    /// <summary>Reference sets at or above this size get outlier-trimmed before centroiding
+    /// (see TrimOutliers) - below it, there's too little data to tell "noise" from "real
+    /// signal" (dropping even one of a 3-4-photo set is as likely to hurt as help), so small
+    /// sets are trusted as-is, same as before this trimming existed.</summary>
+    public const int MinReferencesForTrimming = 6;
+
+    /// <summary>How far below the mean similarity-to-centroid a reference embedding has to
+    /// fall (in standard deviations) to count as an outlier worth dropping. Calibrated against
+    /// a real, measured case: MisoNyah's 62 reference crops span 44 different VRChat worlds
+    /// versus Tomaae's 22 across just 10 (9 of them the same world), and CLIP has no
+    /// lighting-correction step (see ClipEmbeddingService.Preprocess), so a handful of oddly-lit
+    /// crops measurably smeared an otherwise-tight centroid (within-person similarity averaged
+    /// 0.799 for MisoNyah vs. 0.895 for Tomaae). 1.5 standard deviations is the conventional
+    /// mild-outlier cutoff - aggressive enough to catch the worst offenders, conservative enough
+    /// not to eat into a legitimately spread-out but real cluster.</summary>
+    public const float OutlierStdDevThreshold = 1.5f;
+
+    /// <summary>Never trims more than this fraction of a reference set, however far its worst
+    /// members fall below the mean - a safety cap so one unlucky calibration run can't gut a
+    /// person's entire reference pool.</summary>
+    public const float MaxTrimFraction = 0.3f;
+
     /// <summary>Null if there aren't enough references yet - caller should skip this person
     /// for suggestions this pass, not suggest off an unreliable centroid.</summary>
     public static float[]? TryComputeCentroid(List<float[]> referenceEmbeddings)
     {
         if (referenceEmbeddings.Count < MinReferenceEmbeddings) return null;
 
-        int dim = referenceEmbeddings[0].Length;
+        var kept = referenceEmbeddings.Count >= MinReferencesForTrimming
+            ? TrimOutliers(referenceEmbeddings)
+            : referenceEmbeddings;
+
+        return Normalize(Sum(kept));
+    }
+
+    /// <summary>Drops reference embeddings that sit unusually far from the rest of the set -
+    /// see OutlierStdDevThreshold/MaxTrimFraction. Two passes: a rough centroid built from
+    /// EVERY reference measures each embedding's own similarity to "the group"; only the
+    /// surviving subset feeds the real centroid TryComputeCentroid actually hands out.</summary>
+    private static List<float[]> TrimOutliers(List<float[]> referenceEmbeddings)
+    {
+        float[]? roughCentroid = Normalize(Sum(referenceEmbeddings));
+        if (roughCentroid is null) return referenceEmbeddings;
+
+        var ranked = referenceEmbeddings
+            .Select(e => (Embedding: e, Similarity: CosineSimilarity(e, roughCentroid)))
+            .OrderBy(x => x.Similarity)
+            .ToList();
+
+        float mean = ranked.Average(x => x.Similarity);
+        float variance = ranked.Sum(x => (x.Similarity - mean) * (x.Similarity - mean)) / ranked.Count;
+        float cutoff = mean - OutlierStdDevThreshold * MathF.Sqrt(variance);
+
+        int minKeep = Math.Max(MinReferenceEmbeddings,
+            referenceEmbeddings.Count - (int)(referenceEmbeddings.Count * MaxTrimFraction));
+
+        var kept = ranked.Where(x => x.Similarity >= cutoff).Select(x => x.Embedding).ToList();
+        // ranked is ascending by similarity, so the last minKeep entries are the best-fitting -
+        // used verbatim if the cutoff-based trim would have dropped more than MaxTrimFraction
+        // allows.
+        return kept.Count >= minKeep ? kept : ranked.TakeLast(minKeep).Select(x => x.Embedding).ToList();
+    }
+
+    private static float[] Sum(List<float[]> embeddings)
+    {
+        int dim = embeddings[0].Length;
         var sum = new float[dim];
-        foreach (var embedding in referenceEmbeddings)
+        foreach (var embedding in embeddings)
         {
             for (int i = 0; i < dim; i++) sum[i] += embedding[i];
         }
-
-        float norm = MathF.Sqrt(sum.Sum(v => v * v));
-        if (norm == 0) return null;
-        for (int i = 0; i < dim; i++) sum[i] /= norm;
         return sum;
+    }
+
+    /// <summary>Null if the input is a zero vector (e.g. embeddings that exactly cancel out) -
+    /// vanishingly unlikely for real data, but a 0/0 division would otherwise silently produce
+    /// a NaN-filled "centroid" that compares as similar to nothing.</summary>
+    private static float[]? Normalize(float[] vector)
+    {
+        float norm = MathF.Sqrt(vector.Sum(v => v * v));
+        if (norm == 0) return null;
+        var result = new float[vector.Length];
+        for (int i = 0; i < vector.Length; i++) result[i] = vector[i] / norm;
+        return result;
     }
 
     /// <summary>Both inputs are expected to already be L2-normalized (ClipEmbeddingService

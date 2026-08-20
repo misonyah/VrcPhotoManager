@@ -17,15 +17,22 @@
     <Version>1.0.1</Version>
     <!-- Velopack needs a custom Main() (App.xaml.cs) that calls VelopackApp.Build().Run()
          before anything else, so the SDK's own auto-generated WPF entry point (normally
-         produced from App.xaml's ApplicationDefinition build action) has to be turned off -
-         see the ItemGroup below that reclassifies App.xaml as a plain Page instead. -->
+         produced from App.xaml's ApplicationDefinition build action) has to be turned off.
+         EnableDefaultApplicationDefinition=false is the actual SDK-level switch for this - it
+         stops Microsoft.NET.Sdk.WindowsDesktop's default-item globbing from classifying
+         App.xaml as ApplicationDefinition in the first place, so it now falls through to the
+         SDK's normal default-Page-item globbing instead (no separate ItemGroup override
+         needed - an explicit `<Page Include="App.xaml" />` here would just collide with that
+         default inclusion, NETSDK1022). A previous attempt reclassified App.xaml via
+         `<ApplicationDefinition Remove="App.xaml" /><Page Include="App.xaml" />` instead - that
+         depends on evaluation-order luck between the SDK's own default-item injection and this
+         project's explicit items, and silently held for most of a session's incremental builds
+         before failing with CS0017 ("more than one entry point") on the first fully clean
+         build once the MSBuild build-server was restarted, exposing the race. This property is
+         the deterministic fix. -->
     <StartupObject>VrcPhotoManager.App</StartupObject>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ApplicationDefinition Remove="App.xaml" />
-    <Page Include="App.xaml" />
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
