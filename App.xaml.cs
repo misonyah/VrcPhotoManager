@@ -89,7 +89,23 @@ public partial class App : Application
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-face-detect")
         {
-            var detector = new Services.FaceDetectionService();
+            string dataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+            var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+            string? modelDir = repo.GetStringSetting(Services.SettingsKeys.FaceDetectionModelDir);
+            if (modelDir is null)
+            {
+                Console.WriteLine("Face detection model dir not configured (set it via Settings first).");
+                ExitProcess();
+                return;
+            }
+            var detector = Services.FaceDetectionService.TryCreate(modelDir, out string? detectorError);
+            if (detector is null)
+            {
+                Console.WriteLine($"Unavailable: {detectorError}");
+                ExitProcess();
+                return;
+            }
             var faces = detector.DetectFaces(e.Args[1]);
             Console.WriteLine($"Faces found: {faces.Count}");
             foreach (var f in faces)
@@ -180,6 +196,12 @@ public partial class App : Application
         if (e.Args.Length == 1 && e.Args[0] == "--run-suggest-faces")
         {
             RunSuggestFacesDiagnostic();
+            ExitProcess();
+        }
+
+        if (e.Args.Length == 1 && e.Args[0] == "--run-detect-faces")
+        {
+            RunDetectFacesDiagnostic();
             ExitProcess();
         }
 
@@ -342,6 +364,67 @@ public partial class App : Application
             Console.WriteLine($"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people"
                 + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : "."));
         }).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Headless equivalent of clicking "Detect Faces" in the running app - runs
+    /// against the real live database, same rationale as RunSuggestFacesDiagnostic. Deliberately
+    /// does NOT honor SettingsKeys.SkipResolvedPhotosOnFaceScan (unlike MainViewModel.
+    /// ScanFacesAsync's normal incremental behavior) - this exists specifically for the
+    /// "swapped in a better detector model" case that setting's own doc comment already
+    /// anticipates: a photo that was previously fully resolved under the OLD detector (every
+    /// detection tagged) can still have real, previously-missed faces the new detector would
+    /// find, so every photo needs a genuine full rescan here, not just the ones with something
+    /// still outstanding.</summary>
+    private static void RunDetectFacesDiagnostic()
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        string dbPath = Path.Combine(dataDir, "vrcdn_manager.db");
+        var photoRepo = new Data.PhotoRepository(dbPath);
+        var faceRepo = new Data.FaceRepository(dbPath);
+
+        string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.FaceDetectionModelDir);
+        if (modelDir is null)
+        {
+            Console.WriteLine("Face detection model dir not configured (set it via Settings first).");
+            return;
+        }
+        var detector = Services.FaceDetectionService.TryCreate(modelDir, out string? error);
+        if (detector is null)
+        {
+            Console.WriteLine($"Unavailable: {error}");
+            return;
+        }
+
+        var photos = photoRepo.GetAll();
+        Console.WriteLine($"Scanning {photos.Count} photos (full rescan, not just unresolved ones)...");
+
+        int processed = 0, totalExisting = 0, totalNew = 0, totalRemoved = 0;
+        foreach (var photo in photos)
+        {
+            try
+            {
+                var faces = detector.DetectFaces(photo.LocalPath);
+                var result = faceRepo.InsertDetectedFaces(photo.Id, faces);
+                photoRepo.SetFacesScanned(photo.Id);
+                totalExisting += result.Existing;
+                totalNew += result.New;
+                totalRemoved += result.Removed;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Face detection failed for {photo.FileName}: {ex.Message}");
+            }
+
+            processed++;
+            if (processed % 25 == 0 || processed == photos.Count)
+            {
+                Console.WriteLine($"Scanning for faces... {processed}/{photos.Count} photos, {totalNew} new, {totalExisting} existing so far");
+            }
+        }
+
+        Console.WriteLine($"Face scan complete: {totalNew} new faces, {totalExisting} existing across {photos.Count} photos"
+            + (totalRemoved > 0 ? $" ({totalRemoved} stale untagged boxes removed)." : "."));
     }
 
     private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)

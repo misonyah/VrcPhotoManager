@@ -51,6 +51,9 @@ public partial class SettingsWindow : Window
         string? savedCcipDir = _repo.GetStringSetting(SettingsKeys.CcipModelDir);
         CcipModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedCcipDir) ? DefaultModelPaths.Ccip : savedCcipDir;
 
+        string? savedFaceDetectionDir = _repo.GetStringSetting(SettingsKeys.FaceDetectionModelDir);
+        FaceDetectionModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedFaceDetectionDir) ? DefaultModelPaths.FaceDetection : savedFaceDetectionDir;
+
         string? savedAvatarDir = _repo.GetStringSetting(SettingsKeys.AvatarModelDir);
         AvatarModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedAvatarDir) ? DefaultModelPaths.Avatar : savedAvatarDir;
 
@@ -75,6 +78,7 @@ public partial class SettingsWindow : Window
 
         DownloadStatusText.Text = GetModelStatusText(ModelDirTextBox.Text, "model.onnx", "selected_tags.csv");
         DownloadCcipStatusText.Text = GetModelStatusText(CcipModelDirTextBox.Text, "model_feat.onnx", "model_metrics.onnx");
+        DownloadFaceDetectionStatusText.Text = GetModelStatusText(FaceDetectionModelDirTextBox.Text, "model.onnx");
         DownloadAvatarStatusText.Text = GetModelStatusText(AvatarModelDirTextBox.Text, "model.onnx", "labels.txt");
 
         CropPresetsList.ItemsSource = MainViewModel.UploadCropPresets.Select(DescribeCropPreset).ToList();
@@ -243,6 +247,65 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void BrowseFaceDetectionModelDir_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select face detection model folder" };
+        if (dialog.ShowDialog() == true)
+        {
+            FaceDetectionModelDirTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private async void DownloadFaceDetectionModel_Click(object sender, RoutedEventArgs e)
+    {
+        string targetDir = FaceDetectionModelDirTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(targetDir))
+        {
+            MessageBox.Show(this, "Enter or browse to a model folder first (it will be created if it doesn't exist).",
+                "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        DownloadFaceDetectionButton.IsEnabled = false;
+        _isDownloading = true;
+        _downloadCts = new CancellationTokenSource();
+        var progress = new Progress<string>(msg => DownloadFaceDetectionStatusText.Text = msg);
+        try
+        {
+            bool haveFile = File.Exists(Path.Combine(targetDir, "model.onnx"));
+            string? localEtag = _repo.GetStringSetting(SettingsKeys.FaceDetectionModelEtag);
+
+            DownloadFaceDetectionStatusText.Text = "Checking for updates...";
+            string? remoteEtag = await _downloader.GetRemoteFaceDetectionModelETagAsync(_downloadCts.Token);
+
+            if (haveFile && remoteEtag is not null && remoteEtag == localEtag)
+            {
+                DownloadFaceDetectionStatusText.Text = "Already up to date.";
+                return;
+            }
+
+            await _downloader.DownloadFaceDetectionModelAsync(targetDir, progress, _downloadCts.Token);
+            if (remoteEtag is not null)
+            {
+                _repo.SetStringSetting(SettingsKeys.FaceDetectionModelEtag, remoteEtag);
+            }
+            DownloadFaceDetectionStatusText.Text += " Restart VRC Photo Manager to use it.";
+        }
+        catch (OperationCanceledException)
+        {
+            DownloadFaceDetectionStatusText.Text = "Download cancelled.";
+        }
+        catch (Exception ex)
+        {
+            DownloadFaceDetectionStatusText.Text = $"Download failed: {ex.Message}";
+        }
+        finally
+        {
+            DownloadFaceDetectionButton.IsEnabled = true;
+            _isDownloading = false;
+        }
+    }
+
     private void BrowseAvatarModelDir_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "Select avatar classifier model folder" };
@@ -310,6 +373,7 @@ public partial class SettingsWindow : Window
         // configured" everywhere it's read, both here and in MainViewModel's resolvers).
         _repo.SetStringSetting(SettingsKeys.WdModelDir, ModelDirTextBox.Text.Trim());
         _repo.SetStringSetting(SettingsKeys.CcipModelDir, CcipModelDirTextBox.Text.Trim());
+        _repo.SetStringSetting(SettingsKeys.FaceDetectionModelDir, FaceDetectionModelDirTextBox.Text.Trim());
         _repo.SetStringSetting(SettingsKeys.AvatarModelDir, AvatarModelDirTextBox.Text.Trim());
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, HoverDelaySlider.Value);

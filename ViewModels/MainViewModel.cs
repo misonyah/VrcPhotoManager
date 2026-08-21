@@ -688,7 +688,9 @@ public class MainViewModel : INotifyPropertyChanged
 
         var (faceDetector, faceDetectorError) = await Task.Run(() =>
         {
-            var d = FaceDetectionService.TryCreate(out string? error);
+            string? modelDir = ResolveFaceDetectionModelDir();
+            if (modelDir is null) return (null, "Face detection model directory not configured (set it via Settings).");
+            var d = FaceDetectionService.TryCreate(modelDir, out string? error);
             return (d, error);
         });
         _faceDetector = faceDetector;
@@ -1323,6 +1325,13 @@ public class MainViewModel : INotifyPropertyChanged
         string? configured = _repo.GetStringSetting(SettingsKeys.CcipModelDir);
         if (configured is not null && Directory.Exists(configured)) return configured;
         return Directory.Exists(DefaultModelPaths.Ccip) ? DefaultModelPaths.Ccip : null;
+    }
+
+    private string? ResolveFaceDetectionModelDir()
+    {
+        string? configured = _repo.GetStringSetting(SettingsKeys.FaceDetectionModelDir);
+        if (configured is not null && Directory.Exists(configured)) return configured;
+        return Directory.Exists(DefaultModelPaths.FaceDetection) ? DefaultModelPaths.FaceDetection : null;
     }
 
     private string? ResolveAvatarModelDir()

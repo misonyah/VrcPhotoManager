@@ -21,6 +21,10 @@ public class ModelDownloadService
     /// calls - CCIP's distance is a learned metric, not a plain cosine/L2 formula, so this
     /// second model is required, not optional).</summary>
     private const string CcipModelRepoBaseUrl = "https://huggingface.co/deepghs/ccip_onnx/resolve/main/ccip-caformer-24-randaug-pruned";
+    /// <summary>deepghs/anime_face_detection's "face_detect_v1.4_s" variant - the repo's best
+    /// F1-scoring model (0.95, per its own threshold.json) confirmed by direct inspection.
+    /// YOLOv8s, single "face" class - see FaceDetectionService.cs's doc comment.</summary>
+    private const string FaceDetectionModelRepoBaseUrl = "https://huggingface.co/deepghs/anime_face_detection/resolve/main/face_detect_v1.4_s";
     private const string AvatarModelRepoBaseUrl = "https://huggingface.co/misonyah/vrc-avatar-classifier/resolve/main";
 
     public async Task DownloadWdTaggerModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
@@ -40,6 +44,13 @@ public class ModelDownloadService
         await DownloadFileAsync(http, $"{CcipModelRepoBaseUrl}/model_metrics.onnx", Path.Combine(targetDir, "model_metrics.onnx"), "model_metrics.onnx", progress, ct);
     }
 
+    public async Task DownloadFaceDetectionModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(targetDir);
+        using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        await DownloadFileAsync(http, $"{FaceDetectionModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
+    }
+
     public async Task DownloadAvatarModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
     {
         Directory.CreateDirectory(targetDir);
@@ -53,6 +64,9 @@ public class ModelDownloadService
 
     public Task<string?> GetRemoteCcipModelETagAsync(CancellationToken ct = default) =>
         GetRemoteETagAsync($"{CcipModelRepoBaseUrl}/model_feat.onnx", ct);
+
+    public Task<string?> GetRemoteFaceDetectionModelETagAsync(CancellationToken ct = default) =>
+        GetRemoteETagAsync($"{FaceDetectionModelRepoBaseUrl}/model.onnx", ct);
 
     public Task<string?> GetRemoteAvatarModelETagAsync(CancellationToken ct = default) =>
         GetRemoteETagAsync($"{AvatarModelRepoBaseUrl}/model.onnx", ct);

@@ -44,6 +44,24 @@
                 ToolTip="Download the CCIP model files into the folder above." />
         <TextBlock x:Name="DownloadCcipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
+        <TextBlock Text="Face Detection Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
+            Used by "Detect Faces". Model: deepghs/anime_face_detection, face_detect_v1.4_s
+            variant (Hugging Face, YOLOv8s) - noticeably better recall than the previously
+            bundled LBP cascade, especially on close-up multi-person photos.
+        </TextBlock>
+
+        <TextBlock Text="Model folder (model.onnx):" Margin="0,0,0,4" />
+        <DockPanel Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Content="Browse..." Padding="8,2" Margin="8,0,0,0" Click="BrowseFaceDetectionModelDir_Click" />
+            <TextBox x:Name="FaceDetectionModelDirTextBox" VerticalContentAlignment="Center" />
+        </DockPanel>
+
+        <Button x:Name="DownloadFaceDetectionButton" Content="Download Face Detection Model" HorizontalAlignment="Left"
+                Padding="8,4" Margin="0,0,0,8" Click="DownloadFaceDetectionModel_Click"
+                ToolTip="Download the face detection model (~45 MB) into the folder above." />
+        <TextBlock x:Name="DownloadFaceDetectionStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+
         <TextBlock Text="Avatar Type Classifier" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
             Used by "Classify Avatars". Model: misonyah/vrc-avatar-classifier (Hugging Face).

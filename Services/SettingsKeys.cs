@@ -13,9 +13,17 @@ public static class SettingsKeys
     /// setting, and every stored face embedding needs recomputing against the new model anyway
     /// (the two are NOT comparable - see Models.DetectedFace.Embedding's doc comment).</summary>
     public const string CcipModelDir = "ccip_model_dir";
+    /// <summary>deepghs/anime_face_detection's face_detect_v1.4_s (YOLOv8s, model.onnx) -
+    /// replaced the earlier bundled lbpcascade_animeface.xml asset after a real, measured
+    /// comparison (see FaceDetectionService.cs's doc comment): the LBP cascade missed 2 of 3
+    /// clearly-visible faces in a real close-up photo, and tuning its own parameters couldn't
+    /// fix it. Downloadable via Settings like the other ML models, rather than bundled with the
+    /// app - the old cascade was a ~1MB XML file, small enough to ship; this one is ~45MB.</summary>
+    public const string FaceDetectionModelDir = "face_detection_model_dir";
     public const string AvatarModelDir = "avatar_model_dir";
     public const string WdModelEtag = "wd14_model_etag";
     public const string CcipModelEtag = "ccip_model_etag";
+    public const string FaceDetectionModelEtag = "face_detection_model_etag";
     public const string AvatarModelEtag = "avatar_model_etag";
     public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
     public const string HoverPreviewDelaySeconds = "hover_preview_delay_seconds";

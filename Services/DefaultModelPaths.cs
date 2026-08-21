@@ -18,5 +18,6 @@ public static class DefaultModelPaths
 
     public static string WdTagger => Path.Combine(ModelsRoot, "WD14");
     public static string Ccip => Path.Combine(ModelsRoot, "CCIP");
+    public static string FaceDetection => Path.Combine(ModelsRoot, "FaceDetection");
     public static string Avatar => Path.Combine(ModelsRoot, "Avatar");
 }
