@@ -527,14 +527,17 @@ public partial class TagFacesWindow : Window
             }
             else if (suggested && _personsById.TryGetValue(label!.PersonId!.Value, out var suggestedPerson))
             {
-                personName = $"? {suggestedPerson.Name}";
+                // No "?" prefix - the orange box color already says "this is a suggestion, not
+                // confirmed" on its own; the number is FaceMatcher's own raw match score (NOT a
+                // percentage - same "F2 decimal" convention as MinSuggestionConfidenceLabel in
+                // MainWindow's filter bar), so a real user can gauge relative strength between
+                // suggestions without a misleading/inaccurate "% confidence" implication.
+                personName = $"{suggestedPerson.Name} ({label.Confidence:F2})";
                 boxColor = Brushes.Orange;
             }
             else if (autoTagged && _personsById.TryGetValue(label!.PersonId!.Value, out var autoTaggedPerson))
             {
-                // Plain name, no "?" prefix - unlike `suggested`, this is shown with confidence
-                // (not marked as a guess), even though Confirmed is still false underneath.
-                personName = autoTaggedPerson.Name;
+                personName = $"{autoTaggedPerson.Name} ({label.Confidence:F2})";
                 boxColor = Brushes.DeepSkyBlue;
             }
             else if (markedNotAFace)
@@ -889,7 +892,7 @@ public partial class TagFacesWindow : Window
             items.Add(new PickerItem($"Confirm: {autoTaggedPerson.Name}", autoTaggedPerson.VrcUserId, autoTaggedPerson.Id, IsConfirmAutoTag: true));
         }
 
-        items.Add(new PickerItem("<unknown> (wrongly detected face)", null, null, IsNotAFace: true));
+        items.Add(new PickerItem("<unknown> (clear tag)", null, null, IsNotAFace: true));
 
         foreach (var player in _photoPlayers)
         {
@@ -951,7 +954,12 @@ public partial class TagFacesWindow : Window
 
         if (item.IsNotAFace)
         {
-            _faces.UpsertFaceLabel(_activeFaceId, null, confirmed: true, FaceLabelSource.Manual);
+            // Clears back to untagged (yellow) rather than confirming a dedicated "gray -
+            // definitely not a face" state, per a real report: that gray dead-end wasn't useful
+            // and just meant an extra "Clear tag" click later to undo. Same effect as
+            // ClearTagButton_Click, just reachable here too (that button only shows once a face
+            // is already confirmed to a person - this list item is always present).
+            _faces.DeleteFaceLabel(_activeFaceId);
             _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.Ignored);
             LoadFaceData();
             RedrawBoxes();

@@ -82,7 +82,7 @@
                 <RadioButton x:Name="AvatarModeRadio" Content="Avatar" GroupName="TagMode"
                              ToolTip="Click-drag draws an avatar region (magenta); clicking a region tags which avatar it shows.&#10;Separate from face boxes - use this for group photos with more than one avatar in frame." />
             </StackPanel>
-            <TextBlock Text="Click a box to tag who/what it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, gray = &lt;unknown&gt;, magenta = avatar region. Click-drag empty space to add a missed face/region (per the Person/Avatar toggle). Scroll to zoom, middle-drag to pan."
+            <TextBlock Text="Click a box to tag who/what it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, magenta = avatar region. Click-drag empty space to add a missed face/region (per the Person/Avatar toggle). Scroll to zoom, middle-drag to pan."
                        Foreground="Gray" Margin="0,0,8,0" VerticalAlignment="Center" TextWrapping="Wrap" />
         </DockPanel>
 
