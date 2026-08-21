@@ -316,8 +316,20 @@ public class FaceRepository(string dbPath)
         }
     }
 
+    /// <summary>vrcUserId must be a real, non-empty VRC user id - never pass VRCX's own "" empty
+    /// sentinel for a player it couldn't resolve (see TagFacesWindow.NormalizeVrcUserId's doc
+    /// comment). A real, reproduced bug: passing "" through here made this method find (not
+    /// create) whichever OTHER unrelated unresolved person happened to be created first, since
+    /// EVERY unresolved player shares that same empty string - silently merging different real
+    /// people's face tags onto one shared "person" record. Throwing here catches any future
+    /// caller that reintroduces that mistake immediately, instead of corrupting data silently.</summary>
     public RegisteredPerson FindOrCreatePersonByVrcUserId(string vrcUserId, string displayName)
     {
+        if (string.IsNullOrEmpty(vrcUserId))
+        {
+            throw new ArgumentException("vrcUserId must be a real, non-empty VRC user id.", nameof(vrcUserId));
+        }
+
         using var context = NewContext();
         var existing = context.RegisteredPeople.FirstOrDefault(p => p.VrcUserId == vrcUserId);
         if (existing is not null) return existing;

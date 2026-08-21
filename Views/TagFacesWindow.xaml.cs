@@ -862,6 +862,19 @@ public partial class TagFacesWindow : Window
         RedrawBoxes();
     }
 
+    /// <summary>VRCX embeds `"id": ""` (empty string, not a missing/null field) for a player it
+    /// couldn't resolve a real user id for (common for hidden/private accounts) - see
+    /// PngMetadataReader.VrcxPhotoAuthor, whose Id is `required string`, so PhotoPlayer.UserId
+    /// carries that empty string through verbatim rather than null. A real, reproduced bug: every
+    /// unresolved player in the SAME photo shares that identical empty string, so treating it as
+    /// a normal VrcUserId made FindOrCreatePersonByVrcUserId find-or-merge unrelated people who
+    /// each just happened to be unresolved (tagging "PersonA (in this instance, per VRCX)" could
+    /// silently reuse whichever OTHER unresolved person was tagged first, anywhere, ever), and
+    /// separately made PickerItem.AlreadyConfirmedInPhoto bold every unresolved player's name the
+    /// moment any ONE of them got confirmed. Every PickerItem built from a PhotoPlayer/
+    /// GamelogInferredPlayer must route its UserId through this first.</summary>
+    private static string? NormalizeVrcUserId(string userId) => string.IsNullOrEmpty(userId) ? null : userId;
+
     private void OpenPicker(long detectedFaceId, Rectangle box)
     {
         _activeFaceId = detectedFaceId;
@@ -896,26 +909,29 @@ public partial class TagFacesWindow : Window
 
         foreach (var player in _photoPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", player.UserId, null, RawName: player.DisplayName));
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", NormalizeVrcUserId(player.UserId), null, RawName: player.DisplayName));
         }
         // Gamelog-inferred fallback (GamelogCorrelationService) - only ever populated when
         // _photoPlayers is empty, so there's no overlap/duplication risk between the two loops.
         foreach (var player in _gamelogPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", player.UserId, null, RawName: player.DisplayName));
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", NormalizeVrcUserId(player.UserId), null, RawName: player.DisplayName));
         }
         // Recently-tagged shortlist, not every registered person ever created - that list only
         // grows and became unusable (type-to-search below covers the rest; see
         // NewPersonNameTextBox_TextChanged). Capped at 10 by GetRecentlyTaggedPersons.
         foreach (var person in _faces.GetRecentlyTaggedPersons())
         {
-            // person.VrcUserId is null for a manually-created person (no linked VRC account) -
-            // and so is PhotoPlayer.UserId for a player VRCX couldn't resolve an id for (common
-            // for hidden/private users). Comparing those two nulls as if they were the same
-            // "already listed above" match silently hid EVERY manual person whenever the photo
-            // had any unresolved player - confirmed live: this created two separate "Lumiichu"
-            // person records because the first was invisible when the second was typed. Only
-            // treat it as a real duplicate when both sides have an actual, non-null id.
+            // person.VrcUserId is null for a manually-created person (no linked VRC account).
+            // PhotoPlayer.UserId for an unresolved player is "" (VRCX's own sentinel, not null -
+            // see NormalizeVrcUserId), so `p.UserId == person.VrcUserId` naturally stays false
+            // whenever person.VrcUserId is null - "" never equals null in C#. An earlier version
+            // of this guard assumed both sides went null and compared them as if that were the
+            // same "already listed above" match, which silently hid EVERY manual person whenever
+            // the photo had any unresolved player - confirmed live: this created two separate
+            // "Lumiichu" person records because the first was invisible when the second was
+            // typed. The explicit `is not null` below is what actually prevents that, regardless
+            // of which sentinel PhotoPlayer.UserId turns out to use.
             if (person.VrcUserId is not null && (_photoPlayers.Any(p => p.UserId == person.VrcUserId)
                 || _gamelogPlayers.Any(p => p.UserId == person.VrcUserId))) continue;
             items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id));
