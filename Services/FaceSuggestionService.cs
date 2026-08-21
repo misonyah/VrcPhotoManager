@@ -20,12 +20,14 @@ public readonly record struct SuggestFacesResult(int Embedded, int Suggested, in
 public static class FaceSuggestionService
 {
     /// <summary>
-    /// Embeds every not-yet-embedded detected face, builds a reference centroid per registered
-    /// person (confirmed-tag embeddings + VRC profile thumbnail), then scores every
-    /// still-undetermined face against those centroids and records suggestions that clear
-    /// FaceMatcher's acceptance bar. See FaceMatcher.cs for the scoring design (differential
-    /// margin over the runner-up, not a raw similarity) and MainViewModel's former inline
-    /// version (before this extraction) for the original call site.
+    /// Embeds every not-yet-embedded detected face, builds a (possibly outlier-trimmed)
+    /// reference set per registered person (confirmed-tag embeddings + VRC profile thumbnail),
+    /// then scores every still-undetermined face against every reference of every eligible
+    /// person - taking each person's single best (nearest-neighbor) match - and records
+    /// suggestions that clear FaceMatcher's acceptance bar. See FaceMatcher.cs for the scoring
+    /// design (differential margin over the runner-up, not a raw similarity, and why
+    /// nearest-neighbor replaced an earlier centroid-averaging design) and MainViewModel's
+    /// former inline version (before this extraction) for the original call site.
     /// </summary>
     public static async Task<SuggestFacesResult> RunAsync(
         FaceRepository faces,
@@ -68,9 +70,9 @@ public static class FaceSuggestionService
         });
         await Task.WhenAll(embedTasks);
 
-        progress?.Invoke("Building reference centroids...");
+        progress?.Invoke("Building reference sets...");
         var persons = faces.GetAllPersons();
-        var centroids = new Dictionary<long, float[]>();
+        var personRefs = new Dictionary<long, List<float[]>>();
         var confirmedPhotoIdsByPerson = new Dictionary<long, HashSet<long>>();
         foreach (var person in persons)
         {
@@ -82,23 +84,53 @@ public static class FaceSuggestionService
                 catch { /* corrupt/unreadable thumbnail - skip it, may still have enough tag-derived refs */ }
             }
 
-            var centroid = FaceMatcher.TryComputeCentroid(refs);
-            if (centroid is not null)
+            var trimmed = FaceMatcher.GetTrimmedReferences(refs);
+            if (trimmed is not null)
             {
-                centroids[person.Id] = centroid;
+                // Nearest-neighbor (each reference scored individually - see
+                // GetTrimmedReferences' doc comment) only once TrimOutliers has actually run and
+                // filtered the set; below that, fall back to one averaged centroid, which is
+                // safer for a small, unfiltered reference set (see ComputeCentroid's doc
+                // comment for the real case - Sayakiss, 4 references - this fixed).
+                if (trimmed.Count >= FaceMatcher.MinReferencesForTrimming)
+                {
+                    personRefs[person.Id] = trimmed;
+                }
+                else if (FaceMatcher.ComputeCentroid(trimmed) is float[] centroid)
+                {
+                    personRefs[person.Id] = [centroid];
+                }
+                else
+                {
+                    continue; // zero-vector edge case - skip this person this pass
+                }
                 confirmedPhotoIdsByPerson[person.Id] = faces.GetTaggedPhotoIdsForPerson(person.Id);
             }
         }
 
-        if (centroids.Count == 0)
+        if (personRefs.Count == 0)
         {
             return new SuggestFacesResult(embedded, 0, 0);
         }
 
         progress?.Invoke("Matching faces against registered people...");
-        // Fixed ordering so ComputeMatchScores' returned array lines up with personIds by index.
-        var personIds = centroids.Keys.ToList();
-        var centroidList = personIds.Select(id => centroids[id]).ToList();
+        var personIds = personRefs.Keys.ToList();
+        // Flatten every eligible person's entries into one batch, tracking which person owns
+        // each by parallel index - personRefs[id] is either that person's individual trimmed
+        // references (nearest-neighbor path) or a single averaged centroid (small-reference-set
+        // fallback - see the personRefs-building loop above), so this uniformly handles both:
+        // a person's final score is always the max over their own entries (below), which is a
+        // no-op "max of one" for the centroid case.
+        var flatRefs = new List<float[]>();
+        var flatRefOwner = new List<long>();
+        foreach (long personId in personIds)
+        {
+            foreach (var reference in personRefs[personId])
+            {
+                flatRefs.Add(reference);
+                flatRefOwner.Add(personId);
+            }
+        }
 
         var toScore = faces.GetFacesNeedingSuggestion().Where(f => f.Embedding is not null).ToList();
 
@@ -111,11 +143,21 @@ public static class FaceSuggestionService
         {
             float[] faceEmbedding = CcipEmbeddingService.BytesToEmbedding(face.Embedding!);
             // One CCIP metric-model call per face, scored against every eligible person's
-            // centroid at once - see ComputeMatchScores' doc comment for why this must be
-            // batched rather than one call per candidate.
-            float[] scores = await Task.Run(() => ccipEmbedder.ComputeMatchScores(faceEmbedding, centroidList));
-            scoredByFace[face.Id] = personIds
-                .Zip(scores, (personId, score) => (PersonId: personId, Score: score))
+            // individual references at once - see ComputeMatchScores' doc comment for why this
+            // must be batched rather than one call per reference.
+            float[] refScores = await Task.Run(() => ccipEmbedder.ComputeMatchScores(faceEmbedding, flatRefs));
+
+            var bestPerPerson = new Dictionary<long, float>();
+            for (int i = 0; i < refScores.Length; i++)
+            {
+                long personId = flatRefOwner[i];
+                if (!bestPerPerson.TryGetValue(personId, out float existing) || refScores[i] > existing)
+                {
+                    bestPerPerson[personId] = refScores[i];
+                }
+            }
+            scoredByFace[face.Id] = bestPerPerson
+                .Select(kv => (PersonId: kv.Key, Score: kv.Value))
                 .OrderByDescending(s => s.Score)
                 .ToList();
         }
@@ -247,6 +289,6 @@ public static class FaceSuggestionService
             }
         }
 
-        return new SuggestFacesResult(embedded, suggested, centroids.Count, eliminationsApplied);
+        return new SuggestFacesResult(embedded, suggested, personRefs.Count, eliminationsApplied);
     }
 }

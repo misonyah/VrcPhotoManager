@@ -19,8 +19,10 @@ namespace VrcPhotoManager.Services;
 /// matter how many of her reference photos were embedded. CCIP (deepghs/ccip_onnx, contrastively
 /// trained specifically to tell anime characters apart) separated the same two people with only
 /// 2.7% cross-confusion, and a leave-one-out validation (holding out each reference photo,
-/// matching it against a centroid of the rest) correctly matched her 91.9% of the time versus
-/// CLIP's 0%.
+/// matching it against the rest) correctly matched her 91.9% of the time under a single
+/// averaged centroid versus CLIP's 0% - and 100% under nearest-neighbor scoring (best match
+/// against each individual reference - see GetTrimmedReferences), which is what this app
+/// actually uses now.
 /// </summary>
 public static class FaceMatcher
 {
@@ -102,18 +104,38 @@ public static class FaceMatcher
     /// person's entire reference pool.</summary>
     public const float MaxTrimFraction = 0.3f;
 
-    /// <summary>Null if there aren't enough references yet - caller should skip this person
-    /// for suggestions this pass, not suggest off an unreliable centroid.</summary>
-    public static float[]? TryComputeCentroid(List<float[]> referenceEmbeddings)
+    /// <summary>Null if there aren't enough references yet - caller should skip this person for
+    /// suggestions this pass. Returns each (possibly outlier-trimmed - see TrimOutliers)
+    /// reference embedding INDIVIDUALLY, not collapsed into one averaged centroid -
+    /// FaceSuggestionService scores a candidate face against every one of a person's references
+    /// and takes their single best (nearest-neighbor) match, rather than matching against one
+    /// averaged point. Replaced the earlier centroid-averaging design (sum-then-normalize) after
+    /// a leave-one-out validation found nearest-neighbor measurably more accurate for a person
+    /// with a large, somewhat diverse reference set: 100% vs. 91.9% correctly matched for
+    /// MisoNyah's 62-photo set (now 96) - averaging many references into one vector blurs real,
+    /// valid variation (different poses/lighting/framing/avatars) that comparing against each
+    /// reference individually doesn't lose.</summary>
+    public static List<float[]>? GetTrimmedReferences(List<float[]> referenceEmbeddings)
     {
         if (referenceEmbeddings.Count < MinReferenceEmbeddings) return null;
 
-        var kept = referenceEmbeddings.Count >= MinReferencesForTrimming
+        return referenceEmbeddings.Count >= MinReferencesForTrimming
             ? TrimOutliers(referenceEmbeddings)
             : referenceEmbeddings;
-
-        return Normalize(Sum(kept));
     }
+
+    /// <summary>Averages a set of reference embeddings into one point - FaceSuggestionService's
+    /// fallback for a person whose reference set is too small for TrimOutliers to have run
+    /// (below MinReferencesForTrimming), where nearest-neighbor scoring is actually WORSE than
+    /// centroid-averaging: a real, measured case (Sayakiss, 4 untrimmed references, mutual
+    /// similarity only 0.23-0.60 versus 0.78+ for people with large trimmed sets) - nearest-
+    /// neighbor let each individually-unreliable reference cast its own wide net, matching 165
+    /// unrelated faces in one run versus 1 under centroid-averaging. Averaging is the safer
+    /// default until there's enough data for trimming to have actually filtered anything.
+    /// Null only if the input is empty or its embeddings exactly cancel out (vanishingly
+    /// unlikely for real data).</summary>
+    public static float[]? ComputeCentroid(List<float[]> embeddings) =>
+        embeddings.Count == 0 ? null : Normalize(Sum(embeddings));
 
     /// <summary>Drops reference embeddings that sit unusually far from the rest of the set -
     /// see OutlierStdDevThreshold/MaxTrimFraction. Two passes: a rough centroid built from

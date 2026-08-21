@@ -15,10 +15,10 @@ namespace VrcPhotoManager.Services;
 /// photos with only 2.7% cross-person confusion, versus CLIP's suggestions topping out at a
 /// 0.094 best-candidate margin for one person (MisoNyah, 62 reference photos) against a 0.15
 /// acceptance floor - i.e. CLIP never once suggested her at all. A leave-one-out validation
-/// (holding out each of a person's reference photos and matching it against a centroid built
-/// from the rest) confirmed the existing centroid-averaging design (FaceMatcher.TryComputeCentroid)
-/// transfers cleanly to CCIP's embedding space (91.9%-100% correctly matched, per person) rather
-/// than needing a nearest-neighbor redesign.
+/// (holding out each of a person's reference photos and matching it against the rest) found
+/// 91.9% correctly matched under a single averaged centroid versus 100% under
+/// nearest-neighbor scoring (best match against each individual reference) - see
+/// FaceMatcher.GetTrimmedReferences, which is what FaceSuggestionService actually uses.
 ///
 /// Unlike CLIP's plain cosine similarity, CCIP's actual "how similar are these two images"
 /// comparison is a SEPARATE learned model (model_metrics.onnx, loaded here alongside the
@@ -121,11 +121,11 @@ public class CcipEmbeddingService
             embedding = results.First().AsEnumerable<float>().ToArray();
         }
 
-        // L2-normalize so TryComputeCentroid's sum-and-normalize centroiding (shared with the
-        // old CLIP path) behaves the same way here - CCIP's own metric model tolerates
-        // unnormalized input fine (confirmed empirically), but every stored embedding in this
-        // app is expected to already be unit-length (see FaceMatcher.CosineSimilarity... now
-        // ComputeMatchScores's own doc comment) and centroiding specifically needs it.
+        // L2-normalize so FaceMatcher.TrimOutliers' own rough-centroid outlier-detection heuristic
+        // (still used to filter a person's reference set even without a final centroid) behaves
+        // consistently - CCIP's own metric model tolerates unnormalized input fine (confirmed
+        // empirically), but every stored embedding in this app is expected to already be
+        // unit-length (see FaceMatcher.CosineSimilarity's doc comment).
         float norm = MathF.Sqrt(embedding.Sum(v => v * v));
         for (int i = 0; i < embedding.Length; i++) embedding[i] /= norm;
         return embedding;
