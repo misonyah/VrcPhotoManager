@@ -336,14 +336,15 @@
                       ToolTip="Filter by how many people VRCX recorded in the instance when the photo was taken.&#10;This is VRCX's headcount, not the number of detected faces." />
 
             <TextBlock Text="Confidence:" VerticalAlignment="Center" Margin="0,0,4,0"
-                       ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most good matches fall between about 0.15 and 0.5, so the slider is scaled to that range." />
+                       ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most matches fall between about 0.10 and 0.22, so the slider is scaled to that range." />
             <!-- Real stored confidence values are NOT 0-1: for the common case (2+ registered
-                 people), it's the similarity margin over the runner-up candidate, which only
-                 ever gets stored above its 0.15 acceptance floor and rarely exceeds ~0.5 even
-                 for a clean match (see FaceMatcher.DifferentialMarginThreshold). A 0-1 slider
-                 made almost its entire range show zero results. -->
-            <Slider Minimum="0" Maximum="0.5" Value="{Binding MinSuggestionConfidence}" Width="120" VerticalAlignment="Center"
-                    ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most good matches fall between about 0.15 and 0.5, so the slider is scaled to that range." />
+                 people), it's CCIP's own match score margin over the runner-up candidate, which
+                 only ever gets stored above its 0.10 acceptance floor (FaceMatcher.
+                 DifferentialMarginThreshold) and rarely exceeds ~0.22 even for a clean match -
+                 0.20 is already the AutoTagThreshold bar. A 0-1 (or the old CLIP-era 0-0.5)
+                 slider made almost its entire range show zero results. -->
+            <Slider Minimum="0" Maximum="0.25" Value="{Binding MinSuggestionConfidence}" Width="120" VerticalAlignment="Center"
+                    ToolTip="Hide face-match suggestions below this confidence.&#10;All the way left = off (show everything).&#10;This isn't a percentage - most matches fall between about 0.10 and 0.22, so the slider is scaled to that range." />
             <TextBlock Text="{Binding MinSuggestionConfidenceLabel}" VerticalAlignment="Center" Width="32" Margin="4,0,16,0" />
         </StackPanel>
 
