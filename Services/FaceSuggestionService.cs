@@ -29,7 +29,7 @@ public static class FaceSuggestionService
     /// </summary>
     public static async Task<SuggestFacesResult> RunAsync(
         FaceRepository faces,
-        ClipEmbeddingService clipEmbedder,
+        CcipEmbeddingService ccipEmbedder,
         IReadOnlyDictionary<long, string> pathByPhotoId,
         IReadOnlyDictionary<long, string?> avatarTypeByPhotoId,
         Action<string>? progress = null)
@@ -38,7 +38,7 @@ public static class FaceSuggestionService
         var needingEmbedding = faces.GetDetectedFacesWithoutEmbedding();
         int embedded = 0;
         // See MainViewModel.ClassifyPhotosAsync for why bounded concurrency here is safe:
-        // ClipEmbeddingService serializes its own session.Run() calls internally, so only the
+        // CcipEmbeddingService serializes its own session.Run() calls internally, so only the
         // CPU-bound preprocessing overlaps across threads.
         using var embedSemaphore = new SemaphoreSlim(Environment.ProcessorCount);
         var embedTasks = needingEmbedding.Select(async face =>
@@ -48,8 +48,8 @@ public static class FaceSuggestionService
             try
             {
                 float[] embedding = await Task.Run(() =>
-                    clipEmbedder.ComputeEmbedding(path, face.X, face.Y, face.Width, face.Height));
-                faces.SetEmbedding(face.Id, ClipEmbeddingService.EmbeddingToBytes(embedding));
+                    ccipEmbedder.ComputeEmbedding(path, face.X, face.Y, face.Width, face.Height));
+                faces.SetEmbedding(face.Id, CcipEmbeddingService.EmbeddingToBytes(embedding));
             }
             catch (Exception ex)
             {
@@ -75,10 +75,10 @@ public static class FaceSuggestionService
         foreach (var person in persons)
         {
             var refs = faces.GetReferenceEmbeddingsForPerson(person.Id)
-                .Select(ClipEmbeddingService.BytesToEmbedding).ToList();
+                .Select(CcipEmbeddingService.BytesToEmbedding).ToList();
             if (person.VrcProfileThumbnail is byte[] thumb)
             {
-                try { refs.Add(await Task.Run(() => clipEmbedder.ComputeEmbeddingFromBytes(thumb))); }
+                try { refs.Add(await Task.Run(() => ccipEmbedder.ComputeEmbeddingFromBytes(thumb))); }
                 catch { /* corrupt/unreadable thumbnail - skip it, may still have enough tag-derived refs */ }
             }
 
@@ -96,16 +96,24 @@ public static class FaceSuggestionService
         }
 
         progress?.Invoke("Matching faces against registered people...");
+        // Fixed ordering so ComputeMatchScores' returned array lines up with personIds by index.
+        var personIds = centroids.Keys.ToList();
+        var centroidList = personIds.Select(id => centroids[id]).ToList();
+
         var toScore = faces.GetFacesNeedingSuggestion();
         int suggested = 0;
         foreach (var face in toScore)
         {
             if (face.Embedding is null) continue;
-            float[] faceEmbedding = ClipEmbeddingService.BytesToEmbedding(face.Embedding);
+            float[] faceEmbedding = CcipEmbeddingService.BytesToEmbedding(face.Embedding);
 
-            var scored = centroids
-                .Select(kv => (PersonId: kv.Key, Similarity: FaceMatcher.CosineSimilarity(faceEmbedding, kv.Value)))
-                .OrderByDescending(s => s.Similarity)
+            // One CCIP metric-model call per face, scored against every eligible person's
+            // centroid at once - see ComputeMatchScores' doc comment for why this must be
+            // batched rather than one call per candidate.
+            float[] scores = await Task.Run(() => ccipEmbedder.ComputeMatchScores(faceEmbedding, centroidList));
+            var scored = personIds
+                .Zip(scores, (personId, score) => (PersonId: personId, Score: score))
+                .OrderByDescending(s => s.Score)
                 .ToList();
 
             var best = scored[0];
@@ -113,12 +121,12 @@ public static class FaceSuggestionService
             float confidence;
             if (scored.Count == 1)
             {
-                accept = best.Similarity >= FaceMatcher.SingleCandidateThreshold;
-                confidence = best.Similarity;
+                accept = best.Score >= FaceMatcher.SingleCandidateThreshold;
+                confidence = best.Score;
             }
             else
             {
-                float margin = best.Similarity - scored[1].Similarity;
+                float margin = best.Score - scored[1].Score;
                 accept = margin >= FaceMatcher.DifferentialMarginThreshold;
                 confidence = margin;
             }
@@ -155,8 +163,11 @@ public static class FaceSuggestionService
 
             float combinedScore = confidence + avatarAffinityBoost + coOccurrenceBoost;
             // AutoTagThreshold is calibrated against the margin scale (DifferentialMarginThreshold-based);
-            // a single-candidate raw similarity is a different scale entirely and would always exceed it,
-            // so single-candidate suggestions are capped at ConfirmPrompt regardless of score.
+            // a single-candidate raw match score (SingleCandidateThreshold, CCIP's own -0.178475
+            // same-character cutoff) is a fundamentally different signal - "clears the model's own
+            // same-character bar" isn't the same claim as "clearly beats every other registered
+            // person" - so single-candidate suggestions are capped at ConfirmPrompt regardless of
+            // score, not just numerically incapable of reaching AutoTagThreshold.
             Models.SuggestionTier tier = scored.Count > 1 ? FaceMatcher.DetermineTier(combinedScore) : Models.SuggestionTier.ConfirmPrompt;
             Models.FaceLabelSource source = tier == Models.SuggestionTier.AutoTagged ? Models.FaceLabelSource.AutoTagged : Models.FaceLabelSource.EmbeddingMatch;
 

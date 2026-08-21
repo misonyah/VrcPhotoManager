@@ -17,6 +17,6 @@ public static class DefaultModelPaths
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcPhotoManager", "Models");
 
     public static string WdTagger => Path.Combine(ModelsRoot, "WD14");
-    public static string Clip => Path.Combine(ModelsRoot, "CLIP");
+    public static string Ccip => Path.Combine(ModelsRoot, "CCIP");
     public static string Avatar => Path.Combine(ModelsRoot, "Avatar");
 }

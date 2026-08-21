@@ -29,6 +29,22 @@ public partial class App : Application
         app.Run();
     }
 
+    /// <summary>Every diagnostic --test-*/--run-* branch below calls this instead of the more
+    /// obvious `Shutdown(); return;` - a real, reproduced hang proved that pairing insufficient:
+    /// Shutdown() called this early (synchronously inside OnStartup, before Application.Run()'s
+    /// Dispatcher has actually started pumping messages) does not reliably fire OnExit at all
+    /// when ShutdownMode is still its OnLastWindowClose default and no window was ever shown -
+    /// the app just proceeds into Run()'s message loop anyway, now idling forever with nothing
+    /// left to close it. Confirmed live: a diagnostic that loads a CcipEmbeddingService (ONNX
+    /// Runtime + DirectML, which spins up its own non-background worker threads - a live
+    /// foreground thread alone would keep the process alive even past a normal Main() return)
+    /// sat at ~3GB RSS for 10+ minutes after printing its own "done" output, still holding the
+    /// single-instance mutex the whole time - exactly the mechanism that would make the real app
+    /// report "already running" for no visible reason. Environment.Exit sidesteps the entire WPF
+    /// shutdown-timing question by terminating the process immediately and unconditionally,
+    /// regardless of Dispatcher state or any other thread still running.</summary>
+    private static void ExitProcess() => Environment.Exit(0);
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -39,15 +55,13 @@ public partial class App : Application
             MessageBox.Show(
                 "VRC Photo Manager is already running (or a diagnostic command is using its database) - only one instance can run at a time to avoid database lock conflicts.",
                 "VRC Photo Manager", MessageBoxButton.OK, MessageBoxImage.Information);
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-classify")
         {
             RunClassifierSmokeTest(e.Args[1]);
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-crop-print")
@@ -59,8 +73,7 @@ public partial class App : Application
                 string newPath = Services.CropPrintService.CropAndSave(e.Args[1]);
                 Console.WriteLine($"Saved: {newPath}");
             }
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-metadata")
@@ -71,8 +84,7 @@ public partial class App : Application
                 : $"Author: {meta.Author?.DisplayName} ({meta.Author?.Id})\n" +
                   $"World: {meta.World?.Name} ({meta.World?.Id})\n" +
                   $"Players: {string.Join(", ", meta.Players?.Select(p => p.DisplayName) ?? [])}");
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-face-detect")
@@ -84,8 +96,7 @@ public partial class App : Application
             {
                 Console.WriteLine($"  ({f.X}, {f.Y}) {f.Width}x{f.Height}");
             }
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         // Unhandled exceptions on the UI thread (e.g. from an async void command handler)
@@ -112,22 +123,19 @@ public partial class App : Application
             var window = new Views.LoginWindow();
             bool? result = window.ShowDialog();
             Console.WriteLine($"Login result: {result}, cookie: {window.SessionCookie}");
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 1 && e.Args[0] == "--test-vrcdn-sync")
         {
             RunVrcdnSyncDiagnostic();
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-remove-object")
         {
             RunRemoveObjectDiagnostic(e.Args[1]);
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 3 && e.Args[0] == "--debug-tag-faces")
@@ -142,43 +150,37 @@ public partial class App : Application
             var photo = photos.GetAll().First(p => p.Id == photoId);
             var lookup = Services.VrcxProfileLookupService.TryCreate(out _);
             new Views.TagFacesWindow(faces, photos, avatarRegions, null, lookup, photo).ShowDialog();
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 3 && e.Args[0] == "--test-face-repo")
         {
             RunFaceRepoDiagnostic(e.Args[1], long.Parse(e.Args[2]));
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         if (e.Args.Length == 2 && e.Args[0] == "--test-vrcx-profile-lookup")
         {
             RunVrcxProfileLookupDiagnostic(e.Args[1]);
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
-        if (e.Args.Length == 2 && e.Args[0] == "--test-clip-embed")
+        if (e.Args.Length == 2 && e.Args[0] == "--test-ccip-embed")
         {
-            RunClipEmbedDiagnostic(e.Args[1]);
-            Shutdown();
-            return;
+            RunCcipEmbedDiagnostic(e.Args[1]);
+            ExitProcess();
         }
 
-        if (e.Args.Length == 3 && e.Args[0] == "--test-clip-similarity")
+        if (e.Args.Length == 3 && e.Args[0] == "--test-ccip-similarity")
         {
-            RunClipSimilarityDiagnostic(e.Args[1], e.Args[2]);
-            Shutdown();
-            return;
+            RunCcipSimilarityDiagnostic(e.Args[1], e.Args[2]);
+            ExitProcess();
         }
 
         if (e.Args.Length == 1 && e.Args[0] == "--run-suggest-faces")
         {
             RunSuggestFacesDiagnostic();
-            Shutdown();
-            return;
+            ExitProcess();
         }
 
         // Only reached by a real app launch (every diagnostic branch above returns early).
@@ -214,42 +216,48 @@ public partial class App : Application
         }
     }
 
-    private static void RunClipSimilarityDiagnostic(string dir1, string dir2)
+    /// <summary>Uses CcipEmbeddingService.ComputeMatchScores (the real learned metric model,
+    /// see its doc comment) rather than plain cosine similarity - a diagnostic built on cosine
+    /// similarity would be measuring something CCIP's own accept/reject logic never actually
+    /// uses, silently misrepresenting real suggestion quality.</summary>
+    private static void RunCcipSimilarityDiagnostic(string dir1, string dir2)
     {
         string dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
         var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
-        string? modelDir = repo.GetStringSetting(Services.SettingsKeys.ClipModelDir);
-        if (modelDir is null) { Console.WriteLine("CLIP model dir not configured."); return; }
-        var clip = Services.ClipEmbeddingService.TryCreate(modelDir, out string? error);
-        if (clip is null) { Console.WriteLine($"Unavailable: {error}"); return; }
+        string? modelDir = repo.GetStringSetting(Services.SettingsKeys.CcipModelDir);
+        if (modelDir is null) { Console.WriteLine("CCIP model dir not configured."); return; }
+        var ccip = Services.CcipEmbeddingService.TryCreate(modelDir, out string? error);
+        if (ccip is null) { Console.WriteLine($"Unavailable: {error}"); return; }
 
         string[] imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
         var files1 = Directory.GetFiles(dir1).Where(f => imageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
         var files2 = Directory.GetFiles(dir2).Where(f => imageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
         Console.WriteLine($"dir1: {files1.Count} images, dir2: {files2.Count} images");
 
-        var embeddings1 = files1.Select(f => clip.ComputeEmbeddingFromBytes(File.ReadAllBytes(f))).ToList();
-        var embeddings2 = files2.Select(f => clip.ComputeEmbeddingFromBytes(File.ReadAllBytes(f))).ToList();
+        var embeddings1 = files1.Select(f => ccip.ComputeEmbeddingFromBytes(File.ReadAllBytes(f))).ToList();
+        var embeddings2 = files2.Select(f => ccip.ComputeEmbeddingFromBytes(File.ReadAllBytes(f))).ToList();
 
-        var within1 = PairwiseSimilarities(embeddings1);
-        var within2 = PairwiseSimilarities(embeddings2);
+        var within1 = PairwiseMatchScores(ccip, embeddings1);
+        var within2 = PairwiseMatchScores(ccip, embeddings2);
         var cross = new List<float>();
         foreach (var a in embeddings1)
-            foreach (var b in embeddings2)
-                cross.Add(Services.FaceMatcher.CosineSimilarity(a, b));
+        {
+            cross.AddRange(ccip.ComputeMatchScores(a, embeddings2));
+        }
 
-        ReportStats("Within dir1 (same person)", within1);
-        ReportStats("Within dir2 (same person)", within2);
-        ReportStats("Cross dir1<->dir2 (different people)", cross);
+        ReportStats("Within dir1 (same person) - higher score = more similar", within1);
+        ReportStats("Within dir2 (same person) - higher score = more similar", within2);
+        ReportStats("Cross dir1<->dir2 (different people) - higher score = more similar", cross);
     }
 
-    private static List<float> PairwiseSimilarities(List<float[]> embeddings)
+    private static List<float> PairwiseMatchScores(Services.CcipEmbeddingService ccip, List<float[]> embeddings)
     {
         var result = new List<float>();
         for (int i = 0; i < embeddings.Count; i++)
-            for (int j = i + 1; j < embeddings.Count; j++)
-                result.Add(Services.FaceMatcher.CosineSimilarity(embeddings[i], embeddings[j]));
+        {
+            result.AddRange(ccip.ComputeMatchScores(embeddings[i], embeddings.Skip(i + 1).ToList()));
+        }
         return result;
     }
 
@@ -259,29 +267,29 @@ public partial class App : Application
         Console.WriteLine($"{label}: min={values.Min():F4} avg={values.Average():F4} max={values.Max():F4} (n={values.Count})");
     }
 
-    private static void RunClipEmbedDiagnostic(string imagePath)
+    private static void RunCcipEmbedDiagnostic(string imagePath)
     {
         // Same "VrcdnManager" data-dir + vrcdn_manager.db pattern as RunVrcdnSyncDiagnostic -
         // deliberately still the pre-rename folder name so existing installs keep their database.
         string dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
         var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
-        string? modelDir = repo.GetStringSetting(Services.SettingsKeys.ClipModelDir);
+        string? modelDir = repo.GetStringSetting(Services.SettingsKeys.CcipModelDir);
         if (modelDir is null)
         {
-            Console.WriteLine("CLIP model dir not configured (set it via Settings first).");
+            Console.WriteLine("CCIP model dir not configured (set it via Settings first).");
             return;
         }
 
-        var clip = Services.ClipEmbeddingService.TryCreate(modelDir, out string? error);
-        if (clip is null)
+        var ccip = Services.CcipEmbeddingService.TryCreate(modelDir, out string? error);
+        if (ccip is null)
         {
             Console.WriteLine($"Unavailable: {error}");
             return;
         }
 
         byte[] bytes = File.ReadAllBytes(imagePath);
-        float[] embedding = clip.ComputeEmbeddingFromBytes(bytes);
+        float[] embedding = ccip.ComputeEmbeddingFromBytes(bytes);
         Console.WriteLine($"Embedding length: {embedding.Length}");
         Console.WriteLine($"First 5 values: {string.Join(", ", embedding.Take(5).Select(v => v.ToString("F4")))}");
         float norm = MathF.Sqrt(embedding.Sum(v => v * v));
@@ -302,14 +310,14 @@ public partial class App : Application
         var photoRepo = new Data.PhotoRepository(dbPath);
         var faceRepo = new Data.FaceRepository(dbPath);
 
-        string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.ClipModelDir);
+        string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.CcipModelDir);
         if (modelDir is null)
         {
-            Console.WriteLine("CLIP model dir not configured (set it via Settings first).");
+            Console.WriteLine("CCIP model dir not configured (set it via Settings first).");
             return;
         }
-        var clip = Services.ClipEmbeddingService.TryCreate(modelDir, out string? error);
-        if (clip is null)
+        var ccip = Services.CcipEmbeddingService.TryCreate(modelDir, out string? error);
+        if (ccip is null)
         {
             Console.WriteLine($"Unavailable: {error}");
             return;
@@ -325,7 +333,7 @@ public partial class App : Application
         Task.Run(async () =>
         {
             var result = await Services.FaceSuggestionService.RunAsync(
-                faceRepo, clip, pathById, avatarTypeById, msg => Console.WriteLine(msg));
+                faceRepo, ccip, pathById, avatarTypeById, msg => Console.WriteLine(msg));
             if (result.NoEligiblePeople)
             {
                 Console.WriteLine($"No registered person has enough reference photos yet (need >= {Services.FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).");
@@ -512,5 +520,12 @@ public partial class App : Application
     {
         _singleInstanceMutex?.ReleaseMutex();
         base.OnExit(e);
+
+        // Same DirectML-foreground-thread risk ExitProcess's doc comment covers for the
+        // diagnostic CLI paths - Suggest Faces (CcipEmbeddingService) can run from the real GUI
+        // too, so a normal window-close shutdown needs the same forced termination, not just the
+        // headless hooks. OnExit is already the last real app-level hook (Main() has nothing
+        // after app.Run() to interrupt), so this is safe for every shutdown path.
+        Environment.Exit(0);
     }
 }

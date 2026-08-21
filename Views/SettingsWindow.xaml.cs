@@ -48,8 +48,8 @@ public partial class SettingsWindow : Window
         string? savedWdDir = _repo.GetStringSetting(SettingsKeys.WdModelDir);
         ModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedWdDir) ? wdSuggestedDefault : savedWdDir;
 
-        string? savedClipDir = _repo.GetStringSetting(SettingsKeys.ClipModelDir);
-        ClipModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedClipDir) ? DefaultModelPaths.Clip : savedClipDir;
+        string? savedCcipDir = _repo.GetStringSetting(SettingsKeys.CcipModelDir);
+        CcipModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedCcipDir) ? DefaultModelPaths.Ccip : savedCcipDir;
 
         string? savedAvatarDir = _repo.GetStringSetting(SettingsKeys.AvatarModelDir);
         AvatarModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedAvatarDir) ? DefaultModelPaths.Avatar : savedAvatarDir;
@@ -74,7 +74,7 @@ public partial class SettingsWindow : Window
         UploadFormatBox.SelectedIndex = _repo.GetStringSetting(SettingsKeys.UploadImageFormat) == "png" ? 1 : 0;
 
         DownloadStatusText.Text = GetModelStatusText(ModelDirTextBox.Text, "model.onnx", "selected_tags.csv");
-        DownloadClipStatusText.Text = GetModelStatusText(ClipModelDirTextBox.Text, "model.onnx");
+        DownloadCcipStatusText.Text = GetModelStatusText(CcipModelDirTextBox.Text, "model_feat.onnx", "model_metrics.onnx");
         DownloadAvatarStatusText.Text = GetModelStatusText(AvatarModelDirTextBox.Text, "model.onnx", "labels.txt");
 
         CropPresetsList.ItemsSource = MainViewModel.UploadCropPresets.Select(DescribeCropPreset).ToList();
@@ -184,18 +184,18 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void BrowseClipModelDir_Click(object sender, RoutedEventArgs e)
+    private void BrowseCcipModelDir_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Select CLIP model folder" };
+        var dialog = new OpenFolderDialog { Title = "Select CCIP model folder" };
         if (dialog.ShowDialog() == true)
         {
-            ClipModelDirTextBox.Text = dialog.FolderName;
+            CcipModelDirTextBox.Text = dialog.FolderName;
         }
     }
 
-    private async void DownloadClipModel_Click(object sender, RoutedEventArgs e)
+    private async void DownloadCcipModel_Click(object sender, RoutedEventArgs e)
     {
-        string targetDir = ClipModelDirTextBox.Text.Trim();
+        string targetDir = CcipModelDirTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(targetDir))
         {
             MessageBox.Show(this, "Enter or browse to a model folder first (it will be created if it doesn't exist).",
@@ -203,42 +203,42 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        DownloadClipButton.IsEnabled = false;
+        DownloadCcipButton.IsEnabled = false;
         _isDownloading = true;
         _downloadCts = new CancellationTokenSource();
-        var progress = new Progress<string>(msg => DownloadClipStatusText.Text = msg);
+        var progress = new Progress<string>(msg => DownloadCcipStatusText.Text = msg);
         try
         {
-            bool haveFile = File.Exists(Path.Combine(targetDir, "model.onnx"));
-            string? localEtag = _repo.GetStringSetting(SettingsKeys.ClipModelEtag);
+            bool haveBothFiles = File.Exists(Path.Combine(targetDir, "model_feat.onnx")) && File.Exists(Path.Combine(targetDir, "model_metrics.onnx"));
+            string? localEtag = _repo.GetStringSetting(SettingsKeys.CcipModelEtag);
 
-            DownloadClipStatusText.Text = "Checking for updates...";
-            string? remoteEtag = await _downloader.GetRemoteClipModelETagAsync(_downloadCts.Token);
+            DownloadCcipStatusText.Text = "Checking for updates...";
+            string? remoteEtag = await _downloader.GetRemoteCcipModelETagAsync(_downloadCts.Token);
 
-            if (haveFile && remoteEtag is not null && remoteEtag == localEtag)
+            if (haveBothFiles && remoteEtag is not null && remoteEtag == localEtag)
             {
-                DownloadClipStatusText.Text = "Already up to date.";
+                DownloadCcipStatusText.Text = "Already up to date.";
                 return;
             }
 
-            await _downloader.DownloadClipModelAsync(targetDir, progress, _downloadCts.Token);
+            await _downloader.DownloadCcipModelAsync(targetDir, progress, _downloadCts.Token);
             if (remoteEtag is not null)
             {
-                _repo.SetStringSetting(SettingsKeys.ClipModelEtag, remoteEtag);
+                _repo.SetStringSetting(SettingsKeys.CcipModelEtag, remoteEtag);
             }
-            DownloadClipStatusText.Text += " Restart VRC Photo Manager to use it.";
+            DownloadCcipStatusText.Text += " Restart VRC Photo Manager to use it.";
         }
         catch (OperationCanceledException)
         {
-            DownloadClipStatusText.Text = "Download cancelled.";
+            DownloadCcipStatusText.Text = "Download cancelled.";
         }
         catch (Exception ex)
         {
-            DownloadClipStatusText.Text = $"Download failed: {ex.Message}";
+            DownloadCcipStatusText.Text = $"Download failed: {ex.Message}";
         }
         finally
         {
-            DownloadClipButton.IsEnabled = true;
+            DownloadCcipButton.IsEnabled = true;
             _isDownloading = false;
         }
     }
@@ -309,7 +309,7 @@ public partial class SettingsWindow : Window
         // (Directory.Exists("") is false, so an empty saved value already behaves as "not
         // configured" everywhere it's read, both here and in MainViewModel's resolvers).
         _repo.SetStringSetting(SettingsKeys.WdModelDir, ModelDirTextBox.Text.Trim());
-        _repo.SetStringSetting(SettingsKeys.ClipModelDir, ClipModelDirTextBox.Text.Trim());
+        _repo.SetStringSetting(SettingsKeys.CcipModelDir, CcipModelDirTextBox.Text.Trim());
         _repo.SetStringSetting(SettingsKeys.AvatarModelDir, AvatarModelDirTextBox.Text.Trim());
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, HoverDelaySlider.Value);

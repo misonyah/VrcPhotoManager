@@ -5,10 +5,17 @@ namespace VrcPhotoManager.Services;
 public static class SettingsKeys
 {
     public const string WdModelDir = "wd14_model_dir";
-    public const string ClipModelDir = "clip_model_dir";
+    /// <summary>deepghs/ccip_onnx's model folder (two files: model_feat.onnx,
+    /// model_metrics.onnx - see CcipEmbeddingService) - replaced the earlier general-purpose
+    /// CLIP model for face matching, which was never trained to discriminate between people/
+    /// characters at all (see FaceMatcher.cs's doc comment). "clip_model_dir"/"clip_model_etag"
+    /// are deliberately not migrated - this is a one-time model swap, not a cross-version
+    /// setting, and every stored face embedding needs recomputing against the new model anyway
+    /// (the two are NOT comparable - see Models.DetectedFace.Embedding's doc comment).</summary>
+    public const string CcipModelDir = "ccip_model_dir";
     public const string AvatarModelDir = "avatar_model_dir";
     public const string WdModelEtag = "wd14_model_etag";
-    public const string ClipModelEtag = "clip_model_etag";
+    public const string CcipModelEtag = "ccip_model_etag";
     public const string AvatarModelEtag = "avatar_model_etag";
     public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
     public const string HoverPreviewDelaySeconds = "hover_preview_delay_seconds";

@@ -9,8 +9,12 @@ public class DetectedFace
     public int Width { get; set; }
     public int Height { get; set; }
 
-    /// <summary>CLIP embedding as raw little-endian float32 bytes - null until Phase 3 computes
-    /// it. Phase 1 only ever populates the bounding box.</summary>
+    /// <summary>CCIP (deepghs/ccip_onnx) feature vector as raw little-endian float32 bytes -
+    /// null until Suggest Faces computes it (see CcipEmbeddingService). Not comparable across a
+    /// model swap - previously stored CLIP-based embeddings were wiped when this app switched
+    /// from general-purpose CLIP to CCIP (trained specifically to discriminate anime
+    /// characters), so a stale embedding computed under a since-replaced model is never a risk
+    /// in practice, but would silently produce garbage distances if it ever were mixed in.</summary>
     public byte[]? Embedding { get; set; }
 
     public DateTime DetectedAt { get; set; } = DateTime.UtcNow;

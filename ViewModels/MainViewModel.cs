@@ -29,7 +29,7 @@ public class MainViewModel : INotifyPropertyChanged
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
     private string? _selfUserId;
-    private ClipEmbeddingService? _clipEmbedder;
+    private CcipEmbeddingService? _ccipEmbedder;
     private WdTaggerService? _tagger;
     private AvatarTypeService? _avatarClassifier;
     private VrcdnApiClient? _api;
@@ -622,7 +622,7 @@ public class MainViewModel : INotifyPropertyChanged
         ScanFacesCommand = new RelayCommand(ScanFacesAsync,
             () => _faceDetector is not null && HasSucceeded("ScanLibrary"));
         SuggestFacesCommand = new RelayCommand(SuggestFacesAsync,
-            () => _clipEmbedder is not null && HasSucceeded("DetectFaces"));
+            () => _ccipEmbedder is not null && HasSucceeded("DetectFaces"));
         ClassifyPhotosCommand = new RelayCommand(ClassifyPhotosAsync,
             () => _tagger is not null && HasSucceeded("ScanLibrary"));
         ClassifyAvatarsCommand = new RelayCommand(ClassifyAvatarsAsync,
@@ -710,18 +710,18 @@ public class MainViewModel : INotifyPropertyChanged
         _selfUserId = _profileLookup?.GetSelf()?.UserId;
         OnPropertyChanged(nameof(CanFilterOwnPhotosOnly));
 
-        var (clipEmbedder, clipError) = await Task.Run(() =>
+        var (ccipEmbedder, ccipError) = await Task.Run(() =>
         {
-            string? modelDir = ResolveClipModelDir();
-            if (modelDir is null) return (null, "CLIP model directory not configured (set it via Settings).");
-            var s = ClipEmbeddingService.TryCreate(modelDir, out string? error);
+            string? modelDir = ResolveCcipModelDir();
+            if (modelDir is null) return (null, "CCIP model directory not configured (set it via Settings).");
+            var s = CcipEmbeddingService.TryCreate(modelDir, out string? error);
             return (s, error);
         });
-        _clipEmbedder = clipEmbedder;
+        _ccipEmbedder = ccipEmbedder;
         SuggestFacesCommand.RaiseCanExecuteChanged();
-        if (_clipEmbedder is null)
+        if (_ccipEmbedder is null)
         {
-            StatusMessage = $"Face-matching unavailable: {clipError}";
+            StatusMessage = $"Face-matching unavailable: {ccipError}";
         }
     }
 
@@ -1188,12 +1188,12 @@ public class MainViewModel : INotifyPropertyChanged
 
     private async Task SuggestFacesAsync()
     {
-        if (_clipEmbedder is null) { StatusMessage = "CLIP face-matching model not available."; return; }
+        if (_ccipEmbedder is null) { StatusMessage = "CCIP face-matching model not available."; return; }
 
         var pathById = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath);
         var avatarTypeByPhotoId = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType);
         var result = await FaceSuggestionService.RunAsync(
-            _faces, _clipEmbedder, pathById, avatarTypeByPhotoId, msg => StatusMessage = msg);
+            _faces, _ccipEmbedder, pathById, avatarTypeByPhotoId, msg => StatusMessage = msg);
 
         if (result.NoEligiblePeople)
         {
@@ -1316,11 +1316,11 @@ public class MainViewModel : INotifyPropertyChanged
         return @"D:\AI-Tools\wd14-tagger\model";
     }
 
-    private string? ResolveClipModelDir()
+    private string? ResolveCcipModelDir()
     {
-        string? configured = _repo.GetStringSetting(SettingsKeys.ClipModelDir);
+        string? configured = _repo.GetStringSetting(SettingsKeys.CcipModelDir);
         if (configured is not null && Directory.Exists(configured)) return configured;
-        return Directory.Exists(DefaultModelPaths.Clip) ? DefaultModelPaths.Clip : null;
+        return Directory.Exists(DefaultModelPaths.Ccip) ? DefaultModelPaths.Ccip : null;
     }
 
     private string? ResolveAvatarModelDir()

@@ -26,22 +26,23 @@
                 ToolTip="Download the WD14 model (~378 MB) and tag list into the folder above." />
         <TextBlock x:Name="DownloadStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
-        <TextBlock Text="CLIP Face-Matching Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+        <TextBlock Text="CCIP Face-Matching Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
-            Used by "Suggest Faces". Model: laion/CLIP-ViT-L-14-laion2B-s32B-b82K (Hugging Face,
-            ~1.2 GB, image encoder only).
+            Used by "Suggest Faces". Model: deepghs/ccip_onnx, caformer-24-randaug-pruned variant
+            (Hugging Face) - contrastively trained to tell anime characters apart, unlike a
+            general-purpose CLIP model.
         </TextBlock>
 
-        <TextBlock Text="Model folder (model.onnx):" Margin="0,0,0,4" />
+        <TextBlock Text="Model folder (model_feat.onnx + model_metrics.onnx):" Margin="0,0,0,4" />
         <DockPanel Margin="0,0,0,12">
-            <Button DockPanel.Dock="Right" Content="Browse..." Padding="8,2" Margin="8,0,0,0" Click="BrowseClipModelDir_Click" />
-            <TextBox x:Name="ClipModelDirTextBox" VerticalContentAlignment="Center" />
+            <Button DockPanel.Dock="Right" Content="Browse..." Padding="8,2" Margin="8,0,0,0" Click="BrowseCcipModelDir_Click" />
+            <TextBox x:Name="CcipModelDirTextBox" VerticalContentAlignment="Center" />
         </DockPanel>
 
-        <Button x:Name="DownloadClipButton" Content="Download CLIP Model Files" HorizontalAlignment="Left"
-                Padding="8,4" Margin="0,0,0,8" Click="DownloadClipModel_Click"
-                ToolTip="Download the CLIP model (~1.2 GB) into the folder above." />
-        <TextBlock x:Name="DownloadClipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+        <Button x:Name="DownloadCcipButton" Content="Download CCIP Model Files" HorizontalAlignment="Left"
+                Padding="8,4" Margin="0,0,0,8" Click="DownloadCcipModel_Click"
+                ToolTip="Download the CCIP model files into the folder above." />
+        <TextBlock x:Name="DownloadCcipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
 
         <TextBlock Text="Avatar Type Classifier" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">

@@ -14,7 +14,13 @@ namespace VrcPhotoManager.Services;
 public class ModelDownloadService
 {
     private const string ModelRepoBaseUrl = "https://huggingface.co/SmilingWolf/wd-vit-tagger-v3/resolve/main";
-    private const string ClipModelRepoBaseUrl = "https://huggingface.co/immich-app/ViT-L-14__laion2b-s32b-b82k/resolve/main/visual";
+    /// <summary>deepghs/ccip_onnx's "caformer-24-randaug-pruned" variant - the repo's best
+    /// F1-scoring model per its own metrics.json (0.9172), confirmed by direct inspection
+    /// rather than assumed. Two files needed: model_feat.onnx (the feature extractor) and
+    /// model_metrics.onnx (the paired-distance model CcipEmbeddingService.ComputeMatchScore
+    /// calls - CCIP's distance is a learned metric, not a plain cosine/L2 formula, so this
+    /// second model is required, not optional).</summary>
+    private const string CcipModelRepoBaseUrl = "https://huggingface.co/deepghs/ccip_onnx/resolve/main/ccip-caformer-24-randaug-pruned";
     private const string AvatarModelRepoBaseUrl = "https://huggingface.co/misonyah/vrc-avatar-classifier/resolve/main";
 
     public async Task DownloadWdTaggerModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
@@ -26,11 +32,12 @@ public class ModelDownloadService
         await DownloadFileAsync(http, $"{ModelRepoBaseUrl}/selected_tags.csv", Path.Combine(targetDir, "selected_tags.csv"), "selected_tags.csv", progress, ct);
     }
 
-    public async Task DownloadClipModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
+    public async Task DownloadCcipModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
     {
         Directory.CreateDirectory(targetDir);
         using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-        await DownloadFileAsync(http, $"{ClipModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
+        await DownloadFileAsync(http, $"{CcipModelRepoBaseUrl}/model_feat.onnx", Path.Combine(targetDir, "model_feat.onnx"), "model_feat.onnx", progress, ct);
+        await DownloadFileAsync(http, $"{CcipModelRepoBaseUrl}/model_metrics.onnx", Path.Combine(targetDir, "model_metrics.onnx"), "model_metrics.onnx", progress, ct);
     }
 
     public async Task DownloadAvatarModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
@@ -44,8 +51,8 @@ public class ModelDownloadService
     public Task<string?> GetRemoteWdTaggerModelETagAsync(CancellationToken ct = default) =>
         GetRemoteETagAsync($"{ModelRepoBaseUrl}/model.onnx", ct);
 
-    public Task<string?> GetRemoteClipModelETagAsync(CancellationToken ct = default) =>
-        GetRemoteETagAsync($"{ClipModelRepoBaseUrl}/model.onnx", ct);
+    public Task<string?> GetRemoteCcipModelETagAsync(CancellationToken ct = default) =>
+        GetRemoteETagAsync($"{CcipModelRepoBaseUrl}/model_feat.onnx", ct);
 
     public Task<string?> GetRemoteAvatarModelETagAsync(CancellationToken ct = default) =>
         GetRemoteETagAsync($"{AvatarModelRepoBaseUrl}/model.onnx", ct);
