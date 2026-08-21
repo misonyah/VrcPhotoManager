@@ -246,6 +246,7 @@ public class MainViewModel : INotifyPropertyChanged
     [
         "Filename (A-Z)", "Date (Newest First)", "Date (Oldest First)",
         "Untagged Faces (Most First)", "People in World (Most First)",
+        "Suggestion Confidence (Highest First)", "Most Tagging Value (New Info First)",
     ];
 
     /// <summary>
@@ -1994,6 +1995,15 @@ public class MainViewModel : INotifyPropertyChanged
             filtered = filtered.Where(p => suggestedPhotoIds.Contains(p.Model.Id));
         }
 
+        // Computed once (not inside the sort lambdas below, which LINQ would otherwise
+        // re-invoke once per photo - a full DB query per comparison instead of one total),
+        // but only when the matching sort is actually selected, to avoid the query entirely
+        // otherwise.
+        Dictionary<long, float>? maxConfidenceByPhoto = SortOption == "Suggestion Confidence (Highest First)"
+            ? _faces.GetMaxSuggestionConfidenceByPhoto() : null;
+        Dictionary<long, int>? taggingValueByPhoto = SortOption == "Most Tagging Value (New Info First)"
+            ? _faces.GetPhotoTaggingValueScores() : null;
+
         filtered = SortOption switch
         {
             "Date (Newest First)" => filtered.OrderByDescending(p => p.Model.Mtime),
@@ -2002,6 +2012,19 @@ public class MainViewModel : INotifyPropertyChanged
             // biggest tagging backlogs first instead of hunting for them in filename order.
             "Untagged Faces (Most First)" => filtered.OrderByDescending(p => p.DetectedFaceCount - p.TaggedFaceCount),
             "People in World (Most First)" => filtered.OrderByDescending(p => p.WorldPlayerCount),
+            // Highest-confidence suggestions first - the ones most likely to be correct, so a
+            // review pass can clear the easy/obvious ones fastest. A photo with no unconfirmed
+            // suggestion at all sorts last (GetValueOrDefault's 0 default reads as "no
+            // suggestion", never a real one - FaceMatcher's own acceptance floor keeps every
+            // real stored confidence comfortably above 0).
+            "Suggestion Confidence (Highest First)" => filtered.OrderByDescending(
+                p => maxConfidenceByPhoto!.GetValueOrDefault(p.Model.Id, 0f)),
+            // Ascending - GetPhotoTaggingValueScores returns LOWER for more valuable (a
+            // thinly-referenced or brand-new person), so this surfaces the photos whose tagging
+            // would teach the matching algorithm the most, not just clear the biggest backlog.
+            // int.MaxValue default sorts a fully-resolved photo (nothing left to tag) last.
+            "Most Tagging Value (New Info First)" => filtered.OrderBy(
+                p => taggingValueByPhoto!.GetValueOrDefault(p.Model.Id, int.MaxValue)),
             _ => filtered.OrderBy(p => p.Model.LocalPath),
         };
 

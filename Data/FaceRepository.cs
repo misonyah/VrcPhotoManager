@@ -654,6 +654,74 @@ public class FaceRepository(string dbPath)
             .ToHashSet();
     }
 
+    /// <summary>Per-photo MAX confidence among its unconfirmed EmbeddingMatch/AutoTagged
+    /// suggestions - drives the "Suggestion Confidence (Highest First)" sort option, so the
+    /// suggestions most likely to be correct (and thus fastest to review/confirm) surface
+    /// first. Photos with no such suggestion are simply absent (caller treats a missing key as
+    /// lowest priority).</summary>
+    public Dictionary<long, float> GetMaxSuggestionConfidenceByPhoto()
+    {
+        using var context = NewContext();
+        var rows = context.FaceLabels.AsNoTracking()
+            .Where(l => !l.Confirmed && (l.Source == FaceLabelSource.EmbeddingMatch || l.Source == FaceLabelSource.AutoTagged))
+            .Join(context.DetectedFaces.Where(f => !f.Deleted), l => l.DetectedFaceId, f => f.Id,
+                (l, f) => new { f.PhotoId, l.Confidence })
+            .ToList();
+        return rows.GroupBy(r => r.PhotoId).ToDictionary(g => g.Key, g => g.Max(r => r.Confidence));
+    }
+
+    /// <summary>Per-photo "most face-tagging value" signal for the "Most Tagging Value (New
+    /// Info First)" sort option: the LOWEST current confirmed-reference-count among the people
+    /// already suggested for this photo's still-undetermined faces, or -1 if at least one of
+    /// those faces has no suggestion at all (brand new/unregistered - ranks ahead of anyone
+    /// already registered, since tagging it is pure new information rather than reinforcing an
+    /// existing centroid). Photos with nothing left undetermined are simply absent. Confirming a
+    /// face for a thinly-referenced person improves THEIR future suggestion quality far more
+    /// than another confirm for someone already well-represented - see FaceMatcher's
+    /// MinReferencesForTrimming/nearest-neighbor design, where a person needs 6+ references
+    /// before nearest-neighbor scoring (the more accurate mode) even applies to them at all.
+    /// Lower value = more valuable; caller sorts ascending.</summary>
+    public Dictionary<long, int> GetPhotoTaggingValueScores()
+    {
+        using var context = NewContext();
+
+        var refCountByPerson = context.FaceLabels.AsNoTracking()
+            .Where(l => l.Confirmed && l.PersonId != null)
+            .GroupBy(l => l.PersonId!.Value)
+            .Select(g => new { PersonId = g.Key, Count = g.Count() })
+            .ToList()
+            .ToDictionary(x => x.PersonId, x => x.Count);
+
+        var labelByFaceId = context.FaceLabels.AsNoTracking()
+            .Select(l => new { l.DetectedFaceId, l.Confirmed, l.Source, l.PersonId })
+            .ToList()
+            .ToDictionary(l => l.DetectedFaceId);
+
+        var faces = context.DetectedFaces.AsNoTracking()
+            .Where(f => !f.Deleted)
+            .Select(f => new { f.Id, f.PhotoId })
+            .ToList();
+
+        var result = new Dictionary<long, int>();
+        foreach (var face in faces)
+        {
+            labelByFaceId.TryGetValue(face.Id, out var label);
+            bool undetermined = label is null
+                || (!label.Confirmed && (label.Source == FaceLabelSource.EmbeddingMatch || label.Source == FaceLabelSource.AutoTagged));
+            if (!undetermined) continue;
+
+            int value = label?.PersonId is long personId && refCountByPerson.TryGetValue(personId, out int count)
+                ? count
+                : -1;
+
+            if (!result.TryGetValue(face.PhotoId, out int existing) || value < existing)
+            {
+                result[face.PhotoId] = value;
+            }
+        }
+        return result;
+    }
+
     /// <summary>
     /// Links a manually-created person (no VrcUserId) to a real VRC account - powers Tag
     /// Faces' "this looks like someone VRCX already knows" merge prompt (found via a real
