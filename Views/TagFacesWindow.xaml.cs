@@ -443,6 +443,20 @@ public partial class TagFacesWindow : Window
         // for this photo (GamelogCorrelationService's scope), so only bother loading it then.
         _gamelogPlayers = _photoPlayers.Count == 0 ? _photos.GetGamelogInferredPlayersForPhoto(_photo.Id) : [];
         _avatarRegionsList = _avatarRegionRepo.GetRegionsForPhoto(_photo.Id);
+        UpdateAllTaggedButtonLabel();
+    }
+
+    /// <summary>Distinct confirmed people in this photo so far, not a raw box count - two boxes
+    /// confirmed as the same person (a real, legitimate case, see the identity-merging fix)
+    /// should count as 1 "person tagged", not 2.</summary>
+    private void UpdateAllTaggedButtonLabel()
+    {
+        int taggedCount = _labelsByFaceId.Values
+            .Where(l => l.Confirmed && l.PersonId is not null)
+            .Select(l => l.PersonId!.Value)
+            .Distinct()
+            .Count();
+        AllTaggedButton.Content = $"All {taggedCount} {(taggedCount == 1 ? "person" : "people")} tagged";
     }
 
     private void PhotoImage_SizeChanged(object sender, SizeChangedEventArgs e) => RedrawBoxes();

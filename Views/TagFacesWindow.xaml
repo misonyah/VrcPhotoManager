@@ -67,7 +67,7 @@
         </ScrollViewer>
 
         <DockPanel Grid.Row="2" Margin="8">
-            <Button DockPanel.Dock="Right" Content="All tagged" Click="AllTaggedButton_Click" Padding="8,2" VerticalAlignment="Center"
+            <Button x:Name="AllTaggedButton" DockPanel.Dock="Right" Click="AllTaggedButton_Click" Padding="8,2" VerticalAlignment="Center"
                     ToolTip="Everyone identifiable in this photo has been tagged - mark every remaining untagged (yellow) box as a bad detection, same as clicking Delete box on each one.&#10;Kept in the database for reviewing detection quality later, just hidden from view here." />
             <!-- Person/Avatar mode - which kind of box click-drag-on-empty-space creates, and
                  which picker an existing box's own click opens (each box's hit-test rectangle
