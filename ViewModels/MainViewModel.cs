@@ -1201,7 +1201,8 @@ public class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        StatusMessage = $"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people.";
+        StatusMessage = $"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people"
+            + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : ".");
         RecordActionSuccess("SuggestFaces", nameof(SuggestFacesTooltip));
     }
 

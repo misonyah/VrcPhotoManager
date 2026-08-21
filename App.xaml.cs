@@ -339,7 +339,8 @@ public partial class App : Application
                 Console.WriteLine($"No registered person has enough reference photos yet (need >= {Services.FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).");
                 return;
             }
-            Console.WriteLine($"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people.");
+            Console.WriteLine($"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people"
+                + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : "."));
         }).GetAwaiter().GetResult();
     }
 
