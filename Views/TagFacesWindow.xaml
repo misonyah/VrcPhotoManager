@@ -101,28 +101,37 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{Binding DisplayText}" VerticalAlignment="Center"
-                                               ToolTipService.IsEnabled="{Binding NoteTooltip, Converter={StaticResource StringNotEmptyToBoolConverter}}"
-                                               ToolTipService.ShowDuration="15000">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding AlreadyConfirmedInPhoto}" Value="True">
-                                                        <Setter Property="FontWeight" Value="Bold" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                        <TextBlock.ToolTip>
-                                            <ToolTip Content="{Binding NoteTooltip}" MaxWidth="400">
-                                                <ToolTip.ContentTemplate>
-                                                    <DataTemplate>
-                                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" />
-                                                    </DataTemplate>
-                                                </ToolTip.ContentTemplate>
-                                            </ToolTip>
-                                        </TextBlock.ToolTip>
-                                    </TextBlock>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                        <TextBlock Text="{Binding DisplayText}" VerticalAlignment="Center"
+                                                   ToolTipService.IsEnabled="{Binding NoteTooltip, Converter={StaticResource StringNotEmptyToBoolConverter}}"
+                                                   ToolTipService.ShowDuration="15000">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding AlreadyConfirmedInPhoto}" Value="True">
+                                                            <Setter Property="FontWeight" Value="Bold" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                            <TextBlock.ToolTip>
+                                                <ToolTip Content="{Binding NoteTooltip}" MaxWidth="400">
+                                                    <ToolTip.ContentTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                                        </DataTemplate>
+                                                    </ToolTip.ContentTemplate>
+                                                </ToolTip>
+                                            </TextBlock.ToolTip>
+                                        </TextBlock>
+                                        <!-- Separate element with FontFamily set directly (not a fallback list) - a PUA glyph
+                                             mixed into DisplayText's plain-text run did not reliably paint even with an
+                                             explicit "Segoe UI, Segoe MDL2 Assets" fallback (see FriendGlyphFor in the
+                                             code-behind). This mirrors the Alias/Rename buttons below, which already render
+                                             Segoe MDL2 Assets glyphs correctly via a dedicated FontFamily. -->
+                                        <TextBlock Text="{Binding FriendGlyph}" FontFamily="Segoe MDL2 Assets"
+                                                   Foreground="DarkGreen" VerticalAlignment="Center" Margin="4,0,0,0" />
+                                    </StackPanel>
                                     <Button Grid.Column="1" Content="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                                             Padding="4,0" Margin="4,0,0,0"
                                             Visibility="{Binding CanEditAliases, Converter={StaticResource BoolToVisibilityConverter}}"

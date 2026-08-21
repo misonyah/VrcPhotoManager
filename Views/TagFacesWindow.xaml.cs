@@ -77,7 +77,7 @@ public partial class TagFacesWindow : Window
     /// use; RawName is null (falls back to DisplayText, which IS the raw name) for items that
     /// were never given a suffix in the first place.
     /// </summary>
-    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsConfirmAutoTag = false, bool IsNotAFace = false, string? RawName = null)
+    private record PickerItem(string DisplayText, string? VrcUserId, long? ExistingPersonId, bool IsConfirmSuggestion = false, bool IsConfirmAutoTag = false, bool IsNotAFace = false, string? RawName = null, string? FriendGlyph = null)
     {
         public string EffectiveName => RawName ?? DisplayText;
 
@@ -457,6 +457,10 @@ public partial class TagFacesWindow : Window
             .Distinct()
             .Count();
         AllTaggedButton.Content = $"All {taggedCount} {(taggedCount == 1 ? "person" : "people")} tagged";
+        // Nothing left for the bulk-delete in AllTaggedButton_Click to act on once every
+        // detected face already has a label row (confirmed, suggested, or rejected) - clicking
+        // it would just be a no-op, so gray it out instead of leaving it always clickable.
+        AllTaggedButton.IsEnabled = _detectedFaces.Any(f => !_labelsByFaceId.ContainsKey(f.Id));
     }
 
     private void PhotoImage_SizeChanged(object sender, SizeChangedEventArgs e) => RedrawBoxes();
@@ -889,6 +893,27 @@ public partial class TagFacesWindow : Window
     /// GamelogInferredPlayer must route its UserId through this first.</summary>
     private static string? NormalizeVrcUserId(string userId) => string.IsNullOrEmpty(userId) ? null : userId;
 
+    /// <summary>Real (non-self) VRCX friends get a People-icon glyph, self gets a Contact-icon
+    /// glyph, wherever a PickerItem shows up - both the static default list (OpenPicker) and the
+    /// type-to-search results (NewPersonNameTextBox_TextChanged) route through this one method,
+    /// so the two lists can't drift out of sync on this again (an earlier version only wired the
+    /// glyph into the search-results path, leaving the default list - what actually shows before
+    /// you type anything - always blank, including the local account's own self entry).
+    /// Kept out of DisplayText (a plain string) rather than embedded in it: a PUA glyph mixed into
+    /// a larger run of ordinary text did not reliably paint even with an explicit
+    /// "Segoe UI, Segoe MDL2 Assets" font-fallback list (confirmed by a real report - the glyph
+    /// was invisible, no fallback occurred) - Segoe UI evidently reports a present-but-blank
+    /// glyph across that PUA range, so WPF's glyph-presence-based fallback never triggers. A
+    /// dedicated TextBlock with FontFamily set directly (see TagFacesWindow.xaml's FriendGlyph
+    /// column) is the same pattern this window's own alias/rename icon buttons already use
+    /// successfully, so this returns just the raw glyph character for that separate element.</summary>
+    private string? FriendGlyphFor(string? userId)
+    {
+        if (userId is null) return null;
+        if (userId == _self?.UserId) return "";
+        return _friends.Any(f => f.UserId == userId) ? "" : null;
+    }
+
     private void OpenPicker(long detectedFaceId, Rectangle box)
     {
         _activeFaceId = detectedFaceId;
@@ -923,13 +948,15 @@ public partial class TagFacesWindow : Window
 
         foreach (var player in _photoPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", NormalizeVrcUserId(player.UserId), null, RawName: player.DisplayName));
+            string? userId = NormalizeVrcUserId(player.UserId);
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", userId, null, RawName: player.DisplayName, FriendGlyph: FriendGlyphFor(userId)));
         }
         // Gamelog-inferred fallback (GamelogCorrelationService) - only ever populated when
         // _photoPlayers is empty, so there's no overlap/duplication risk between the two loops.
         foreach (var player in _gamelogPlayers)
         {
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", NormalizeVrcUserId(player.UserId), null, RawName: player.DisplayName));
+            string? userId = NormalizeVrcUserId(player.UserId);
+            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", userId, null, RawName: player.DisplayName, FriendGlyph: FriendGlyphFor(userId)));
         }
         // Recently-tagged shortlist, not every registered person ever created - that list only
         // grows and became unusable (type-to-search below covers the rest; see
@@ -948,7 +975,7 @@ public partial class TagFacesWindow : Window
             // of which sentinel PhotoPlayer.UserId turns out to use.
             if (person.VrcUserId is not null && (_photoPlayers.Any(p => p.UserId == person.VrcUserId)
                 || _gamelogPlayers.Any(p => p.UserId == person.VrcUserId))) continue;
-            items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id));
+            items.Add(new PickerItem(person.Name, person.VrcUserId, person.Id, FriendGlyph: FriendGlyphFor(person.VrcUserId)));
         }
 
         items = WithNoteTooltips(items);
@@ -1132,15 +1159,16 @@ public partial class TagFacesWindow : Window
             .Where(x => x.Eval.Matches)
             .OrderBy(x => x.Person.Name)
             .Select(x => new PickerItem(
-                BuildLabel(x.Person.Name, x.Eval.AliasesToShow, null), x.Person.VrcUserId, x.Person.Id, RawName: x.Person.Name));
+                BuildLabel(x.Person.Name, x.Eval.AliasesToShow, null),
+                x.Person.VrcUserId, x.Person.Id, RawName: x.Person.Name, FriendGlyph: FriendGlyphFor(x.Person.VrcUserId)));
 
         var friendMatches = _friends
             .Where(f => !registeredVrcUserIds.Contains(f.UserId))
             .Select(f => (Friend: f, Eval: EvaluateMatch(f.DisplayName, f.UserId)))
             .Where(x => x.Eval.Matches)
             .Select(x => new PickerItem(
-                BuildLabel(x.Friend.DisplayName, x.Eval.AliasesToShow, x.Friend.UserId == _self?.UserId ? "you" : "VRCX friend"),
-                x.Friend.UserId, null, RawName: x.Friend.DisplayName));
+                BuildLabel(x.Friend.DisplayName, x.Eval.AliasesToShow, null),
+                x.Friend.UserId, null, RawName: x.Friend.DisplayName, FriendGlyph: FriendGlyphFor(x.Friend.UserId)));
 
         // Everyone VRCX has ever reported (friends or gamelog) as of the last "Sync VRC
         // Players" run (MainViewModel.SyncVrcPlayerDataAsync) - a local-only read, not a live
