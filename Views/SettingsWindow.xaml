@@ -170,6 +170,15 @@
                     <CheckBox x:Name="SkipResolvedPhotosCheckBox" Content="Skip fully-tagged photos when running Detect Faces"
                               Margin="0,0,0,12"
                               ToolTip="Once every face detected in a photo is tagged, marked &lt;unknown&gt;, or deleted (e.g. via Tag Faces' &quot;All tagged&quot; button), there's nothing left to find - skip re-running the ML detector on it.&#10;Turn off for a deliberate full rescan of everything, e.g. after switching to a better detector model." />
+
+                    <TextBlock Text="Portal-hop detection window:" Margin="0,0,0,4"
+                               ToolTip="How close a friend's departure from your previous instance and arrival into a photo's instance need to be to your own transition to count as &quot;traveled together&quot; (Photo Metadata's Traveled Together section).&#10;A real portal/invite hop isn't perfectly synchronized - you might go through before or after everyone else - so this needs some slack." />
+                    <DockPanel Margin="0,0,0,12"
+                               ToolTip="How close a friend's departure from your previous instance and arrival into a photo's instance need to be to your own transition to count as &quot;traveled together&quot; (Photo Metadata's Traveled Together section).&#10;A real portal/invite hop isn't perfectly synchronized - you might go through before or after everyone else - so this needs some slack.">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PortalHopWindowSlider, Path=Value, StringFormat={}{0:0}s}"
+                                   Width="32" Margin="4,0,0,0" VerticalAlignment="Center" />
+                        <Slider x:Name="PortalHopWindowSlider" Minimum="15" Maximum="180" TickFrequency="15" IsSnapToTickEnabled="True" />
+                    </DockPanel>
                 </StackPanel>
             </TabItem>
         </TabControl>

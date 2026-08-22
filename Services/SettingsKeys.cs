@@ -28,6 +28,14 @@ public static class SettingsKeys
     public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
     public const string HoverPreviewDelaySeconds = "hover_preview_delay_seconds";
     public const string SkipResolvedPhotosOnFaceScan = "skip_resolved_photos_on_face_scan";
+    /// <summary>How wide a window (seconds) GamelogCorrelationService.FindTraveledTogether
+    /// allows between your own instance transition and a friend's matching departure/arrival
+    /// before counting them as having portal-hopped with you - see MetadataWindow's "Traveled
+    /// together" section. Real-world portal/invite hops aren't perfectly synchronized (you might
+    /// go through before or after everyone else), so this needs to be generous - a real design
+    /// discussion landed on 90 seconds as the default, user-configurable since the right width
+    /// depends on how a given friend group actually travels together.</summary>
+    public const string PortalHopWindowSeconds = "portal_hop_window_seconds";
 
     // Session-state persistence (restore where you left off) - written once at Closing, read
     // once at startup, deliberately not live-synced on every change (ThumbnailSize alone can

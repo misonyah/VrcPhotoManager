@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Input;
 using VrcPhotoManager.Data;
+using VrcPhotoManager.Models;
+using VrcPhotoManager.Services;
 using VrcPhotoManager.ViewModels;
 
 namespace VrcPhotoManager.Views;
@@ -54,6 +56,8 @@ public partial class MetadataWindow : Window
         }
         p.Inlines.Add(new Run("\n"));
 
+        AppendTraveledTogether(p, m, repo);
+
         p.Inlines.Add(new Run($"Upload status: {m.RemoteStatus}\n"));
         p.Inlines.Add(new Run("Remote URL:    "));
         p.Inlines.Add(m.RemoteUrl is string remoteUrl ? DirectLink(remoteUrl) : new Run("-"));
@@ -63,6 +67,33 @@ public partial class MetadataWindow : Window
 
         doc.Blocks.Add(p);
         MetadataText.Document = doc;
+    }
+
+    /// <summary>Best-effort "who did I travel here with" via GamelogCorrelationService's paired
+    /// departure/arrival correlation (see its FindTraveledTogether doc comment for the actual
+    /// matching rules) - degrades silently (adds nothing to the document) if VRCX isn't
+    /// available, this photo's capture time can't be parsed from its filename, or the gamelog
+    /// has no preceding visit to compare against. This is a nice-to-have inference, not a
+    /// correctness-critical field like the rest of this window, so it never surfaces as an
+    /// error - just absent.</summary>
+    private static void AppendTraveledTogether(Paragraph p, Photo m, PhotoRepository repo)
+    {
+        if (GamelogCorrelationService.TryParseCaptureTime(m.LocalPath) is not DateTime captureTime) return;
+        using var gamelog = GamelogCorrelationService.TryCreate(out _);
+        if (gamelog is null) return;
+
+        double windowSeconds = repo.GetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, 90);
+        var traveled = gamelog.FindTraveledTogether(captureTime, TimeSpan.FromSeconds(windowSeconds));
+        if (traveled is not { Count: > 0 }) return;
+
+        p.Inlines.Add(new Run("Traveled together:\n"));
+        foreach (var (userId, displayName) in traveled)
+        {
+            p.Inlines.Add(new Run("  "));
+            p.Inlines.Add(VrcLink(userId, displayName, "https://vrchat.com/home/user/{0}"));
+            p.Inlines.Add(new Run("\n"));
+        }
+        p.Inlines.Add(new Run("\n"));
     }
 
     /// <summary>A clickable VRChat website link when id is available, plain text otherwise -

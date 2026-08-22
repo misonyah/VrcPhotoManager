@@ -169,6 +169,76 @@ public class GamelogCorrelationService : IDisposable
         return bracketIndex;
     }
 
+    /// <summary>
+    /// Friends who plausibly traveled to this instance with you via the same portal/invite -
+    /// both their departure from your PREVIOUS instance and their arrival into THIS one fall
+    /// within <paramref name="window"/> of your own transition moment. A single timestamp
+    /// stands in for both "you left the old instance" and "you joined this one" - no separate
+    /// gap to account for, since a visit's own recorded duration (gamelog_location.time) lines
+    /// up with the next visit's start to within about a second in practice (there's no
+    /// mid-loading-screen idle VRCX logs separately). Deliberately requires BOTH ends to match,
+    /// not just one - matching arrival alone would also flag someone who happened to arrive from
+    /// somewhere else entirely at a similar time, not someone who actually traveled with you.
+    /// The window is intentionally generous (not exact-timestamp matching): a real portal/invite
+    /// hop isn't perfectly synchronized, and you might go through before or after everyone else
+    /// in the group - see SettingsKeys.PortalHopWindowSeconds.
+    /// Returns null (not empty) if the visit bracketing captureTime has no PRECEDING visit to
+    /// compare against (e.g. the very first visit VRCX ever recorded) - there's no "old instance"
+    /// to have traveled from, so the question doesn't apply, as opposed to a real answer of zero
+    /// people.
+    /// </summary>
+    public List<(string UserId, string DisplayName)>? FindTraveledTogether(DateTime localCaptureTime, TimeSpan window)
+    {
+        DateTime captureTimeUtc = DateTime.SpecifyKind(localCaptureTime, DateTimeKind.Local).ToUniversalTime();
+        int bracketIndex = FindBracketIndex(_visits, v => v.StartUtc, captureTimeUtc);
+        if (bracketIndex <= 0) return null;
+
+        DateTime transitionUtc = _visits[bracketIndex].StartUtc;
+        string newLocation = _visits[bracketIndex].Location;
+        string oldLocation = _visits[bracketIndex - 1].Location;
+        string windowStart = (transitionUtc - window).ToString("o");
+        string windowEnd = (transitionUtc + window).ToString("o");
+
+        var leftOldAround = new Dictionary<string, string>();
+        using (var leftCmd = _conn.CreateCommand())
+        {
+            leftCmd.CommandText = """
+                SELECT DISTINCT user_id, display_name FROM gamelog_join_leave
+                WHERE location = @location AND type = 'OnPlayerLeft'
+                    AND created_at >= @start AND created_at <= @end
+                """;
+            leftCmd.Parameters.AddWithValue("@location", oldLocation);
+            leftCmd.Parameters.AddWithValue("@start", windowStart);
+            leftCmd.Parameters.AddWithValue("@end", windowEnd);
+            using var reader = leftCmd.ExecuteReader();
+            while (reader.Read()) leftOldAround[reader.GetString(0)] = reader.GetString(1);
+        }
+        if (leftOldAround.Count == 0) return [];
+
+        var result = new List<(string, string)>();
+        using (var joinedCmd = _conn.CreateCommand())
+        {
+            joinedCmd.CommandText = """
+                SELECT DISTINCT user_id, display_name FROM gamelog_join_leave
+                WHERE location = @location AND type = 'OnPlayerJoined'
+                    AND created_at >= @start AND created_at <= @end
+                """;
+            joinedCmd.Parameters.AddWithValue("@location", newLocation);
+            joinedCmd.Parameters.AddWithValue("@start", windowStart);
+            joinedCmd.Parameters.AddWithValue("@end", windowEnd);
+            using var reader = joinedCmd.ExecuteReader();
+            while (reader.Read())
+            {
+                string userId = reader.GetString(0);
+                if (leftOldAround.TryGetValue(userId, out string? displayName))
+                {
+                    result.Add((userId, displayName));
+                }
+            }
+        }
+        return result;
+    }
+
     /// <summary>World name and id recorded for whichever visit brackets this capture time, or
     /// null if no visit brackets it (same "no data, not a guess" convention as
     /// FindPresentPlayers), the bracketed visit itself has no recorded world name (a normal gap

@@ -60,6 +60,7 @@ public partial class SettingsWindow : Window
         AutoCopyUrlCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
         HoverDelaySlider.Value = _repo.GetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, 0.25);
         SkipResolvedPhotosCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, true);
+        PortalHopWindowSlider.Value = _repo.GetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, 90);
 
         // GistTokenBox is deliberately left blank rather than showing the saved token - it's
         // only used to CHANGE the token (see SaveButton_Click, which leaves the stored token
@@ -378,6 +379,7 @@ public partial class SettingsWindow : Window
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, HoverDelaySlider.Value);
         _repo.SetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, SkipResolvedPhotosCheckBox.IsChecked == true);
+        _repo.SetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, PortalHopWindowSlider.Value);
 
         // GistTokenBox left empty means "don't change the saved token" - only overwrite it when
         // something was actually typed, so reopening Settings and clicking Save without touching

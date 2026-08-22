@@ -917,6 +917,33 @@ public partial class TagFacesWindow : Window
         return _friends.Any(f => f.UserId == userId) ? "" : null;
     }
 
+    /// <summary>Best-effort match score between the face currently being tagged and a
+    /// present-in-instance candidate, used only to rank OpenPicker's "in this instance" section
+    /// (score only makes sense against a prior of "this person was actually there" - sorting the
+    /// much wider type-to-search results the same way would rank total strangers alongside real
+    /// candidates). This mirrors FaceSuggestionService's own trimmed-references/centroid-fallback
+    /// scoring (see FaceMatcher.GetTrimmedReferences), minus its VrcProfileThumbnail fallback and
+    /// batching - this runs live against a handful of candidates each time the picker opens, not
+    /// the whole library, so there's no need for either. Null whenever a score can't be computed
+    /// (the active face has no stored embedding yet - Suggest Faces/Detect Faces hasn't run -,
+    /// the candidate has no linked VRC account, or that VRC account has never been registered or
+    /// has zero confirmed reference photos yet) - those candidates keep their original
+    /// (alphabetical) position rather than being sorted to a misleading spot.</summary>
+    private float? ScoreCandidate(string? vrcUserId, float[]? activeEmbedding)
+    {
+        if (vrcUserId is null || activeEmbedding is null) return null;
+        if (_personsById.Values.FirstOrDefault(p => p.VrcUserId == vrcUserId) is not RegisteredPerson person) return null;
+
+        var refs = _faces.GetReferenceEmbeddingsForPerson(person.Id)
+            .Select(CcipEmbeddingService.BytesToEmbedding).ToList();
+        if (FaceMatcher.GetTrimmedReferences(refs) is not List<float[]> trimmed) return null;
+
+        List<float[]> candidates = trimmed.Count >= FaceMatcher.MinReferencesForTrimming
+            ? trimmed
+            : FaceMatcher.ComputeCentroid(trimmed) is float[] centroid ? [centroid] : [];
+        return candidates.Count > 0 ? candidates.Max(r => FaceMatcher.CosineSimilarity(activeEmbedding, r)) : null;
+    }
+
     private void OpenPicker(long detectedFaceId, Rectangle box)
     {
         _activeFaceId = detectedFaceId;
@@ -949,18 +976,32 @@ public partial class TagFacesWindow : Window
 
         items.Add(new PickerItem("<unknown> (clear tag)", null, null, IsNotAFace: true));
 
+        // Ranked by match score against the face being tagged where one's available (see
+        // ScoreCandidate) - a present-in-instance candidate is exactly the pool where a score is
+        // meaningful (a real prior of "this person was actually here"), unlike the much wider
+        // type-to-search results below. Unscored candidates (no embedding yet, never registered,
+        // no reference photos) keep their original position at the back, stable-sorted.
+        float[]? activeEmbedding = _detectedFaces.FirstOrDefault(f => f.Id == detectedFaceId)?.Embedding is byte[] embeddingBytes
+            ? CcipEmbeddingService.BytesToEmbedding(embeddingBytes)
+            : null;
+        var presentItems = new List<(PickerItem Item, float? Score)>();
         foreach (var player in _photoPlayers)
         {
             string? userId = NormalizeVrcUserId(player.UserId);
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per VRCX)", userId, null, RawName: player.DisplayName, FriendGlyph: FriendGlyphFor(userId)));
+            float? score = ScoreCandidate(userId, activeEmbedding);
+            string label = $"{player.DisplayName} (in this instance, per VRCX)" + (score is float s ? $" ({s:F2})" : "");
+            presentItems.Add((new PickerItem(label, userId, null, RawName: player.DisplayName, FriendGlyph: FriendGlyphFor(userId)), score));
         }
         // Gamelog-inferred fallback (GamelogCorrelationService) - only ever populated when
         // _photoPlayers is empty, so there's no overlap/duplication risk between the two loops.
         foreach (var player in _gamelogPlayers)
         {
             string? userId = NormalizeVrcUserId(player.UserId);
-            items.Add(new PickerItem($"{player.DisplayName} (in this instance, per log)", userId, null, RawName: player.DisplayName, FriendGlyph: FriendGlyphFor(userId)));
+            float? score = ScoreCandidate(userId, activeEmbedding);
+            string label = $"{player.DisplayName} (in this instance, per log)" + (score is float s ? $" ({s:F2})" : "");
+            presentItems.Add((new PickerItem(label, userId, null, RawName: player.DisplayName, FriendGlyph: FriendGlyphFor(userId)), score));
         }
+        items.AddRange(presentItems.OrderByDescending(x => x.Score ?? float.NegativeInfinity).Select(x => x.Item));
         // Recently-tagged shortlist, not every registered person ever created - that list only
         // grows and became unusable (type-to-search below covers the rest; see
         // NewPersonNameTextBox_TextChanged). Capped at 10 by GetRecentlyTaggedPersons.
