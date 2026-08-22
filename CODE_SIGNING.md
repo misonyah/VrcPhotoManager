@@ -39,6 +39,20 @@ only ever come from this project's own GitHub Releases (Velopack's `GithubSource
 documented above. There is no plugin, script-downloading, or arbitrary-code-execution mechanism
 beyond this self-update path.
 
+## Build provenance attestation (available now, separate from signing)
+
+Since release 1.1.0, every release publishes a [GitHub Artifact Attestation]
+(Sigstore-backed, free for public repos) alongside a `SHA256SUMS.txt` - see the README's
+"Verifying a release" section for how to check them. **This is not a substitute for
+Authenticode code signing above and does not affect Windows SmartScreen at all** - Windows
+doesn't consume Sigstore/SLSA attestations. What it actually proves: the exact file you
+downloaded was built by [this repo's release workflow](.github/workflows/release.yml) from a
+specific tagged commit in this repository, not tampered with or substituted afterward, and not
+built anywhere else. That's a real, independently-verifiable integrity/origin guarantee available
+today at zero cost, while the SmartScreen-facing signing question above is still pending.
+
+[GitHub Artifact Attestation]: https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds
+
 ## Team roles
 
 This is currently a solo-maintained project - one person (the repository owner) acts as Author,

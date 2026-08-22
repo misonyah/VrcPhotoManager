@@ -13,6 +13,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +57,29 @@ jobs:
           --shortcuts Desktop,StartMenu
           --outputDir Releases
 
+      # Plain-text SHA256 of every packaged file, verifiable with nothing more than stock
+      # Windows (certutil -hashfile) or any *nix coreutils sha256sum -c - no GitHub CLI or
+      # Sigstore tooling required, unlike the attestation below. Generated before that step so
+      # its own attestation subject list also covers this file, not just the binaries.
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem -Path Releases -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          Set-Content -Path Releases/SHA256SUMS.txt -Value $lines -Encoding utf8
+
+      # Cryptographically ties every packaged file (Setup.exe, nupkg, delta files, and the
+      # checksums file above) to this exact commit + workflow run via GitHub's Sigstore-backed
+      # attestation service (free for public repos) - see CODE_SIGNING.md and the README's
+      # "Verifying a release" section for what this proves and how to check it. Independent of
+      # (and not a substitute for) actual Authenticode signing - see that same doc for why.
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "Releases/*"
+
       - name: Upload to GitHub Release
         run: >
           vpk upload github
@@ -63,3 +88,12 @@ jobs:
           --tag ${{ github.ref_name }}
           --outputDir Releases
           --publish
+
+      # vpk's uploader only knows about the files it itself packaged - explicitly attach the
+      # checksums file too so it actually shows up as a downloadable release asset.
+      # --clobber makes this idempotent regardless of whether vpk's own upload already grabbed
+      # a same-named file from the output directory.
+      - name: Attach checksums to the release
+        run: gh release upload ${{ github.ref_name }} Releases/SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

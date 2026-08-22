@@ -161,6 +161,29 @@ this project's **Code signing policy** (applying for [SignPath Foundation](https
 The app checks for updates in the background on startup and downloads them automatically;
 a downloaded update is applied the next time you restart the app - no separate updater step.
 
+### Verifying a release
+
+The installer isn't code-signed yet (see above), but every release since 1.1.0 publishes two
+free, independently-checkable proofs that what you downloaded is exactly what this repository's
+own CI built - neither requires trusting me, just GitHub's and Sigstore's public infrastructure:
+
+- **Checksum** - each release includes a `SHA256SUMS.txt`. Verify with:
+  ```powershell
+  certutil -hashfile VrcPhotoManager-win-Setup.exe SHA256
+  ```
+  and compare against the matching line in `SHA256SUMS.txt`.
+- **Build provenance attestation** - cryptographic proof the file was built by
+  [this repo's release workflow](.github/workflows/release.yml) from a specific tagged commit,
+  not assembled or modified anywhere else. Verify with the
+  [GitHub CLI](https://cli.github.com/):
+  ```powershell
+  gh attestation verify VrcPhotoManager-win-Setup.exe --owner misonyah
+  ```
+
+Neither of these is a malware scan by itself - they prove *origin and integrity*, not *safety*.
+For an independent malware-engine opinion, you're welcome to upload the installer to
+[VirusTotal](https://www.virustotal.com/) yourself.
+
 ## Building & running from source
 
 ```powershell
