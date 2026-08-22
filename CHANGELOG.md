@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.1.0
+
+### Face detection & matching
+
+- Replace the bundled LBP cascade face detector with a YOLOv8 model (deepghs/anime_face_detection)
+  - a real, measured recall win, especially on close-up multi-person photos.
+- Switch face matching from a general-purpose CLIP model to CCIP (contrastively trained to tell
+  anime characters apart), with nearest-neighbor scoring for well-populated people and an averaged
+  centroid fallback for small/noisy reference sets.
+- Add per-photo elimination to Suggest Faces (a person already confirmed or claimed elsewhere in
+  the same photo is excluded as a candidate for its other faces) and fix a stale-suggestion bug it
+  exposed.
+- Fix face-tag identity merging around VRCX's empty-string "unresolved player" sentinel, which had
+  been silently merging unrelated unresolved people.
+
+### Tag Faces
+
+- The person picker now shows a friend/self indicator glyph, and ranks "in this instance"
+  candidates by live match score against the face being tagged.
+- Split the old combined "All tagged" button into independent "Confirm N faces" (accepts pending
+  suggestions) and "Remove N untagged faces" (clears bad detections) actions.
+- Add sort-by-suggestion-confidence and sort-by-tagging-value options to the main grid.
+
+### Metadata & gamelog
+
+- Add a "Traveled together" section to Photo Metadata: friends whose departure from your previous
+  instance and arrival into this one both fall within a configurable window of your own
+  transition - a portal/invite-hop detector, in other words.
+
+### General
+
+- Persist the main window's filters and sort order across restarts, the same way window size
+  already was.
+- Split the Settings window into tabs (Models / Upload & Sharing / General) now that it had grown
+  past a single comfortable column.
+- Add a Gist-published photo index, VRCDN quota display, and rework crop/upload tracking.
+- Add CODE_SIGNING.md and PRIVACY.md ahead of a SignPath Foundation application.
+
 ## 1.0.1
 
 - Add an installer and automatic background updates via [Velopack](https://velopack.io) -
