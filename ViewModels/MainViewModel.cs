@@ -608,6 +608,21 @@ public class MainViewModel : INotifyPropertyChanged
         // rebuild yet (this runs before InitializeAsync loads any photos) and would just be
         // redundant work once it does.
         _thumbnailSize = _repo.GetDoubleSetting(SettingsKeys.LastThumbnailSize, _thumbnailSize);
+        // Same reasoning as _thumbnailSize above - straight into the backing fields, not the
+        // properties (their setters call RebuildRows, which has nothing to rebuild yet). All of
+        // these are already in place before InitializeAsync's first RebuildRows() runs, so - the
+        // player filter aside (see RestorePlayerFilterCriteria) - this is the entire restore, no
+        // second pass needed.
+        _ratingFilter = _repo.GetStringSetting(SettingsKeys.RatingFilter) ?? _ratingFilter;
+        _statusFilter = _repo.GetStringSetting(SettingsKeys.StatusFilter) ?? _statusFilter;
+        _uploadCropModeFilter = _repo.GetStringSetting(SettingsKeys.UploadCropModeFilter) ?? _uploadCropModeFilter;
+        _avatarTypeFilter = _repo.GetStringSetting(SettingsKeys.AvatarTypeFilter) ?? _avatarTypeFilter;
+        _faceCountFilter = _repo.GetStringSetting(SettingsKeys.FaceCountFilter) ?? _faceCountFilter;
+        _playerCountFilter = _repo.GetStringSetting(SettingsKeys.PlayerCountFilter) ?? _playerCountFilter;
+        _minSuggestionConfidence = _repo.GetDoubleSetting(SettingsKeys.MinSuggestionConfidence, _minSuggestionConfidence);
+        _sortOption = _repo.GetStringSetting(SettingsKeys.SortOption) ?? _sortOption;
+        _taggedOnlyFilter = _repo.GetBoolSetting(SettingsKeys.TaggedOnlyFilter);
+        _ownPhotosOnlyFilter = _repo.GetBoolSetting(SettingsKeys.OwnPhotosOnlyFilter);
         _thumbnails = new ThumbnailService();
         _credentials = new CredentialStore(_repo);
         _faces = new FaceRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
@@ -657,6 +672,7 @@ public class MainViewModel : INotifyPropertyChanged
         RefreshPlayerFilterOptions();
         RefreshAvatarTypeFilterOptions();
         RefreshUploadCropModeFilterOptions();
+        RestorePlayerFilterCriteria();
 
         TryAutoLogin();
 
@@ -1240,6 +1256,70 @@ public class MainViewModel : INotifyPropertyChanged
             .OrderBy(x => NaturalSortKey(x.Name), StringComparer.OrdinalIgnoreCase)
             .Select(x => x.Option));
         PlayerFilterOptions = options;
+    }
+
+    /// <summary>Rebuilds PlayerFilterCriteria from the previous session's saved rows (see
+    /// SaveFilterState for the format) - called once at startup, after RefreshPlayerFilterOptions
+    /// so each saved (VrcUserId or PersonId) has a real PlayerFilterOption to match against
+    /// (matching against a placeholder object built before that list exists would show the
+    /// right filter behavior but the wrong/stale display text and tagged-count in the UI). A
+    /// saved id that no longer resolves to anything current (the person was deleted, or this is
+    /// a stale value from a much older session) is silently dropped rather than left as a
+    /// broken row - same "just don't restore what doesn't fit" approach as RestoreWindowBounds
+    /// ignoring a 0x0 saved size.</summary>
+    private void RestorePlayerFilterCriteria()
+    {
+        string? raw = _repo.GetStringSetting(SettingsKeys.PlayerFilterCriteria);
+        if (string.IsNullOrEmpty(raw)) return;
+
+        PlayerFilterCriteria.Clear();
+        foreach (string entry in raw.Split('|', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] fields = entry.Split(':', 3);
+            if (fields.Length != 3) continue;
+            bool exclude = fields[0] == "X";
+            PlayerFilterOption? match = fields[1] switch
+            {
+                "U" => PlayerFilterOptions.FirstOrDefault(o => o.VrcUserId == fields[2]),
+                "P" when long.TryParse(fields[2], out long personId) =>
+                    PlayerFilterOptions.FirstOrDefault(o => o.PersonId == personId),
+                _ => null,
+            };
+            if (match is null) continue;
+            var row = NewPlayerFilterRow(match);
+            row.Exclude = exclude;
+            PlayerFilterCriteria.Add(row);
+        }
+        OnPlayerFilterCriteriaChanged();
+    }
+
+    /// <summary>Writes every filter/sort control's current value so the next launch can restore
+    /// the exact same view (see MainWindow.SaveSessionState, which calls this alongside the
+    /// window-bounds/thumbnail-size writes it already does). PlayerFilterCriteria needs its own
+    /// serialization since it's a list, not a scalar: each non-empty row becomes
+    /// "{X|I}:{U|P}:{id}" (Exclude-or-Include, VrcUserId-or-PersonId, the id itself), joined with
+    /// "|" - e.g. "I:U:usr_abc123|X:P:42". The always-present trailing empty row (see
+    /// EnsurePlayerFilterCriteriaShape) is skipped, same as RestorePlayerFilterCriteria skips
+    /// anything that isn't exactly 3 fields.</summary>
+    public void SaveFilterState()
+    {
+        _repo.SetStringSetting(SettingsKeys.RatingFilter, RatingFilter);
+        _repo.SetStringSetting(SettingsKeys.StatusFilter, StatusFilter);
+        _repo.SetStringSetting(SettingsKeys.UploadCropModeFilter, UploadCropModeFilter);
+        _repo.SetStringSetting(SettingsKeys.AvatarTypeFilter, AvatarTypeFilter);
+        _repo.SetStringSetting(SettingsKeys.FaceCountFilter, FaceCountFilter);
+        _repo.SetStringSetting(SettingsKeys.PlayerCountFilter, PlayerCountFilter);
+        _repo.SetDoubleSetting(SettingsKeys.MinSuggestionConfidence, MinSuggestionConfidence);
+        _repo.SetStringSetting(SettingsKeys.SortOption, SortOption);
+        _repo.SetBoolSetting(SettingsKeys.TaggedOnlyFilter, TaggedOnlyFilter);
+        _repo.SetBoolSetting(SettingsKeys.OwnPhotosOnlyFilter, OwnPhotosOnlyFilter);
+
+        string serializedCriteria = string.Join('|', PlayerFilterCriteria
+            .Where(r => !r.IsEmpty)
+            .Select(r => r.Option.VrcUserId is not null
+                ? $"{(r.Exclude ? "X" : "I")}:U:{r.Option.VrcUserId}"
+                : $"{(r.Exclude ? "X" : "I")}:P:{r.Option.PersonId}"));
+        _repo.SetStringSetting(SettingsKeys.PlayerFilterCriteria, serializedCriteria);
     }
 
     /// <summary>

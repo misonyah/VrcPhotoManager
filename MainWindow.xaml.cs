@@ -94,6 +94,7 @@ public partial class MainWindow : Window
         vm.Repo.SetDoubleSetting(SettingsKeys.WindowHeight, bounds.Height);
 
         vm.Repo.SetDoubleSetting(SettingsKeys.LastThumbnailSize, vm.ThumbnailSize);
+        vm.SaveFilterState();
 
         if (FindVisualChild<ScrollViewer>(PhotoGrid) is ScrollViewer scrollViewer)
         {

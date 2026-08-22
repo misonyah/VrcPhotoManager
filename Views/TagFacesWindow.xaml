@@ -68,7 +68,9 @@
 
         <DockPanel Grid.Row="2" Margin="8">
             <Button x:Name="AllTaggedButton" DockPanel.Dock="Right" Click="AllTaggedButton_Click" Padding="8,2" VerticalAlignment="Center"
-                    ToolTip="Everyone identifiable in this photo has been tagged - mark every remaining untagged (yellow) box as a bad detection, same as clicking Delete box on each one.&#10;Kept in the database for reviewing detection quality later, just hidden from view here." />
+                    ToolTip="Accepts every pending suggestion (orange) as-is - same as clicking &quot;Confirm: {name}&quot; on each one individually." />
+            <Button x:Name="RemoveUntaggedButton" DockPanel.Dock="Right" Click="RemoveUntaggedButton_Click" Padding="8,2" Margin="0,0,8,0" VerticalAlignment="Center"
+                    ToolTip="Marks every remaining untagged (yellow) box as a bad detection - same as clicking Delete box on each one individually.&#10;Kept in the database for reviewing detection quality later, just hidden from view here." />
             <!-- Person/Avatar mode - which kind of box click-drag-on-empty-space creates, and
                  which picker an existing box's own click opens (each box's hit-test rectangle
                  has its OWN handler wired in RedrawBoxes/RedrawAvatarRegions, so this toggle

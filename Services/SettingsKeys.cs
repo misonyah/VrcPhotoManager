@@ -40,6 +40,24 @@ public static class SettingsKeys
     public const string LastThumbnailSize = "last_thumbnail_size";
     public const string LastScrollOffset = "last_scroll_offset";
 
+    // Filter/sort state - same write-once-at-Closing, read-once-at-startup pattern as the
+    // session-state keys above (see MainViewModel.SaveFilterState/RestoreFilterState).
+    public const string RatingFilter = "rating_filter";
+    public const string StatusFilter = "status_filter";
+    public const string UploadCropModeFilter = "upload_crop_mode_filter";
+    public const string AvatarTypeFilter = "avatar_type_filter";
+    public const string FaceCountFilter = "face_count_filter";
+    public const string PlayerCountFilter = "player_count_filter";
+    public const string MinSuggestionConfidence = "min_suggestion_confidence";
+    public const string SortOption = "sort_option";
+    public const string TaggedOnlyFilter = "tagged_only_filter";
+    public const string OwnPhotosOnlyFilter = "own_photos_only_filter";
+    /// <summary>Serialized PlayerFilterCriteria rows - see MainViewModel.SaveFilterState for the
+    /// format. Restored separately from the other filters above, after RefreshPlayerFilterOptions
+    /// has run (needs the real PlayerFilterOption objects to match against), not directly in the
+    /// constructor.</summary>
+    public const string PlayerFilterCriteria = "player_filter_criteria";
+
     // VRCDN index file (for a Udon world script to randomly pick an uploaded photo - see
     // MainViewModel.GenerateVrcdnIndexAsync) - the base filename (no extension) and format
     // ("csv", "json", or "txt") used the next time the index is generated. IndexFileNameBase

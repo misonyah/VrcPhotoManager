@@ -446,21 +446,24 @@ public partial class TagFacesWindow : Window
         UpdateAllTaggedButtonLabel();
     }
 
-    /// <summary>Distinct confirmed people in this photo so far, not a raw box count - two boxes
-    /// confirmed as the same person (a real, legitimate case, see the identity-merging fix)
-    /// should count as 1 "person tagged", not 2.</summary>
+    /// <summary>AllTaggedButton and RemoveUntaggedButton are two separate bulk actions, not one -
+    /// a real report caught the original combined button counting a pending suggestion and an
+    /// untagged box together as "2 faces" to confirm, when clicking it would only ever confirm
+    /// one of them (the other gets deleted, not confirmed). AllTaggedButton now only ever accepts
+    /// pending suggestions (has a PersonId, not yet Confirmed); RemoveUntaggedButton only ever
+    /// deletes boxes with no label row at all. Both counts are raw face counts, not distinct-
+    /// person counts, since the same person can legitimately appear in more than one box in the
+    /// same photo (a selfie, a mirror) and each occurrence is its own remaining item.</summary>
     private void UpdateAllTaggedButtonLabel()
     {
-        int taggedCount = _labelsByFaceId.Values
-            .Where(l => l.Confirmed && l.PersonId is not null)
-            .Select(l => l.PersonId!.Value)
-            .Distinct()
-            .Count();
-        AllTaggedButton.Content = $"All {taggedCount} {(taggedCount == 1 ? "person" : "people")} tagged";
-        // Nothing left for the bulk-delete in AllTaggedButton_Click to act on once every
-        // detected face already has a label row (confirmed, suggested, or rejected) - clicking
-        // it would just be a no-op, so gray it out instead of leaving it always clickable.
-        AllTaggedButton.IsEnabled = _detectedFaces.Any(f => !_labelsByFaceId.ContainsKey(f.Id));
+        int suggestedCount = _detectedFaces.Count(f =>
+            _labelsByFaceId.TryGetValue(f.Id, out var label) && !label.Confirmed && label.PersonId is not null);
+        AllTaggedButton.Content = $"Confirm {suggestedCount} {(suggestedCount == 1 ? "face" : "faces")}";
+        AllTaggedButton.IsEnabled = suggestedCount > 0;
+
+        int untaggedCount = _detectedFaces.Count(f => !_labelsByFaceId.ContainsKey(f.Id));
+        RemoveUntaggedButton.Content = $"Remove {untaggedCount} untagged {(untaggedCount == 1 ? "face" : "faces")}";
+        RemoveUntaggedButton.IsEnabled = untaggedCount > 0;
     }
 
     private void PhotoImage_SizeChanged(object sender, SizeChangedEventArgs e) => RedrawBoxes();
@@ -1266,12 +1269,34 @@ public partial class TagFacesWindow : Window
         RedrawBoxes();
     }
 
-    /// <summary>Bulk cleanup for once you've tagged everyone you recognize in this photo: every
+    /// <summary>Bulk-accepts every remaining pending suggestion (orange - a real FaceLabel row,
+    /// PersonId set, just not Confirmed yet), same as picking "Confirm: {name}" per-box
+    /// (SuggestionListBox_MouseUp's IsConfirmSuggestion/IsConfirmAutoTag branches). Leaves
+    /// untagged (yellow, no label row at all) boxes untouched - see RemoveUntaggedButton_Click
+    /// for those; a real report caught these two being combined into one button and one count,
+    /// where "Confirm N faces" silently included boxes the click would only ever delete, not
+    /// confirm.</summary>
+    private void AllTaggedButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingManualFaceId = null;
+        PersonPickerPopup.IsOpen = false;
+        foreach (var face in _detectedFaces)
+        {
+            if (!_labelsByFaceId.TryGetValue(face.Id, out var label)) continue;
+            if (label.Confirmed || label.PersonId is null) continue;
+            _faces.UpsertFaceLabel(face.Id, label.PersonId.Value, confirmed: true, label.Source);
+            _faces.ResolveSuggestionLog(face.Id, SuggestionOutcome.ConfirmedAsIs);
+        }
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    /// <summary>Bulk cleanup for once you've reviewed everyone recognizable in this photo: every
     /// remaining untagged (yellow) box - no FaceLabel row at all, i.e. never reviewed, not the
     /// same as the gray "confirmed as &lt;unknown&gt;" state - is a bad detection by elimination,
-    /// so this does the same thing DeleteFaceButton_Click does per-box, just for all of them in
-    /// one click instead of clicking Delete box on each one individually.</summary>
-    private void AllTaggedButton_Click(object sender, RoutedEventArgs e)
+    /// same as clicking Delete box on each one individually. Leaves pending suggestions (orange)
+    /// untouched - see AllTaggedButton_Click for those.</summary>
+    private void RemoveUntaggedButton_Click(object sender, RoutedEventArgs e)
     {
         _pendingManualFaceId = null;
         PersonPickerPopup.IsOpen = false;
