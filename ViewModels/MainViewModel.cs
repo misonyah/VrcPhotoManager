@@ -918,22 +918,77 @@ public class MainViewModel : INotifyPropertyChanged
     private async Task ScanLibraryAsync()
     {
         var token = _shutdownCts.Token;
-        var localFolderLibraries = _libraries.GetAll().Where(l => l.Type == LibraryType.LocalFolder).ToList();
+        var allLibraries = _libraries.GetAll();
+
+        var localFolderLibraries = allLibraries.Where(l => l.Type == LibraryType.LocalFolder).ToList();
         StatusMessage = "Scanning library...";
 
+        int totalLocalFiles = 0;
         foreach (var library in localFolderLibraries)
         {
             if (library.LocalPath is null) continue;
-            await ScanLocalFolderLibraryAsync(library.Id, library.LocalPath, token);
+            totalLocalFiles += await ScanLocalFolderLibraryAsync(library.Id, library.LocalPath, token);
             if (token.IsCancellationRequested) return;
         }
+
+        // Discord sync is a graceful no-op when there's nothing to sync or no bot token is
+        // configured yet - Settings' Discord setup is optional, so Scan Library must keep
+        // working for local-only libraries whether or not it's been done.
+        var discordLibraries = allLibraries.Where(l => l.Type == LibraryType.DiscordChannel).ToList();
+        if (discordLibraries.Count > 0)
+        {
+            string? botToken = _credentials.LoadDiscordBotToken();
+            if (botToken is not null)
+            {
+                using var discordClient = new DiscordApiClient(botToken);
+                var progress = new Progress<string>(msg => StatusMessage = msg);
+                foreach (var library in discordLibraries)
+                {
+                    try
+                    {
+                        await DiscordLibraryService.SyncChannelAsync(library, discordClient, _repo, _libraries, progress, token);
+                    }
+                    catch (Exception ex)
+                    {
+                        // One library's sync failure (bad token scope, deleted channel, network
+                        // blip) shouldn't abort the rest of the scan - local folders above already
+                        // ran, and other Discord libraries below still deserve a chance.
+                        StatusMessage = $"Discord sync failed for {library.DisplayName}: {ex.Message}";
+                    }
+                    if (token.IsCancellationRequested) return;
+                }
+            }
+        }
+
+        // Finalization tail - runs exactly once per full ScanLibraryAsync call (covering every
+        // local-folder AND Discord library just scanned above), not once per library. Previously
+        // lived at the end of ScanLocalFolderLibraryAsync (per-local-folder), which was correct
+        // back when that was the only kind of library, but would have run it once per folder
+        // (and never after a Discord sync) once multi-library support landed.
+        ApplyPlayerCounts();
+        StatusMessage = $"Scan complete: {totalLocalFiles} photos.";
+        RecordActionSuccess("ScanLibrary", nameof(ScanLibraryTooltip));
+        // Unlocks the 4 buttons gated on ScanLibrary having run at least once, and refreshes
+        // their tooltips so the "Run Scan Library first." note disappears immediately instead
+        // of only on the next hover after WPF's own requery happens to fire.
+        ScanFacesCommand.RaiseCanExecuteChanged();
+        ClassifyPhotosCommand.RaiseCanExecuteChanged();
+        ClassifyAvatarsCommand.RaiseCanExecuteChanged();
+        CrossReferenceGamelogCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(ScanFacesTooltip));
+        OnPropertyChanged(nameof(ClassifyPhotosTooltip));
+        OnPropertyChanged(nameof(ClassifyAvatarsTooltip));
+        OnPropertyChanged(nameof(CrossReferenceGamelogTooltip));
     }
 
     /// <summary>Scans one local-folder library's root - exactly the same enumerate/upsert/
     /// metadata-probe logic ScanLibraryAsync used to run against a single hardcoded root,
     /// now parameterized so it works identically for every configured local folder. New photos
-    /// are tagged with libraryId so they show up correctly filtered/grouped by library later.</summary>
-    private async Task ScanLocalFolderLibraryAsync(long libraryId, string root, CancellationToken token)
+    /// are tagged with libraryId so they show up correctly filtered/grouped by library later.
+    /// Returns the number of image files found under root, so the outer ScanLibraryAsync can
+    /// report a combined total across every local-folder library once, instead of this method
+    /// reporting (and finalizing) once per folder.</summary>
+    private async Task<int> ScanLocalFolderLibraryAsync(long libraryId, string root, CancellationToken token)
     {
         List<string> files;
         try
@@ -945,18 +1000,18 @@ public class MainViewModel : INotifyPropertyChanged
         catch (OperationCanceledException)
         {
             StatusMessage = "Scan cancelled.";
-            return;
+            return 0;
         }
         catch (DirectoryNotFoundException)
         {
             StatusMessage = $"Library folder not found: {root}";
-            return;
+            return 0;
         }
 
         int processed = 0;
         foreach (var chunk in Chunk(files, 25))
         {
-            if (token.IsCancellationRequested) { StatusMessage = "Scan cancelled."; return; }
+            if (token.IsCancellationRequested) { StatusMessage = "Scan cancelled."; return processed; }
 
             foreach (var path in chunk)
             {
@@ -1005,7 +1060,7 @@ public class MainViewModel : INotifyPropertyChanged
                     catch (OperationCanceledException)
                     {
                         StatusMessage = "Scan cancelled.";
-                        return;
+                        return processed;
                     }
                     catch (Exception ex)
                     {
@@ -1046,7 +1101,7 @@ public class MainViewModel : INotifyPropertyChanged
                     catch (OperationCanceledException)
                     {
                         StatusMessage = "Scan cancelled.";
-                        return;
+                        return processed;
                     }
                     catch (Exception ex)
                     {
@@ -1059,20 +1114,7 @@ public class MainViewModel : INotifyPropertyChanged
             RebuildRows();
         }
 
-        ApplyPlayerCounts();
-        StatusMessage = $"Scan complete: {files.Count} photos.";
-        RecordActionSuccess("ScanLibrary", nameof(ScanLibraryTooltip));
-        // Unlocks the 4 buttons gated on ScanLibrary having run at least once, and refreshes
-        // their tooltips so the "Run Scan Library first." note disappears immediately instead
-        // of only on the next hover after WPF's own requery happens to fire.
-        ScanFacesCommand.RaiseCanExecuteChanged();
-        ClassifyPhotosCommand.RaiseCanExecuteChanged();
-        ClassifyAvatarsCommand.RaiseCanExecuteChanged();
-        CrossReferenceGamelogCommand.RaiseCanExecuteChanged();
-        OnPropertyChanged(nameof(ScanFacesTooltip));
-        OnPropertyChanged(nameof(ClassifyPhotosTooltip));
-        OnPropertyChanged(nameof(ClassifyAvatarsTooltip));
-        OnPropertyChanged(nameof(CrossReferenceGamelogTooltip));
+        return files.Count;
     }
 
     private async Task ScanFacesAsync()
