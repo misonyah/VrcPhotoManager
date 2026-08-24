@@ -13,6 +13,13 @@ public enum RemoteStatus
 public class Photo
 {
     public long Id { get; set; }
+
+    /// <summary>FK into Library.Id - every photo belongs to exactly one library (a local folder
+    /// or a Discord channel). Backfilled for all pre-existing rows by the AddLibraryAndPhoto
+    /// LibraryId migration, which also seeds the original hardcoded VRChat screenshot folder as
+    /// Library row 1 - see the migration's Up() for the exact seed logic.</summary>
+    public long LibraryId { get; set; }
+
     public required string LocalPath { get; set; }
     public long FileSize { get; set; }
     public double Mtime { get; set; }

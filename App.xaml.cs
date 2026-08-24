@@ -142,6 +142,12 @@ public partial class App : Application
             ExitProcess();
         }
 
+        if (e.Args.Length == 1 && e.Args[0] == "--test-library-repo")
+        {
+            RunLibraryRepoDiagnostic();
+            ExitProcess();
+        }
+
         if (e.Args.Length == 1 && e.Args[0] == "--test-vrcdn-sync")
         {
             RunVrcdnSyncDiagnostic();
@@ -659,6 +665,28 @@ public partial class App : Application
 
         faces.DeleteFaceLabel(faceId);
         Console.WriteLine("DeleteFaceLabel: OK (cleanup)");
+    }
+
+    private static void RunLibraryRepoDiagnostic()
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        string dbPath = Path.Combine(dataDir, "vrcdn_manager.db");
+        _ = new Data.PhotoRepository(dbPath); // triggers migration (see PhotoRepository.EnsureDatabaseUpToDate)
+        var libraries = new Data.LibraryRepository(dbPath);
+
+        var created = libraries.AddLocalFolder(@"C:\temp\test-library-diagnostic", "Diagnostic Test Folder");
+        Console.WriteLine($"Created library id={created.Id}, type={created.Type}, path={created.LocalPath}");
+
+        var all = libraries.GetAll();
+        Console.WriteLine($"Total libraries: {all.Count}");
+        foreach (var lib in all)
+        {
+            Console.WriteLine($"  [{lib.Id}] {lib.Type} \"{lib.DisplayName}\" path={lib.LocalPath} discord={lib.DiscordChannelId}");
+        }
+
+        libraries.Remove(created.Id);
+        Console.WriteLine($"Removed id={created.Id}, remaining: {libraries.GetAll().Count}");
     }
 
     private static void RunVrcdnSyncDiagnostic()

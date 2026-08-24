@@ -18,6 +18,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<VrcUserAlias> VrcUserAliases => Set<VrcUserAlias>();
     public DbSet<AvatarRegion> AvatarRegions => Set<AvatarRegion>();
     public DbSet<AvatarCatalog> AvatarCatalogs => Set<AvatarCatalog>();
+    public DbSet<Library> Libraries => Set<Library>();
 
     private readonly string _dbPath;
 
@@ -57,6 +58,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.AvatarType).HasColumnName("avatar_type");
             entity.Property(p => p.AvatarTypeConfidence).HasColumnName("avatar_type_confidence");
             entity.Property(p => p.AvatarCatalogId).HasColumnName("avatar_catalog_id");
+            entity.Property(p => p.LibraryId).HasColumnName("library_id");
             entity.Property(p => p.MetadataScanned).HasColumnName("metadata_scanned");
             entity.Property(p => p.FacesScanned).HasColumnName("faces_scanned");
             entity.Property(p => p.AuthorId).HasColumnName("author_id");
@@ -248,6 +250,23 @@ public class VrcdnDbContext : DbContext
             entity.Property(c => c.JinxxyProduct).HasColumnName("jinxxy_product");
             entity.Property(c => c.ParentItemId).HasColumnName("parent_item_id");
             entity.Property(c => c.CreatedAt).HasColumnName("created_at");
+        });
+
+        modelBuilder.Entity<Library>(entity =>
+        {
+            entity.ToTable("libraries");
+            entity.HasKey(l => l.Id);
+
+            entity.Property(l => l.Id).HasColumnName("id");
+            entity.Property(l => l.Type).HasColumnName("type").HasConversion<string>();
+            entity.Property(l => l.DisplayName).HasColumnName("display_name").IsRequired();
+            entity.Property(l => l.LocalPath).HasColumnName("local_path");
+            entity.Property(l => l.DiscordGuildId).HasColumnName("discord_guild_id");
+            entity.Property(l => l.DiscordChannelId).HasColumnName("discord_channel_id");
+            entity.Property(l => l.LastSyncedAt).HasColumnName("last_synced_at");
+            entity.Property(l => l.LastSyncedMessageId).HasColumnName("last_synced_message_id");
+            entity.Property(l => l.AutoDownloadOriginals).HasColumnName("auto_download_originals").HasDefaultValue(false);
+            entity.Property(l => l.CreatedAt).HasColumnName("created_at");
         });
 
         modelBuilder.Entity<VrcUserAlias>(entity =>
