@@ -20,7 +20,28 @@ public class Photo
     /// Library row 1 - see the migration's Up() for the exact seed logic.</summary>
     public long LibraryId { get; set; }
 
-    public required string LocalPath { get; set; }
+    /// <summary>Null for a Discord-sourced photo whose full-size original hasn't been
+    /// downloaded/cached yet (or was evicted since) - see RemoteSourceUrl/RemoteSourceId and
+    /// PhotoSourceResolver. Always non-null for a local-folder photo.</summary>
+    public string? LocalPath { get; set; }
+
+    /// <summary>Discord CDN attachment URL - used to download the full-size original on demand.
+    /// Null for local-folder photos. Can go stale (Discord CDN URLs on older messages can
+    /// expire/rotate) - PhotoSourceResolver re-fetches the source message for a fresh one on a
+    /// 404 rather than treating that as a hard failure.</summary>
+    public string? RemoteSourceUrl { get; set; }
+
+    /// <summary>"{discordMessageId}_{attachmentIndex}" - the dedup key for Discord sync (see
+    /// DiscordLibraryService.SyncChannelAsync), independent of RemoteSourceUrl since that can
+    /// rotate but this never does. Null for local-folder photos. Unique when non-null.</summary>
+    public string? RemoteSourceId { get; set; }
+
+    /// <summary>Drives two-tier LRU eviction of the full-size cache (see
+    /// DiscordPhotoCacheService) - set whenever PhotoSourceResolver hands out a cached local
+    /// path, whether newly downloaded or already present. Null for local-folder photos (never
+    /// evicted, so never needs this).</summary>
+    public DateTime? LastAccessedAt { get; set; }
+
     public long FileSize { get; set; }
     public double Mtime { get; set; }
 

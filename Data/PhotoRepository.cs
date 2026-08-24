@@ -159,6 +159,9 @@ public class PhotoRepository
         PendingRemovalRemoteId = p.PendingRemovalRemoteId,
         UploadedOffsetX = p.UploadedOffsetX,
         UploadedOffsetY = p.UploadedOffsetY,
+        RemoteSourceUrl = p.RemoteSourceUrl,
+        RemoteSourceId = p.RemoteSourceId,
+        LastAccessedAt = p.LastAccessedAt,
     };
 
     public List<Photo> GetAll()
@@ -799,6 +802,79 @@ public class PhotoRepository
             context.SaveChanges();
         }
         return unresolved;
+    }
+
+    public Photo? GetByRemoteSourceId(string remoteSourceId)
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking().FirstOrDefault(p => p.RemoteSourceId == remoteSourceId);
+    }
+
+    /// <summary>Insert-only (Discord sync's dedup already checks GetByRemoteSourceId first, so
+    /// this is never called for an existing row) - LocalPath stays null until
+    /// PhotoSourceResolver caches the full-size original on demand.</summary>
+    public long UpsertDiscordPhoto(long libraryId, string remoteSourceId, string remoteSourceUrl, byte[] thumbnail)
+    {
+        using var context = NewContext();
+        var photo = new Photo
+        {
+            LibraryId = libraryId,
+            RemoteSourceId = remoteSourceId,
+            RemoteSourceUrl = remoteSourceUrl,
+            Thumbnail = thumbnail,
+            FileSize = 0,
+            Mtime = 0,
+        };
+        context.Photos.Add(photo);
+        context.SaveChanges();
+        return photo.Id;
+    }
+
+    public void SetLocalPathAndAccessed(long photoId, string localPath)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == photoId).ExecuteUpdate(s => s
+            .SetProperty(p => p.LocalPath, localPath)
+            .SetProperty(p => p.LastAccessedAt, DateTime.UtcNow));
+    }
+
+    public void TouchLastAccessed(long photoId)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == photoId).ExecuteUpdate(s => s.SetProperty(p => p.LastAccessedAt, DateTime.UtcNow));
+    }
+
+    /// <summary>Eviction's own write - nulls LocalPath back out once its cached file is deleted,
+    /// leaving RemoteSourceUrl/RemoteSourceId untouched so PhotoSourceResolver can re-download
+    /// it later.</summary>
+    public void ClearLocalPath(long photoId)
+    {
+        using var context = NewContext();
+        context.Photos.Where(p => p.Id == photoId).ExecuteUpdate(s => s.SetProperty(p => p.LocalPath, (string?)null));
+    }
+
+    /// <summary>Cache-eviction candidates: every Discord photo currently holding a cached
+    /// full-size file, tagged with whether it's "fully face-tagged" (FacesScanned=true and
+    /// every DetectedFace resolved - no pending suggestions) for DiscordPhotoCacheService's
+    /// two-tier priority. See the design spec's "Full-size cache + eviction" section.</summary>
+    public List<(long PhotoId, string LocalPath, long FileSize, DateTime? LastAccessedAt, bool FullyFaceTagged)> GetCachedDiscordPhotosForEviction()
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking()
+            .Where(p => p.RemoteSourceId != null && p.LocalPath != null)
+            .Select(p => new
+            {
+                p.Id,
+                LocalPath = p.LocalPath!,
+                p.FileSize,
+                p.LastAccessedAt,
+                p.FacesScanned,
+                HasUnresolvedFace = context.DetectedFaces.Any(f => f.PhotoId == p.Id && !f.Deleted
+                    && !context.FaceLabels.Any(l => l.DetectedFaceId == f.Id)),
+            })
+            .ToList()
+            .Select(p => (p.Id, p.LocalPath, p.FileSize, p.LastAccessedAt, p.FacesScanned && !p.HasUnresolvedFace))
+            .ToList();
     }
 
     public byte[]? GetSetting(string key)

@@ -44,10 +44,11 @@ public class VrcdnDbContext : DbContext
             entity.ToTable("photos");
             entity.HasKey(p => p.Id);
             entity.HasIndex(p => p.LocalPath).IsUnique();
+            entity.HasIndex(p => p.RemoteSourceId).IsUnique().HasFilter("remote_source_id IS NOT NULL");
             entity.HasIndex(p => p.RemoteStatus);
 
             entity.Property(p => p.Id).HasColumnName("id");
-            entity.Property(p => p.LocalPath).HasColumnName("local_path").IsRequired();
+            entity.Property(p => p.LocalPath).HasColumnName("local_path");
             entity.Property(p => p.FileSize).HasColumnName("file_size");
             entity.Property(p => p.Mtime).HasColumnName("mtime");
             entity.Property(p => p.Width).HasColumnName("width");
@@ -79,6 +80,9 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.CropOffsetY).HasColumnName("crop_offset_y");
             entity.Property(p => p.CropRatioOverride).HasColumnName("crop_ratio_override");
             entity.Property(p => p.PendingRemovalRemoteId).HasColumnName("pending_removal_remote_id");
+            entity.Property(p => p.RemoteSourceUrl).HasColumnName("remote_source_url");
+            entity.Property(p => p.RemoteSourceId).HasColumnName("remote_source_id");
+            entity.Property(p => p.LastAccessedAt).HasColumnName("last_accessed_at");
         });
 
         modelBuilder.Entity<AppSetting>(entity =>
