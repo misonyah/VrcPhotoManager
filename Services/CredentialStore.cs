@@ -16,6 +16,7 @@ public class CredentialStore
     private const string PasswordSaltKey = "password_salt";
     private const int Pbkdf2Iterations = 200_000;
     private const string GistTokenKey = "github_gist_token";
+    private const string DiscordBotTokenKey = "discord_bot_token";
 
     private readonly PhotoRepository _repo;
 
@@ -82,6 +83,24 @@ public class CredentialStore
     public string? LoadGistToken()
     {
         byte[]? stored = _repo.GetSetting(GistTokenKey);
+        if (stored is null) return null;
+        byte[] plain = ProtectedData.Unprotect(stored, null, DataProtectionScope.CurrentUser);
+        return Encoding.UTF8.GetString(plain);
+    }
+
+    /// <summary>DPAPI-only (no password layer, unlike SaveCookie/LoadCookie) - the Discord bot
+    /// token is scoped to a single bot and read-only on the Gist, so YAGNI on the extra
+    /// password-protection option unless asked for later.</summary>
+    public void SaveDiscordBotToken(string token)
+    {
+        byte[] plain = Encoding.UTF8.GetBytes(token);
+        byte[] dpapiProtected = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
+        _repo.SetSetting(DiscordBotTokenKey, dpapiProtected);
+    }
+
+    public string? LoadDiscordBotToken()
+    {
+        byte[]? stored = _repo.GetSetting(DiscordBotTokenKey);
         if (stored is null) return null;
         byte[] plain = ProtectedData.Unprotect(stored, null, DataProtectionScope.CurrentUser);
         return Encoding.UTF8.GetString(plain);

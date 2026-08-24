@@ -224,6 +224,12 @@ public partial class App : Application
             ExitProcess();
         }
 
+        if (e.Args.Length == 2 && e.Args[0] == "--test-discord-token")
+        {
+            RunDiscordTokenDiagnostic(e.Args[1]);
+            ExitProcess();
+        }
+
         // Only reached by a real app launch (every diagnostic branch above returns early).
         // Fire-and-forget: never block startup on a network check, and never let a failure
         // (offline, GitHub unreachable, no releases published yet) surface as an error - this
@@ -597,6 +603,18 @@ public partial class App : Application
             Console.WriteLine("FAILED:");
             Console.WriteLine(ex.ToString());
         }
+    }
+
+    private static void RunDiscordTokenDiagnostic(string token)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        var credentials = new Services.CredentialStore(repo);
+
+        credentials.SaveDiscordBotToken(token);
+        string? loaded = credentials.LoadDiscordBotToken();
+        Console.WriteLine(loaded == token ? "OK: round-tripped correctly" : $"MISMATCH: got '{loaded}'");
     }
 
     private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)
