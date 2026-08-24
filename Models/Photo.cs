@@ -165,5 +165,7 @@ public class Photo
     [NotMapped]
     public bool HasThumbnail { get; set; }
 
-    public string FileName => System.IO.Path.GetFileName(LocalPath);
+    /// <summary>Null when LocalPath is null (a Discord-sourced photo whose full-size original
+    /// hasn't been cached yet) - see LocalPath's doc comment.</summary>
+    public string? FileName => System.IO.Path.GetFileName(LocalPath);
 }

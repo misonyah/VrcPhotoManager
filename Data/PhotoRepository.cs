@@ -476,7 +476,9 @@ public class PhotoRepository
     public void SetRatingByFileName(string fileName, string rating)
     {
         using var context = NewContext();
-        context.Photos.Where(p => p.LocalPath.EndsWith(fileName))
+        // LocalPath is null for a not-yet-cached Discord photo (see Photo.LocalPath) - excluded
+        // up front so this stays a plain SQL-side match instead of a client-evaluated dereference.
+        context.Photos.Where(p => p.LocalPath != null && p.LocalPath.EndsWith(fileName))
             .ExecuteUpdate(s => s.SetProperty(p => p.Rating, rating));
     }
 
@@ -708,9 +710,15 @@ public class PhotoRepository
 
         // Loaded once and matched in memory - the fallback needs regex parsing that EF can't
         // translate to SQL, and re-querying per remote object would be thousands of round trips.
+        // LocalPath is null for a Discord photo whose full-size original hasn't been
+        // cached (see Photo.LocalPath) - this method is inherently a local-folder-photo concept
+        // (matching VRCDN's remote object list against locally-uploaded files), and the
+        // client-side regex matching below does string operations on LocalPath that would throw
+        // on a null value, so those rows are filtered out up front rather than reached at all.
         var candidates = context.Photos
+            .Where(p => p.LocalPath != null)
             .OrderBy(p => p.Id)
-            .Select(p => new { p.Id, p.LocalPath, p.RemoteStatus, p.RemoteUrl, p.UploadCropMode })
+            .Select(p => new { p.Id, LocalPath = p.LocalPath!, p.RemoteStatus, p.RemoteUrl, p.UploadCropMode })
             .ToList();
         var hasRemoteUrlById = candidates.ToDictionary(c => c.Id, c => !string.IsNullOrEmpty(c.RemoteUrl));
         var uploadCropModeMissingById = candidates.ToDictionary(c => c.Id, c => c.UploadCropMode is null);

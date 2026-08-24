@@ -36,7 +36,7 @@ public class PhotoViewModel : INotifyPropertyChanged
         });
     }
 
-    public string FileName => Model.FileName;
+    public string? FileName => Model.FileName;
     public string? Rating => Model.Rating;
     public string? AvatarType => Model.AvatarType;
     public RemoteStatus RemoteStatus => Model.RemoteStatus;
