@@ -39,7 +39,12 @@ public class PhotoSourceResolver(Data.PhotoRepository photoRepo, DiscordPhotoCac
             bytes = await RefetchAndDownloadAsync(photo, ct);
         }
 
-        string cachePath = cache.GetCachePath(photo.RemoteSourceId, Path.GetFileName(url ?? "photo.png"));
+        // Discord CDN URLs carry signed query params (?ex=...&is=...&hm=...) - strip them via
+        // Uri.AbsolutePath before extracting the filename, since Path.GetFileName on the raw
+        // URL would drag the whole query string into the cache path (illegal on Windows).
+        string filename = url is not null ? Path.GetFileName(new Uri(url).AbsolutePath) : "photo.png";
+        if (string.IsNullOrEmpty(filename)) filename = "photo.png";
+        string cachePath = cache.GetCachePath(photo.RemoteSourceId, filename);
         Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
         await File.WriteAllBytesAsync(cachePath, bytes, ct);
         photoRepo.SetLocalPathAndAccessed(photo.Id, cachePath);
@@ -75,7 +80,11 @@ public class PhotoSourceResolver(Data.PhotoRepository photoRepo, DiscordPhotoCac
         string messageId = parts[0];
         int attachmentIndex = int.Parse(parts[1]);
 
-        var message = await discordClient.GetMessageAsync(photo.DiscordChannelId!, messageId, ct)
+        string channelId = photo.DiscordChannelId
+            ?? throw new InvalidOperationException(
+                $"Photo {photo.Id} has RemoteSourceId but no DiscordChannelId - cannot re-fetch its source message.");
+
+        var message = await discordClient.GetMessageAsync(channelId, messageId, ct)
             ?? throw new InvalidOperationException($"Discord message {messageId} no longer exists.");
         string freshUrl = message.Attachments[attachmentIndex].Url;
 

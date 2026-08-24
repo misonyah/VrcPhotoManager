@@ -13,6 +13,13 @@ public class DiscordPhotoCacheService(string cacheRootDir)
 {
     public string GetCachePath(string remoteSourceId, string originalFilename)
     {
+        // Defense in depth: callers are expected to pass a clean filename (no query string -
+        // see PhotoSourceResolver.ResolveLocalPathAsync, which strips it via Uri.AbsolutePath
+        // before calling here), but a raw Discord CDN URL's query string (?ex=...&hm=...) would
+        // otherwise leak into Path.GetExtension's result and make File.WriteAllBytesAsync throw.
+        int queryIndex = originalFilename.IndexOf('?');
+        if (queryIndex >= 0) originalFilename = originalFilename[..queryIndex];
+
         string ext = Path.GetExtension(originalFilename);
         if (string.IsNullOrEmpty(ext)) ext = ".png";
         return Path.Combine(cacheRootDir, $"{remoteSourceId}{ext}");
