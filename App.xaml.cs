@@ -172,7 +172,17 @@ public partial class App : Application
             var avatarCatalog = new Data.AvatarCatalogRepository(dbPath);
             var photo = photos.GetAll().First(p => p.Id == photoId);
             var lookup = Services.VrcxProfileLookupService.TryCreate(out _);
-            new Views.TagFacesWindow(faces, photos, avatarRegions, avatarCatalog, null, lookup, photo).ShowDialog();
+            // Same DiscordCache dir as RunResolvePhotoDiagnostic - sharing it across this
+            // scratch-db diagnostic and the real app is fine, the cache is keyed by
+            // RemoteSourceId and purely additive.
+            string diagDataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+            var diagCredentials = new Services.CredentialStore(photos);
+            string? diagDiscordToken = diagCredentials.LoadDiscordBotToken();
+            var diagDiscordClient = diagDiscordToken is not null ? new Services.DiscordApiClient(diagDiscordToken) : null;
+            var diagCache = new Services.DiscordPhotoCacheService(Path.Combine(diagDataDir, "DiscordCache"));
+            var photoSourceResolver = new Services.PhotoSourceResolver(photos, diagCache, diagDiscordClient);
+            new Views.TagFacesWindow(faces, photos, avatarRegions, avatarCatalog, photoSourceResolver, null, lookup, photo).ShowDialog();
             ExitProcess();
         }
 
@@ -445,32 +455,50 @@ public partial class App : Application
             return;
         }
 
+        // Same PhotoSourceResolver every UI consumer now goes through (see MainViewModel's
+        // constructor / RunResolvePhotoDiagnostic) - a Discord photo not yet cached locally gets
+        // downloaded-and-cached on demand here too, instead of DetectFaces choking on a null/
+        // stale LocalPath.
+        var credentials = new Services.CredentialStore(photoRepo);
+        string? discordToken = credentials.LoadDiscordBotToken();
+        var discordClient = discordToken is not null ? new Services.DiscordApiClient(discordToken) : null;
+        var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
+        var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
+
         var photos = photoRepo.GetAll();
         Console.WriteLine($"Scanning {photos.Count} photos (full rescan, not just unresolved ones)...");
 
         int processed = 0, totalExisting = 0, totalNew = 0, totalRemoved = 0;
-        foreach (var photo in photos)
+        // Task.Run(...).GetAwaiter().GetResult() pattern, same as every other async diagnostic
+        // in this file (see RunResolvePhotoDiagnostic/RunVrcdnSyncDiagnostic) - OnStartup runs
+        // on the WPF Dispatcher's SynchronizationContext, so blocking directly on this async
+        // loop would deadlock.
+        Task.Run(async () =>
         {
-            try
+            foreach (var photo in photos)
             {
-                var faces = detector.DetectFaces(photo.LocalPath);
-                var result = faceRepo.InsertDetectedFaces(photo.Id, faces);
-                photoRepo.SetFacesScanned(photo.Id);
-                totalExisting += result.Existing;
-                totalNew += result.New;
-                totalRemoved += result.Removed;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Face detection failed for {photo.FileName}: {ex.Message}");
-            }
+                try
+                {
+                    string localPath = await resolver.ResolveLocalPathAsync(photo);
+                    var faces = detector.DetectFaces(localPath);
+                    var result = faceRepo.InsertDetectedFaces(photo.Id, faces);
+                    photoRepo.SetFacesScanned(photo.Id);
+                    totalExisting += result.Existing;
+                    totalNew += result.New;
+                    totalRemoved += result.Removed;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Face detection failed for {photo.FileName}: {ex.Message}");
+                }
 
-            processed++;
-            if (processed % 25 == 0 || processed == photos.Count)
-            {
-                Console.WriteLine($"Scanning for faces... {processed}/{photos.Count} photos, {totalNew} new, {totalExisting} existing so far");
+                processed++;
+                if (processed % 25 == 0 || processed == photos.Count)
+                {
+                    Console.WriteLine($"Scanning for faces... {processed}/{photos.Count} photos, {totalNew} new, {totalExisting} existing so far");
+                }
             }
-        }
+        }).GetAwaiter().GetResult();
 
         Console.WriteLine($"Face scan complete: {totalNew} new faces, {totalExisting} existing across {photos.Count} photos"
             + (totalRemoved > 0 ? $" ({totalRemoved} stale untagged boxes removed)." : "."));
@@ -522,6 +550,16 @@ public partial class App : Application
             ? "Multi-avatar body detection available - group photos will get per-avatar regions."
             : "Multi-avatar body detection not configured - every photo gets one whole-photo classification.");
 
+        // Same PhotoSourceResolver every UI consumer now goes through (see MainViewModel's
+        // constructor / RunResolvePhotoDiagnostic) - a Discord photo not yet cached locally gets
+        // downloaded-and-cached on demand here too, instead of DetectBodies/Classify choking on
+        // a null/stale LocalPath.
+        var credentials = new Services.CredentialStore(photoRepo);
+        string? discordToken = credentials.LoadDiscordBotToken();
+        var discordClient = discordToken is not null ? new Services.DiscordApiClient(discordToken) : null;
+        var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
+        var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
+
         var missingIds = photoRepo.GetPhotoIdsMissingAvatarType();
         var retryIds = photoRepo.GetPhotoIdsWithNoConfidentMatch();
         var regionIds = avatarRegions.GetPhotoIdsWithRegions();
@@ -532,47 +570,54 @@ public partial class App : Application
         Console.WriteLine($"Classifying {toClassify.Count} photos...");
 
         int processed = 0, matched = 0, multiAvatarPhotos = 0, regionsCreated = 0, failed = 0;
-        foreach (var photo in toClassify)
+        // Task.Run(...).GetAwaiter().GetResult() pattern, same as every other async diagnostic
+        // in this file - OnStartup runs on the WPF Dispatcher's SynchronizationContext, so
+        // blocking directly on this async loop would deadlock.
+        Task.Run(async () =>
         {
-            try
+            foreach (var photo in toClassify)
             {
-                var bodies = bodyDetector?.DetectBodies(photo.LocalPath) ?? [];
-                if (bodies.Count < 2)
+                try
                 {
-                    var (label, catalogId, confidence) = classifier.Classify(photo.LocalPath);
-                    long? resolvedCatalogId = label is not null && catalogId is not null
-                        ? avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
-                        : null;
-                    photoRepo.SetAvatarType(photo.Id, label, resolvedCatalogId, confidence);
-                    if (label is not null) matched++;
-                }
-                else
-                {
-                    multiAvatarPhotos++;
-                    foreach (var body in bodies)
+                    string localPath = await resolver.ResolveLocalPathAsync(photo);
+                    var bodies = bodyDetector?.DetectBodies(localPath) ?? [];
+                    if (bodies.Count < 2)
                     {
-                        var (label, catalogId, confidence) = classifier.Classify(photo.LocalPath, (body.X, body.Y, body.Width, body.Height));
+                        var (label, catalogId, confidence) = classifier.Classify(localPath);
                         long? resolvedCatalogId = label is not null && catalogId is not null
                             ? avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
                             : null;
-                        avatarRegions.AddAutoDetectedRegion(photo.Id, body.X, body.Y, body.Width, body.Height,
-                            resolvedCatalogId, label, confidence);
-                        regionsCreated++;
+                        photoRepo.SetAvatarType(photo.Id, label, resolvedCatalogId, confidence);
+                        if (label is not null) matched++;
+                    }
+                    else
+                    {
+                        multiAvatarPhotos++;
+                        foreach (var body in bodies)
+                        {
+                            var (label, catalogId, confidence) = classifier.Classify(localPath, (body.X, body.Y, body.Width, body.Height));
+                            long? resolvedCatalogId = label is not null && catalogId is not null
+                                ? avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
+                                : null;
+                            avatarRegions.AddAutoDetectedRegion(photo.Id, body.X, body.Y, body.Width, body.Height,
+                                resolvedCatalogId, label, confidence);
+                            regionsCreated++;
+                        }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                Console.WriteLine($"Avatar classification failed for {photo.FileName}: {ex.Message}");
-            }
+                catch (Exception ex)
+                {
+                    failed++;
+                    Console.WriteLine($"Avatar classification failed for {photo.FileName}: {ex.Message}");
+                }
 
-            processed++;
-            if (processed % 25 == 0 || processed == toClassify.Count)
-            {
-                Console.WriteLine($"Classifying avatars... {processed}/{toClassify.Count}, {matched} matched, {multiAvatarPhotos} multi-avatar so far");
+                processed++;
+                if (processed % 25 == 0 || processed == toClassify.Count)
+                {
+                    Console.WriteLine($"Classifying avatars... {processed}/{toClassify.Count}, {matched} matched, {multiAvatarPhotos} multi-avatar so far");
+                }
             }
-        }
+        }).GetAwaiter().GetResult();
 
         string multiAvatarPart = multiAvatarPhotos > 0
             ? $" {multiAvatarPhotos} group photos got {regionsCreated} per-avatar regions instead (review in Tag Faces)."

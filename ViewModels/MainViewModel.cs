@@ -28,6 +28,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly AvatarRegionRepository _avatarRegions;
     private readonly AvatarCatalogRepository _avatarCatalog;
     private readonly LibraryRepository _libraries;
+    private readonly PhotoSourceResolver _photoSourceResolver;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
     private string? _selfUserId;
@@ -581,6 +582,10 @@ public class MainViewModel : INotifyPropertyChanged
     public AvatarRegionRepository AvatarRegions => _avatarRegions;
     public AvatarCatalogRepository AvatarCatalog => _avatarCatalog;
     public LibraryRepository Libraries => _libraries;
+    /// <summary>Exposed so MainWindow's code-behind (thumbnail/preview hover) and callers that
+    /// construct TagFacesWindow can resolve a photo's real local path before touching its file
+    /// bytes, the same way local-folder and (once cached) Discord photos both need to.</summary>
+    public PhotoSourceResolver PhotoSourceResolver => _photoSourceResolver;
     public AvatarTypeService? AvatarClassifier => _avatarClassifier;
     public VrcxProfileLookupService? ProfileLookup => _profileLookup;
     public CcipEmbeddingService? CcipEmbedder => _ccipEmbedder;
@@ -657,6 +662,15 @@ public class MainViewModel : INotifyPropertyChanged
         _avatarRegions = new AvatarRegionRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _avatarCatalog = new AvatarCatalogRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _libraries = new LibraryRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        // Shared chokepoint for every consumer that touches a photo's file bytes (thumbnail/
+        // preview, Tag Faces, Detect Faces, Classify Photos/Avatars, crop/print, VRCDN upload) -
+        // see PhotoSourceResolver's own doc comment. Built once here (not per-call-site) so a
+        // Discord photo's already-cached local path is reused across every consumer instead of
+        // re-resolving (and potentially re-downloading) it separately for each.
+        var discordCache = new DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
+        string? discordToken = _credentials.LoadDiscordBotToken();
+        var discordClient = discordToken is not null ? new DiscordApiClient(discordToken) : null;
+        _photoSourceResolver = new PhotoSourceResolver(_repo, discordCache, discordClient);
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         // Gated on ScanLibrary/DetectFaces having succeeded at least once (not just this
@@ -1143,7 +1157,8 @@ public class MainViewModel : INotifyPropertyChanged
         {
             try
             {
-                var faces = await Task.Run(() => _faceDetector.DetectFaces(vm.Model.LocalPath));
+                string localPath = await _photoSourceResolver.ResolveLocalPathAsync(vm.Model);
+                var faces = await Task.Run(() => _faceDetector.DetectFaces(localPath));
                 var result = _faces.InsertDetectedFaces(vm.Model.Id, faces);
                 _repo.SetFacesScanned(vm.Model.Id);
                 vm.Model.FacesScanned = true;
@@ -1567,7 +1582,8 @@ public class MainViewModel : INotifyPropertyChanged
             await semaphore.WaitAsync();
             try
             {
-                string rating = await Task.Run(() => _tagger.ClassifyRating(vm.Model.LocalPath));
+                string localPath = await _photoSourceResolver.ResolveLocalPathAsync(vm.Model);
+                string rating = await Task.Run(() => _tagger.ClassifyRating(localPath));
                 vm.Model.Rating = rating;
                 _repo.SetRating(vm.Model.Id, rating);
                 vm.NotifyRatingChanged();
@@ -1632,13 +1648,14 @@ public class MainViewModel : INotifyPropertyChanged
             await semaphore.WaitAsync();
             try
             {
+                string localPath = await _photoSourceResolver.ResolveLocalPathAsync(vm.Model);
                 List<BodyBox> bodies = _avatarBodyDetector is not null
-                    ? await Task.Run(() => _avatarBodyDetector.DetectBodies(vm.Model.LocalPath))
+                    ? await Task.Run(() => _avatarBodyDetector.DetectBodies(localPath))
                     : [];
 
                 if (bodies.Count < 2)
                 {
-                    var (label, catalogId, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
+                    var (label, catalogId, confidence) = await Task.Run(() => _avatarClassifier.Classify(localPath));
                     long? resolvedCatalogId = label is not null && catalogId is not null
                         ? _avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
                         : null;
@@ -1654,7 +1671,7 @@ public class MainViewModel : INotifyPropertyChanged
                     foreach (var body in bodies)
                     {
                         var (label, catalogId, confidence) = await Task.Run(() =>
-                            _avatarClassifier.Classify(vm.Model.LocalPath, (body.X, body.Y, body.Width, body.Height)));
+                            _avatarClassifier.Classify(localPath, (body.X, body.Y, body.Width, body.Height)));
                         long? resolvedCatalogId = label is not null && catalogId is not null
                             ? _avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
                             : null;
@@ -1708,10 +1725,11 @@ public class MainViewModel : INotifyPropertyChanged
         {
             try
             {
-                bool hasBorder = await Task.Run(() => CropPrintService.HasWhiteBorder(vm.Model.LocalPath));
+                string localPath = await _photoSourceResolver.ResolveLocalPathAsync(vm.Model);
+                bool hasBorder = await Task.Run(() => CropPrintService.HasWhiteBorder(localPath));
                 if (!hasBorder) { skipped++; continue; }
 
-                string newPath = await Task.Run(() => CropPrintService.CropAndSave(vm.Model.LocalPath));
+                string newPath = await Task.Run(() => CropPrintService.CropAndSave(localPath));
                 var info = new FileInfo(newPath);
                 // The cropped file is saved alongside its source, so it belongs to the same library.
                 long id = _repo.UpsertLocalFile(newPath, info.Length, info.LastWriteTimeUtc.ToOADate(), vm.Model.LibraryId);
@@ -1823,8 +1841,9 @@ public class MainViewModel : INotifyPropertyChanged
             try
             {
                 var (photoCropRatio, photoCropLabel) = ResolvePhotoCrop(vm);
+                string localPath = await _photoSourceResolver.ResolveLocalPathAsync(vm.Model);
                 var (resized, width, height) = await _thumbnails.PrepareForUploadAsync(
-                    vm.Model.LocalPath, photoCropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY, uploadFormat);
+                    localPath, photoCropRatio, vm.Model.CropOffsetX, vm.Model.CropOffsetY, uploadFormat);
                 // Only a cropped upload gets a resolution suffix - an uncropped one keeps its
                 // filename exactly as before crop-on-upload existed, so existing uploads/
                 // filename-matching (SyncRemoteMatches) aren't affected.

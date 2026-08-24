@@ -530,7 +530,7 @@ public partial class MainWindow : Window
 
         HidePreviewOverlay();
         var (pathByPhotoId, avatarTypeByPhotoId) = vm.GetPhotoPathsAndAvatarTypes();
-        var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.AvatarRegions, vm.AvatarCatalog, vm.AvatarClassifier, vm.ProfileLookup, photo.Model,
+        var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.AvatarRegions, vm.AvatarCatalog, vm.PhotoSourceResolver, vm.AvatarClassifier, vm.ProfileLookup, photo.Model,
             vm.CcipEmbedder, vm.GetVisiblePhotoIds(), pathByPhotoId, avatarTypeByPhotoId,
             vm.SuggestionsMayBeStale, stale => vm.SuggestionsMayBeStale = stale);
         _openTagFacesWindow = window;
@@ -636,19 +636,29 @@ public partial class MainWindow : Window
         _hoverTimer.Start();
     }
 
-    private void HoverTimer_Tick(object? sender, EventArgs e)
+    private async void HoverTimer_Tick(object? sender, EventArgs e)
     {
         _hoverTimer.Stop();
         if (_hoverTarget?.DataContext is not PhotoViewModel photo) return;
         if (photo == _currentPreviewPhoto) return; // already showing this one - nothing changed
+        if (DataContext is not MainViewModel vm) return;
 
         try
         {
+            // Resolves a Discord photo's cached (or freshly downloaded) local file the same way
+            // every other file-bytes consumer does - a no-op extra hop for the common
+            // local-folder case (PhotoSourceResolver returns LocalPath immediately, no I/O).
+            string localPath = await vm.PhotoSourceResolver.ResolveLocalPathAsync(photo.Model);
+            // The user may have moved on to a different photo (or the same photo stopped being
+            // hovered) while the resolve above was in flight - don't clobber whatever's now
+            // showing with a stale result.
+            if (_hoverTarget?.DataContext != photo) return;
+
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.DecodePixelWidth = 1000; // cap memory use - this is a preview, not for editing
-            bmp.UriSource = new Uri(photo.Model.LocalPath);
+            bmp.UriSource = new Uri(localPath);
             bmp.EndInit();
             bmp.Freeze();
 
@@ -657,7 +667,7 @@ public partial class MainWindow : Window
             AnimatePreviewOverlayIn();
             _currentPreviewPhoto = photo;
 
-            if (DataContext is MainViewModel vm && vm.AutoCopyUrlOnHover)
+            if (vm.AutoCopyUrlOnHover)
             {
                 // Clipboard.SetText("") throws ArgumentException - empty string isn't a valid
                 // clipboard text value, so a not-yet-uploaded photo needs Clear() instead.
@@ -667,8 +677,9 @@ public partial class MainWindow : Window
         }
         catch
         {
-            // full-res original may be missing/moved since scan, or the clipboard is
-            // momentarily locked by another process - either way, just skip silently.
+            // full-res original may be missing/moved since scan, the clipboard is momentarily
+            // locked by another process, or a Discord original couldn't be downloaded - either
+            // way, just skip silently.
         }
     }
 }

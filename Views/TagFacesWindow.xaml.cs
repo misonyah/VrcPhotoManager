@@ -19,6 +19,7 @@ public partial class TagFacesWindow : Window
     private readonly PhotoRepository _photos;
     private readonly AvatarRegionRepository _avatarRegionRepo;
     private readonly AvatarCatalogRepository _avatarCatalogRepo;
+    private readonly PhotoSourceResolver _photoSourceResolver;
     private readonly AvatarTypeService? _avatarClassifier;
     private readonly VrcxProfileLookupService? _profileLookup;
     private Photo _photo;
@@ -177,7 +178,7 @@ public partial class TagFacesWindow : Window
     private record ManualPersonMergeSuggestion(long ManualPersonId, string ManualName, string VrcUserId, string VrcDisplayName);
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, AvatarRegionRepository avatarRegions,
-        AvatarCatalogRepository avatarCatalog,
+        AvatarCatalogRepository avatarCatalog, PhotoSourceResolver photoSourceResolver,
         AvatarTypeService? avatarClassifier, VrcxProfileLookupService? profileLookup, Photo photo,
         CcipEmbeddingService? ccipEmbedder = null,
         IReadOnlyList<long>? scopedPhotoIds = null,
@@ -198,6 +199,7 @@ public partial class TagFacesWindow : Window
         _photos = photos;
         _avatarRegionRepo = avatarRegions;
         _avatarCatalogRepo = avatarCatalog;
+        _photoSourceResolver = photoSourceResolver;
         _avatarClassifier = avatarClassifier;
         _profileLookup = profileLookup;
         _ccipEmbedder = ccipEmbedder;
@@ -270,21 +272,12 @@ public partial class TagFacesWindow : Window
         AliasEditorPanel.Visibility = Visibility.Collapsed;
         ClearTagButton.Visibility = Visibility.Collapsed;
 
-        try
-        {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.UriSource = new Uri(photo.LocalPath);
-            bitmap.EndInit();
-            bitmap.Freeze();
-            PhotoImage.Source = bitmap;
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Could not load the photo file:\n{ex.Message}", "Tag Faces",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
+        // Fire-and-forget, same convention as ShowStaleSuggestionsBannerAsync below - LoadPhoto
+        // itself stays synchronous (it's called from the constructor, which can't await) while
+        // the image load (which may need to download-and-cache a Discord original) happens in
+        // the background. Exceptions are caught inside LoadPhotoImageAsync itself, not here -
+        // an unobserved exception from a fire-and-forget Task would otherwise never surface.
+        _ = LoadPhotoImageAsync(photo);
 
         LoadFaceData();
         // Reads _personsById, which LoadFaceData just populated - computed here (not earlier,
@@ -296,6 +289,36 @@ public partial class TagFacesWindow : Window
         _mergeSuggestions.Clear();
         foreach (var suggestion in FindManualPersonMergeSuggestions()) _mergeSuggestions.Add(suggestion);
         RedrawBoxes();
+    }
+
+    /// <summary>Resolves photo's real local path (a no-op for a local-folder photo, a download-
+    /// and-cache for a not-yet-cached Discord one) and loads it into PhotoImage - split out of
+    /// LoadPhoto so the resolve/download can be awaited without making LoadPhoto itself async
+    /// (it's called from the constructor). Guards against a stale result: if the user has since
+    /// navigated to a different photo (NavigateToPhoto) while this was still resolving/
+    /// downloading, _photo will have moved on, so this no-ops instead of clobbering the newer
+    /// photo's already-shown image.</summary>
+    private async Task LoadPhotoImageAsync(Photo photo)
+    {
+        try
+        {
+            string localPath = await _photoSourceResolver.ResolveLocalPathAsync(photo);
+            if (_photo != photo) return;
+
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.UriSource = new Uri(localPath);
+            bitmap.EndInit();
+            bitmap.Freeze();
+            PhotoImage.Source = bitmap;
+        }
+        catch (Exception ex)
+        {
+            if (_photo != photo) return;
+            MessageBox.Show(this, $"Could not load the photo file:\n{ex.Message}", "Tag Faces",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>Left/Right arrow keys (see TagFacesWindow_PreviewKeyDown) - offset is -1
