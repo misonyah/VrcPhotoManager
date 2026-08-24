@@ -236,6 +236,12 @@ public partial class App : Application
             ExitProcess();
         }
 
+        if (e.Args.Length == 2 && e.Args[0] == "--test-discord-cache-evict")
+        {
+            RunDiscordCacheEvictDiagnostic(long.Parse(e.Args[1]));
+            ExitProcess();
+        }
+
         // Only reached by a real app launch (every diagnostic branch above returns early).
         // Fire-and-forget: never block startup on a network check, and never let a failure
         // (offline, GitHub unreachable, no releases published yet) surface as an error - this
@@ -839,6 +845,23 @@ public partial class App : Application
         }
         string rating = tagger.ClassifyRating(imagePath);
         Console.WriteLine($"RATING: {rating}");
+    }
+
+    private static void RunDiscordCacheEvictDiagnostic(long limitBytes)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        string cacheDir = Path.Combine(dataDir, "DiscordCache");
+        var cache = new Services.DiscordPhotoCacheService(cacheDir);
+
+        var before = repo.GetCachedDiscordPhotosForEviction();
+        Console.WriteLine($"Before: {before.Count} cached photos, {before.Sum(p => p.FileSize)} bytes total");
+
+        cache.EnforceCacheLimitAsync(repo, limitBytes).GetAwaiter().GetResult();
+
+        var after = repo.GetCachedDiscordPhotosForEviction();
+        Console.WriteLine($"After (limit={limitBytes}): {after.Count} cached photos, {after.Sum(p => p.FileSize)} bytes total");
     }
 
     protected override void OnExit(ExitEventArgs e)

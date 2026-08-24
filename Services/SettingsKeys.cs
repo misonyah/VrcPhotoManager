@@ -102,4 +102,8 @@ public static class SettingsKeys
     /// (right column). PNG uploads are just as metadata-free as jpg - see
     /// ThumbnailService.ResizeAsync, which never attaches BitmapMetadata to either encoder.</summary>
     public const string UploadImageFormat = "upload_image_format";
+
+    /// <summary>Discord full-size photo cache size limit in gigabytes - see
+    /// DiscordPhotoCacheService.EnforceCacheLimitAsync for the eviction logic.</summary>
+    public const string DiscordCacheSizeLimitGb = "discord_cache_size_limit_gb";
 }
