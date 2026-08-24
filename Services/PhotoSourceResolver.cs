@@ -47,7 +47,7 @@ public class PhotoSourceResolver(Data.PhotoRepository photoRepo, DiscordPhotoCac
         string cachePath = cache.GetCachePath(photo.RemoteSourceId, filename);
         Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
         await File.WriteAllBytesAsync(cachePath, bytes, ct);
-        photoRepo.SetLocalPathAndAccessed(photo.Id, cachePath);
+        photoRepo.SetLocalPathAndAccessed(photo.Id, cachePath, bytes.Length);
         return cachePath;
     }
 

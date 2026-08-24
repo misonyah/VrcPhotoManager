@@ -843,11 +843,12 @@ public class PhotoRepository
         return photo.Id;
     }
 
-    public void SetLocalPathAndAccessed(long photoId, string localPath)
+    public void SetLocalPathAndAccessed(long photoId, string localPath, long fileSize)
     {
         using var context = NewContext();
         context.Photos.Where(p => p.Id == photoId).ExecuteUpdate(s => s
             .SetProperty(p => p.LocalPath, localPath)
+            .SetProperty(p => p.FileSize, fileSize)
             .SetProperty(p => p.LastAccessedAt, DateTime.UtcNow));
     }
 
