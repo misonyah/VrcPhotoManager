@@ -51,6 +51,7 @@ public class PhotoRepository
         }
 
         context.Database.Migrate();
+        SeedDefaultLibraryAndBackfillPhotos(context);
     }
 
     private static bool TableExists(VrcdnDbContext context, string tableName)
@@ -61,6 +62,33 @@ public class PhotoRepository
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = @name";
         cmd.Parameters.AddWithValue("@name", tableName);
         return (long)cmd.ExecuteScalar()! > 0;
+    }
+
+    /// <summary>One-time seed: every install (fresh or upgraded) gets exactly one Library row
+    /// for the app's original hardcoded screenshot folder (see MainViewModel.ScanLibraryAsync,
+    /// which used to hardcode this path directly - see docs/superpowers/VrcPhotoManager/specs/
+    /// 2026-08-23-multi-library-discord-design.md). Every pre-existing Photo row (library_id
+    /// still 0, the AddColumn migration's placeholder default) is backfilled to point at it.
+    /// Idempotent: only inserts the seed row when no LocalFolder library exists yet, so this
+    /// runs safely on every app start, not just the first one after upgrading.</summary>
+    private static void SeedDefaultLibraryAndBackfillPhotos(VrcdnDbContext context)
+    {
+        bool anyLocalFolderLibrary = context.Libraries.Any(l => l.Type == Models.LibraryType.LocalFolder);
+        if (anyLocalFolderLibrary) return;
+
+        string defaultPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "VRChat");
+        var seedLibrary = new Models.Library
+        {
+            Type = Models.LibraryType.LocalFolder,
+            LocalPath = defaultPath,
+            DisplayName = "VRChat Screenshots",
+        };
+        context.Libraries.Add(seedLibrary);
+        context.SaveChanges();
+
+        context.Photos.Where(p => p.LibraryId == 0)
+            .ExecuteUpdate(s => s.SetProperty(p => p.LibraryId, seedLibrary.Id));
     }
 
     public long UpsertLocalFile(string path, long size, double mtime)
