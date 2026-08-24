@@ -27,6 +27,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly FaceRepository _faces;
     private readonly AvatarRegionRepository _avatarRegions;
     private readonly AvatarCatalogRepository _avatarCatalog;
+    private readonly LibraryRepository _libraries;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
     private string? _selfUserId;
@@ -654,6 +655,7 @@ public class MainViewModel : INotifyPropertyChanged
         _faces = new FaceRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _avatarRegions = new AvatarRegionRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _avatarCatalog = new AvatarCatalogRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        _libraries = new LibraryRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         // Gated on ScanLibrary/DetectFaces having succeeded at least once (not just this
@@ -915,13 +917,23 @@ public class MainViewModel : INotifyPropertyChanged
     private async Task ScanLibraryAsync()
     {
         var token = _shutdownCts.Token;
-
-        // VRChat's own default screenshot location, regardless of which account runs this.
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "VRChat");
+        var localFolderLibraries = _libraries.GetAll().Where(l => l.Type == LibraryType.LocalFolder).ToList();
         StatusMessage = "Scanning library...";
 
-        // Directory enumeration itself is synchronous I/O - offload it too so a large tree
-        // doesn't cause even a brief startup hitch.
+        foreach (var library in localFolderLibraries)
+        {
+            if (library.LocalPath is null) continue;
+            await ScanLocalFolderLibraryAsync(library.Id, library.LocalPath, token);
+            if (token.IsCancellationRequested) return;
+        }
+    }
+
+    /// <summary>Scans one local-folder library's root - exactly the same enumerate/upsert/
+    /// metadata-probe logic ScanLibraryAsync used to run against a single hardcoded root,
+    /// now parameterized so it works identically for every configured local folder. New photos
+    /// are tagged with libraryId so they show up correctly filtered/grouped by library later.</summary>
+    private async Task ScanLocalFolderLibraryAsync(long libraryId, string root, CancellationToken token)
+    {
         List<string> files;
         try
         {
@@ -934,6 +946,11 @@ public class MainViewModel : INotifyPropertyChanged
             StatusMessage = "Scan cancelled.";
             return;
         }
+        catch (DirectoryNotFoundException)
+        {
+            StatusMessage = $"Library folder not found: {root}";
+            return;
+        }
 
         int processed = 0;
         foreach (var chunk in Chunk(files, 25))
@@ -943,12 +960,12 @@ public class MainViewModel : INotifyPropertyChanged
             foreach (var path in chunk)
             {
                 var info = new FileInfo(path);
-                long id = _repo.UpsertLocalFile(path, info.Length, info.LastWriteTimeUtc.ToOADate());
+                long id = _repo.UpsertLocalFile(path, info.Length, info.LastWriteTimeUtc.ToOADate(), libraryId);
 
                 var existing = _allPhotos.FirstOrDefault(p => p.Model.LocalPath == path);
                 if (existing is null)
                 {
-                    var model = new Photo { Id = id, LocalPath = path, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate() };
+                    var model = new Photo { Id = id, LocalPath = path, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), LibraryId = libraryId };
                     existing = new PhotoViewModel(model, _repo);
                     AddPhoto(existing);
                 }
@@ -1653,9 +1670,10 @@ public class MainViewModel : INotifyPropertyChanged
 
                 string newPath = await Task.Run(() => CropPrintService.CropAndSave(vm.Model.LocalPath));
                 var info = new FileInfo(newPath);
-                long id = _repo.UpsertLocalFile(newPath, info.Length, info.LastWriteTimeUtc.ToOADate());
+                // The cropped file is saved alongside its source, so it belongs to the same library.
+                long id = _repo.UpsertLocalFile(newPath, info.Length, info.LastWriteTimeUtc.ToOADate(), vm.Model.LibraryId);
                 _repo.SetImageDimensions(id, 1920, 1080);
-                AddPhoto(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080 }, _repo));
+                AddPhoto(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080, LibraryId = vm.Model.LibraryId }, _repo));
                 cropped++;
             }
             catch (Exception ex)

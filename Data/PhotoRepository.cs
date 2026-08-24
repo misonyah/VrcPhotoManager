@@ -91,7 +91,7 @@ public class PhotoRepository
             .ExecuteUpdate(s => s.SetProperty(p => p.LibraryId, seedLibrary.Id));
     }
 
-    public long UpsertLocalFile(string path, long size, double mtime)
+    public long UpsertLocalFile(string path, long size, double mtime, long libraryId)
     {
         using var context = NewContext();
         var existing = context.Photos.FirstOrDefault(p => p.LocalPath == path);
@@ -103,7 +103,7 @@ public class PhotoRepository
             return existing.Id;
         }
 
-        var photo = new Photo { LocalPath = path, FileSize = size, Mtime = mtime };
+        var photo = new Photo { LocalPath = path, FileSize = size, Mtime = mtime, LibraryId = libraryId };
         context.Photos.Add(photo);
         context.SaveChanges();
         return photo.Id;
@@ -123,6 +123,7 @@ public class PhotoRepository
     {
         Id = p.Id,
         LocalPath = p.LocalPath,
+        LibraryId = p.LibraryId,
         FileSize = p.FileSize,
         Mtime = p.Mtime,
         Width = p.Width,
