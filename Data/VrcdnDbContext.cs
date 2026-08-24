@@ -83,6 +83,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(p => p.RemoteSourceUrl).HasColumnName("remote_source_url");
             entity.Property(p => p.RemoteSourceId).HasColumnName("remote_source_id");
             entity.Property(p => p.LastAccessedAt).HasColumnName("last_accessed_at");
+            entity.Property(p => p.DiscordChannelId).HasColumnName("discord_channel_id");
         });
 
         modelBuilder.Entity<AppSetting>(entity =>

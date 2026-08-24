@@ -88,5 +88,14 @@ public class DiscordApiClient : IDisposable
         return messages;
     }
 
+    /// <summary>Single-message fetch - used by PhotoSourceResolver.RefetchAndDownloadAsync to
+    /// get a fresh attachment URL when a cached photo's stored RemoteSourceUrl has gone stale
+    /// (Discord CDN URLs on older messages can expire/rotate).</summary>
+    public async Task<DiscordMessage?> GetMessageAsync(string channelId, string messageId, CancellationToken ct)
+    {
+        var response = await GetWithRateLimitRetryAsync($"{ApiBase}/channels/{channelId}/messages/{messageId}", ct);
+        return await response.Content.ReadFromJsonAsync<DiscordMessage>(cancellationToken: ct);
+    }
+
     public void Dispose() => _http.Dispose();
 }

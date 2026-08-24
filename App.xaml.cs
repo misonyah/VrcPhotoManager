@@ -242,6 +242,12 @@ public partial class App : Application
             ExitProcess();
         }
 
+        if (e.Args.Length == 2 && e.Args[0] == "--test-resolve-photo")
+        {
+            RunResolvePhotoDiagnostic(long.Parse(e.Args[1]));
+            ExitProcess();
+        }
+
         // Only reached by a real app launch (every diagnostic branch above returns early).
         // Fire-and-forget: never block startup on a network check, and never let a failure
         // (offline, GitHub unreachable, no releases published yet) surface as an error - this
@@ -862,6 +868,35 @@ public partial class App : Application
 
         var after = repo.GetCachedDiscordPhotosForEviction();
         Console.WriteLine($"After (limit={limitBytes}): {after.Count} cached photos, {after.Sum(p => p.FileSize)} bytes total");
+    }
+
+    /// <summary>Headless verification for PhotoSourceResolver - resolves a single photo's local
+    /// path (downloading-and-caching a Discord original on demand, or short-circuiting instantly
+    /// for an already-cached/local-folder photo) and reports whether the result is a real,
+    /// existing, non-empty file. Same Task.Run(...).GetAwaiter().GetResult() pattern as
+    /// RunVrcxProfileLookupDiagnostic/RunVrcdnSyncDiagnostic - OnStartup runs on the WPF
+    /// Dispatcher thread, which has a SynchronizationContext; blocking directly on an async
+    /// chain that tries to resume on that same context deadlocks.</summary>
+    private static void RunResolvePhotoDiagnostic(long photoId)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        var photo = repo.GetAll().FirstOrDefault(p => p.Id == photoId);
+        if (photo is null) { Console.WriteLine("Photo not found."); return; }
+
+        var credentials = new Services.CredentialStore(repo);
+        string? token = credentials.LoadDiscordBotToken();
+        var discordClient = token is not null ? new Services.DiscordApiClient(token) : null;
+        var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
+        var resolver = new Services.PhotoSourceResolver(repo, cache, discordClient);
+
+        Task.Run(async () =>
+        {
+            string path = await resolver.ResolveLocalPathAsync(photo);
+            Console.WriteLine($"Resolved: {path}");
+            Console.WriteLine($"File exists: {File.Exists(path)}, size: {(File.Exists(path) ? new FileInfo(path).Length : 0)} bytes");
+        }).GetAwaiter().GetResult();
     }
 
     protected override void OnExit(ExitEventArgs e)

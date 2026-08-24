@@ -57,7 +57,7 @@ public static class DiscordLibraryService
                     if (photoRepo.GetByRemoteSourceId(remoteSourceId) is not null) continue;
 
                     byte[] thumbnail = await FetchThumbnailAsync(http, attachment.Url, ct);
-                    photoRepo.UpsertDiscordPhoto(library.Id, remoteSourceId, attachment.Url, thumbnail);
+                    photoRepo.UpsertDiscordPhoto(library.Id, remoteSourceId, attachment.Url, thumbnail, library.DiscordChannelId!);
                     totalNew++;
                     // Pacing: see this method's own doc comment - the CDN has no documented
                     // rate-limit contract to react to (unlike the REST calls above, which

@@ -36,6 +36,13 @@ public class Photo
     /// rotate but this never does. Null for local-folder photos. Unique when non-null.</summary>
     public string? RemoteSourceId { get; set; }
 
+    /// <summary>Denormalized from the owning Library.DiscordChannelId, set once at insert time
+    /// (PhotoRepository.UpsertDiscordPhoto, sourced from DiscordLibraryService.SyncChannelAsync's
+    /// library.DiscordChannelId) - lets PhotoSourceResolver.RefetchAndDownloadAsync re-fetch the
+    /// source message on a stale/expired CDN URL without a join back to Library on every resolve
+    /// call. Null for local-folder photos.</summary>
+    public string? DiscordChannelId { get; set; }
+
     /// <summary>Drives two-tier LRU eviction of the full-size cache (see
     /// DiscordPhotoCacheService) - set whenever PhotoSourceResolver hands out a cached local
     /// path, whether newly downloaded or already present. Null for local-folder photos (never

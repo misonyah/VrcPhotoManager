@@ -162,6 +162,7 @@ public class PhotoRepository
         RemoteSourceUrl = p.RemoteSourceUrl,
         RemoteSourceId = p.RemoteSourceId,
         LastAccessedAt = p.LastAccessedAt,
+        DiscordChannelId = p.DiscordChannelId,
     };
 
     public List<Photo> GetAll()
@@ -820,8 +821,11 @@ public class PhotoRepository
 
     /// <summary>Insert-only (Discord sync's dedup already checks GetByRemoteSourceId first, so
     /// this is never called for an existing row) - LocalPath stays null until
-    /// PhotoSourceResolver caches the full-size original on demand.</summary>
-    public long UpsertDiscordPhoto(long libraryId, string remoteSourceId, string remoteSourceUrl, byte[] thumbnail)
+    /// PhotoSourceResolver caches the full-size original on demand. discordChannelId is
+    /// denormalized from the owning Library (see Photo.DiscordChannelId's doc comment) so
+    /// PhotoSourceResolver.RefetchAndDownloadAsync can re-fetch the source message without a
+    /// join back to Library on every resolve call.</summary>
+    public long UpsertDiscordPhoto(long libraryId, string remoteSourceId, string remoteSourceUrl, byte[] thumbnail, string discordChannelId)
     {
         using var context = NewContext();
         var photo = new Photo
@@ -832,6 +836,7 @@ public class PhotoRepository
             Thumbnail = thumbnail,
             FileSize = 0,
             Mtime = 0,
+            DiscordChannelId = discordChannelId,
         };
         context.Photos.Add(photo);
         context.SaveChanges();
