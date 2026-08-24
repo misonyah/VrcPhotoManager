@@ -89,8 +89,8 @@ public class CredentialStore
     }
 
     /// <summary>DPAPI-only (no password layer, unlike SaveCookie/LoadCookie) - the Discord bot
-    /// token is scoped to a single bot and read-only on the Gist, so YAGNI on the extra
-    /// password-protection option unless asked for later.</summary>
+    /// token is scoped to a single bot and lower-stakes than the VRCDN session, so YAGNI on the
+    /// extra password-protection option unless asked for later.</summary>
     public void SaveDiscordBotToken(string token)
     {
         byte[] plain = Encoding.UTF8.GetBytes(token);
