@@ -230,6 +230,12 @@ public partial class App : Application
             ExitProcess();
         }
 
+        if (e.Args.Length == 1 && e.Args[0] == "--test-discord-guilds")
+        {
+            RunDiscordGuildsDiagnostic();
+            ExitProcess();
+        }
+
         // Only reached by a real app launch (every diagnostic branch above returns early).
         // Fire-and-forget: never block startup on a network check, and never let a failure
         // (offline, GitHub unreachable, no releases published yet) surface as an error - this
@@ -615,6 +621,29 @@ public partial class App : Application
         credentials.SaveDiscordBotToken(token);
         string? loaded = credentials.LoadDiscordBotToken();
         Console.WriteLine(loaded == token ? "OK: round-tripped correctly" : $"MISMATCH: got '{loaded}'");
+    }
+
+    private static void RunDiscordGuildsDiagnostic()
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var repo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        var credentials = new Services.CredentialStore(repo);
+        string? token = credentials.LoadDiscordBotToken();
+        if (token is null) { Console.WriteLine("No Discord bot token configured - run --test-discord-token first."); return; }
+
+        using var client = new Services.DiscordApiClient(token);
+        Task.Run(async () =>
+        {
+            var guilds = await client.GetGuildsAsync(CancellationToken.None);
+            Console.WriteLine($"{guilds.Count} guild(s):");
+            foreach (var g in guilds)
+            {
+                Console.WriteLine($"  {g.Id}  {g.Name}");
+                var channels = await client.GetChannelsAsync(g.Id, CancellationToken.None);
+                foreach (var c in channels) Console.WriteLine($"    #{c.Name} ({c.Id})");
+            }
+        }).GetAwaiter().GetResult();
     }
 
     private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)
