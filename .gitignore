@@ -27,6 +27,10 @@ design_time.db
 # Subagent-driven-development scratch (ledger, briefs, review packages) - not repo content.
 .superpowers/
 
+# Isolated git worktrees created for subagent-driven-development plan execution - not repo
+# content, each is its own throwaway checkout on its own branch.
+.worktrees/
+
 # Claude Code local configuration and tool state - not repo content.
 .claude/
 
