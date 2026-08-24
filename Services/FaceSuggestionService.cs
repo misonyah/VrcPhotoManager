@@ -6,7 +6,7 @@ namespace VrcPhotoManager.Services;
 /// NoEligiblePeople is true when no registered person has enough reference material yet
 /// (FaceMatcher.MinReferenceEmbeddings); callers should show that as its own message rather
 /// than a "0 suggestions" result, since it means the run couldn't even attempt scoring.</summary>
-public readonly record struct SuggestFacesResult(int Embedded, int Suggested, int EligiblePeople, int EliminationsApplied = 0)
+public readonly record struct SuggestFacesResult(int Embedded, int Suggested, int EligiblePeople, int EliminationsApplied = 0, int ExifEliminations = 0)
 {
     public bool NoEligiblePeople => EligiblePeople == 0;
 }
@@ -20,24 +20,48 @@ public readonly record struct SuggestFacesResult(int Embedded, int Suggested, in
 public static class FaceSuggestionService
 {
     /// <summary>
-    /// Embeds every not-yet-embedded detected face, builds a (possibly outlier-trimmed)
-    /// reference set per registered person (confirmed-tag embeddings + VRC profile thumbnail),
-    /// then scores every still-undetermined face against every reference of every eligible
-    /// person - taking each person's single best (nearest-neighbor) match - and records
-    /// suggestions that clear FaceMatcher's acceptance bar. See FaceMatcher.cs for the scoring
-    /// design (differential margin over the runner-up, not a raw similarity, and why
+    /// Embeds every not-yet-embedded detected face, then runs two independent identification
+    /// passes: a VRCX-presence elimination pass (see below - no embedding involved at all), then
+    /// CCIP embedding-based matching for whatever elimination didn't resolve. Builds a (possibly
+    /// outlier-trimmed) reference set per registered person (confirmed-tag embeddings + VRC
+    /// profile thumbnail), then scores every still-undetermined face against every reference of
+    /// every eligible person - taking each person's single best (nearest-neighbor) match - and
+    /// records suggestions that clear FaceMatcher's acceptance bar. See FaceMatcher.cs for the
+    /// scoring design (differential margin over the runner-up, not a raw similarity, and why
     /// nearest-neighbor replaced an earlier centroid-averaging design) and MainViewModel's
     /// former inline version (before this extraction) for the original call site.
+    ///
+    /// scopedPhotoIds null (the default) means the whole library - the full-library "Suggest
+    /// Faces" button and the `--run-suggest-faces` diagnostic hook both call it this way. A
+    /// non-null set restricts embedding/matching to just those photos - see Tag Faces'
+    /// incremental refresh banner (TagFacesWindow), which scopes this to whatever's currently
+    /// filtered/visible in the main grid rather than paying for a full-library pass just to let
+    /// a person just tagged start suggesting into a few other open photos. Candidate PEOPLE are
+    /// never scoped - every eligible registered person is still considered for every face in
+    /// scope, same as a full run; only which FACES get considered changes.
+    ///
+    /// photos null disables the elimination pass entirely (callers gate this on
+    /// SettingsKeys.EnableExifElimination) - a photo with VRCX presence data (photo_players, or
+    /// gamelog_inferred_players as a weaker fallback) where exactly one detected face is still
+    /// unidentified and exactly one listed person is unaccounted for gets that face labeled as
+    /// that person by pure elimination, no CCIP embedding needed. A photo_players match (VRCX's
+    /// own native metadata) confirms directly; a gamelog_inferred_players match (present in the
+    /// instance, not necessarily in frame) lands as a normal pending suggestion instead. Runs
+    /// BEFORE the CCIP pass and before the "no eligible people" early-out below, since
+    /// elimination needs no existing reference photos at all - it can identify someone who's
+    /// never been tagged before, which is exactly the scenario a fresh library needs most.
     /// </summary>
     public static async Task<SuggestFacesResult> RunAsync(
         FaceRepository faces,
         CcipEmbeddingService ccipEmbedder,
         IReadOnlyDictionary<long, string> pathByPhotoId,
         IReadOnlyDictionary<long, string?> avatarTypeByPhotoId,
-        Action<string>? progress = null)
+        Action<string>? progress = null,
+        IReadOnlyCollection<long>? scopedPhotoIds = null,
+        PhotoRepository? photos = null)
     {
         progress?.Invoke("Computing face embeddings...");
-        var needingEmbedding = faces.GetDetectedFacesWithoutEmbedding();
+        var needingEmbedding = faces.GetDetectedFacesWithoutEmbedding(scopedPhotoIds);
         int embedded = 0;
         // See MainViewModel.ClassifyPhotosAsync for why bounded concurrency here is safe:
         // CcipEmbeddingService serializes its own session.Run() calls internally, so only the
@@ -70,8 +94,63 @@ public static class FaceSuggestionService
         });
         await Task.WhenAll(embedTasks);
 
-        progress?.Invoke("Building reference sets...");
         var persons = faces.GetAllPersons();
+        int exifEliminations = 0;
+        if (photos is not null)
+        {
+            progress?.Invoke("Checking VRCX-presence elimination...");
+            var personById = persons.ToDictionary(p => p.Id);
+            var unconfirmedFaces = faces.GetUnconfirmedDetectedFaces(scopedPhotoIds);
+            foreach (var photoGroup in unconfirmedFaces.GroupBy(f => f.PhotoId))
+            {
+                // Airtight case only - exactly one face left to identify in this photo. More
+                // than one is ambiguous (which face is which of several unaccounted people?);
+                // extra/spurious faces (a misdetection) would make the headcount itself
+                // unreliable, so this deliberately doesn't try to be clever about partial cases.
+                if (photoGroup.Count() != 1) continue;
+                var onlyFace = photoGroup.Single();
+
+                // photo_players (VRCX's own native PlayerList metadata, captured at the exact
+                // moment of the shot) is preferred and treated as trustworthy enough to confirm
+                // directly; gamelog_inferred_players (present in the instance at that time, not
+                // necessarily in the photographed frame) is a weaker fallback that only ever
+                // produces a pending suggestion instead - see the confirmed: isNativeMetadata
+                // line below.
+                var nativePlayers = photos.GetPlayersForPhoto(photoGroup.Key);
+                bool isNativeMetadata = nativePlayers.Count > 0;
+                List<(string UserId, string DisplayName)> vrcxPeople = isNativeMetadata
+                    ? nativePlayers.Select(p => (p.UserId, p.DisplayName)).ToList()
+                    : photos.GetGamelogInferredPlayersForPhoto(photoGroup.Key).Select(p => (p.UserId, p.DisplayName)).ToList();
+                if (vrcxPeople.Count == 0) continue;
+
+                // excludingDetectedFaceId: 0 - a sentinel that never matches a real DetectedFace
+                // id (EF Core ids start at 1) - to get every confirmed person in this photo with
+                // nothing excluded, not "every OTHER confirmed face" the way this method is used
+                // elsewhere.
+                var confirmedVrcUserIds = faces.GetConfirmedPersonIdsInPhoto(photoGroup.Key, excludingDetectedFaceId: 0)
+                    .Select(pid => personById.TryGetValue(pid, out var p) ? p.VrcUserId : null)
+                    .Where(id => id is not null)
+                    .ToHashSet();
+                var unaccounted = vrcxPeople.Where(p => !confirmedVrcUserIds.Contains(p.UserId)).ToList();
+                if (unaccounted.Count != 1) continue; // still ambiguous - more than one candidate left
+
+                var (vrcUserId, displayName) = unaccounted[0];
+                var person = faces.FindOrCreatePersonByVrcUserId(vrcUserId, displayName);
+                faces.UpsertFaceLabel(onlyFace.Id, person.Id, confirmed: isNativeMetadata, Models.FaceLabelSource.ExifElimination, confidence: 1.0f);
+                faces.UpsertSuggestionLog(onlyFace.Id, person.Id, 1.0f, 1.0f, 0f, 0f,
+                    isNativeMetadata ? Models.SuggestionTier.AutoTagged : Models.SuggestionTier.ConfirmPrompt);
+                if (isNativeMetadata) faces.ResolveSuggestionLog(onlyFace.Id, Models.SuggestionOutcome.ConfirmedAsIs);
+                exifEliminations++;
+                // Keeps personById correct in-memory (a brand-new person from
+                // FindOrCreatePersonByVrcUserId wouldn't otherwise be in it) without a DB
+                // round-trip per elimination - persons itself gets one single refresh after the
+                // loop below, for the CCIP reference-building pass that follows.
+                personById[person.Id] = person;
+            }
+            if (exifEliminations > 0) persons = faces.GetAllPersons();
+        }
+
+        progress?.Invoke("Building reference sets...");
         var personRefs = new Dictionary<long, List<float[]>>();
         var confirmedPhotoIdsByPerson = new Dictionary<long, HashSet<long>>();
         foreach (var person in persons)
@@ -110,7 +189,7 @@ public static class FaceSuggestionService
 
         if (personRefs.Count == 0)
         {
-            return new SuggestFacesResult(embedded, 0, 0);
+            return new SuggestFacesResult(embedded, 0, 0, ExifEliminations: exifEliminations);
         }
 
         progress?.Invoke("Matching faces against registered people...");
@@ -132,12 +211,14 @@ public static class FaceSuggestionService
             }
         }
 
-        var toScore = faces.GetFacesNeedingSuggestion().Where(f => f.Embedding is not null).ToList();
+        var toScore = faces.GetFacesNeedingSuggestion(scopedPhotoIds).Where(f => f.Embedding is not null).ToList();
 
         // Score every face against every eligible person up front, before any elimination - the
         // photo-wide greedy assignment below needs each face's full ranked candidate list to
         // fairly compare confidences ACROSS faces, not just whichever face happens to be
         // processed first.
+        progress?.Invoke($"Matching faces against registered people... 0/{toScore.Count}");
+        int scoredCount = 0;
         var scoredByFace = new Dictionary<long, List<(long PersonId, float Score)>>();
         foreach (var face in toScore)
         {
@@ -146,6 +227,14 @@ public static class FaceSuggestionService
             // individual references at once - see ComputeMatchScores' doc comment for why this
             // must be batched rather than one call per reference.
             float[] refScores = await Task.Run(() => ccipEmbedder.ComputeMatchScores(faceEmbedding, flatRefs));
+            scoredCount++;
+            // Every face, not every 25 like the embedding loop above - a real report found this
+            // loop silently sat on its last progress message ("Building reference sets...") for
+            // the entire scoring pass with zero visible movement, which read as a hang even
+            // though each iteration really does yield back to the UI thread via the await above -
+            // an unscoped (whole-library) run can have thousands of faces here, and it's cheap to
+            // just always report.
+            progress?.Invoke($"Matching faces against registered people... {scoredCount}/{toScore.Count}");
 
             var bestPerPerson = new Dictionary<long, float>();
             for (int i = 0; i < refScores.Length; i++)
@@ -289,6 +378,6 @@ public static class FaceSuggestionService
             }
         }
 
-        return new SuggestFacesResult(embedded, suggested, personRefs.Count, eliminationsApplied);
+        return new SuggestFacesResult(embedded, suggested, personRefs.Count, eliminationsApplied, exifEliminations);
     }
 }

@@ -1,0 +1,61 @@
+<Window x:Class="VrcPhotoManager.Views.AvatarCatalogEditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Edit catalog info" Width="340" SizeToContent="Height"
+        WindowStyle="ToolWindow" ShowInTaskbar="False" ResizeMode="NoResize">
+    <StackPanel Margin="12">
+        <TextBlock x:Name="AvatarNameText" FontWeight="Bold" Margin="0,0,0,10" TextWrapping="Wrap" />
+
+        <TextBlock Text="Booth item id:" Margin="0,0,0,2" />
+        <TextBox x:Name="BoothProductBox" Margin="0,0,0,8"
+                 ToolTip="The numeric id from a booth.pm/en/items/&lt;id&gt; URL." />
+
+        <TextBlock Text="Gumroad:" Margin="0,0,0,2" />
+        <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="GumroadUserBox" Grid.Column="0"
+                     ToolTip="Uploader username, e.g. 'marivr' from marivr.gumroad.com/l/Deira." />
+            <TextBox x:Name="GumroadProductBox" Grid.Column="2"
+                     ToolTip="Product slug, e.g. 'Deira' from marivr.gumroad.com/l/Deira." />
+        </Grid>
+
+        <TextBlock Text="Jinxxy:" Margin="0,0,0,2" />
+        <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="JinxxyUserBox" Grid.Column="0"
+                     ToolTip="Uploader username, e.g. 'ReyCK' from jinxxy.com/ReyCK/Pinki." />
+            <TextBox x:Name="JinxxyProductBox" Grid.Column="2"
+                     ToolTip="Product slug, e.g. 'Pinki' from jinxxy.com/ReyCK/Pinki." />
+        </Grid>
+
+        <TextBlock Text="Based on (parent avatar):" Margin="0,0,0,2" />
+        <Grid Margin="0,0,0,4">
+            <TextBox x:Name="ParentSearchTextBox"
+                     GotFocus="ParentSearchTextBox_GotFocus"
+                     TextChanged="ParentSearchTextBox_TextChanged"
+                     ToolTip="Search for the base avatar this one is a recolor/edit of.&#10;Leave blank for none." />
+            <Popup x:Name="ParentSearchPopup" PlacementTarget="{Binding ElementName=ParentSearchTextBox}"
+                   Placement="Bottom" Width="316" StaysOpen="False" AllowsTransparency="True">
+                <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1">
+                    <ListBox x:Name="ParentSearchListBox" MaxHeight="200" DisplayMemberPath="DisplayName"
+                             MouseUp="ParentSearchListBox_MouseUp" />
+                </Border>
+            </Popup>
+        </Grid>
+        <Button x:Name="ClearParentButton" Content="Clear parent" HorizontalAlignment="Left" Padding="4,0"
+                Margin="0,0,0,10" Click="ClearParentButton_Click" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Padding="16,4" Margin="0,0,8,0" Click="CancelButton_Click" />
+            <Button Content="Save" Padding="16,4" Click="SaveButton_Click" IsDefault="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

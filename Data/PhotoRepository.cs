@@ -86,53 +86,69 @@ public class PhotoRepository
     /// the point of lazy per-row loading. Use GetThumbnail(id) on demand (PhotoViewModel does
     /// this only when a row is actually realized by the virtualizing panel).
     /// </summary>
+    /// <summary>Shared by GetAll and GetById - deliberately re-selects into a fresh Photo rather
+    /// than returning the tracked entity as-is, purely to exclude the Thumbnail BLOB from the
+    /// generated SQL (see GetAll's doc comment). A single shared expression means the two can't
+    /// drift out of sync on which columns are included - see the CropOffsetX/Y comment below for
+    /// what happened the one time this list was duplicated instead of shared.</summary>
+    private static readonly System.Linq.Expressions.Expression<Func<Photo, Photo>> ProjectWithoutThumbnail = p => new Photo
+    {
+        Id = p.Id,
+        LocalPath = p.LocalPath,
+        FileSize = p.FileSize,
+        Mtime = p.Mtime,
+        Width = p.Width,
+        Height = p.Height,
+        FileHash = p.FileHash,
+        HasThumbnail = p.Thumbnail != null,
+        Rating = p.Rating,
+        AvatarType = p.AvatarType,
+        AvatarTypeConfidence = p.AvatarTypeConfidence,
+        AvatarCatalogId = p.AvatarCatalogId,
+        MetadataScanned = p.MetadataScanned,
+        FacesScanned = p.FacesScanned,
+        AuthorId = p.AuthorId,
+        AuthorDisplayName = p.AuthorDisplayName,
+        WorldName = p.WorldName,
+        WorldId = p.WorldId,
+        WorldNameInferred = p.WorldNameInferred,
+        Selected = p.Selected,
+        RemoteStatus = p.RemoteStatus,
+        RemoteUrl = p.RemoteUrl,
+        RemoteId = p.RemoteId,
+        UploadedAt = p.UploadedAt,
+        UploadCropMode = p.UploadCropMode,
+        UploadedFormat = p.UploadedFormat,
+        // Previously missing from this explicit projection - object initializers leave
+        // unlisted properties at their type default, so every app load/reload silently
+        // reset these four to 0/null in memory even though the database had real values.
+        // Position (CropOffsetX/Y) looked like it "forgot" itself across a restart while
+        // the crop ratio (UploadCropMode, listed above) stayed correct - a real report.
+        CropOffsetX = p.CropOffsetX,
+        CropOffsetY = p.CropOffsetY,
+        CropRatioOverride = p.CropRatioOverride,
+        PendingRemovalRemoteId = p.PendingRemovalRemoteId,
+        UploadedOffsetX = p.UploadedOffsetX,
+        UploadedOffsetY = p.UploadedOffsetY,
+    };
+
     public List<Photo> GetAll()
     {
         using var context = NewContext();
         return context.Photos
             .AsNoTracking()
             .OrderBy(p => p.LocalPath)
-            .Select(p => new Photo
-            {
-                Id = p.Id,
-                LocalPath = p.LocalPath,
-                FileSize = p.FileSize,
-                Mtime = p.Mtime,
-                Width = p.Width,
-                Height = p.Height,
-                FileHash = p.FileHash,
-                HasThumbnail = p.Thumbnail != null,
-                Rating = p.Rating,
-                AvatarType = p.AvatarType,
-                AvatarTypeConfidence = p.AvatarTypeConfidence,
-                AvatarCatalogId = p.AvatarCatalogId,
-                MetadataScanned = p.MetadataScanned,
-                FacesScanned = p.FacesScanned,
-                AuthorId = p.AuthorId,
-                AuthorDisplayName = p.AuthorDisplayName,
-                WorldName = p.WorldName,
-                WorldId = p.WorldId,
-                WorldNameInferred = p.WorldNameInferred,
-                Selected = p.Selected,
-                RemoteStatus = p.RemoteStatus,
-                RemoteUrl = p.RemoteUrl,
-                RemoteId = p.RemoteId,
-                UploadedAt = p.UploadedAt,
-                UploadCropMode = p.UploadCropMode,
-                UploadedFormat = p.UploadedFormat,
-                // Previously missing from this explicit projection - object initializers leave
-                // unlisted properties at their type default, so every app load/reload silently
-                // reset these four to 0/null in memory even though the database had real values.
-                // Position (CropOffsetX/Y) looked like it "forgot" itself across a restart while
-                // the crop ratio (UploadCropMode, listed above) stayed correct - a real report.
-                CropOffsetX = p.CropOffsetX,
-                CropOffsetY = p.CropOffsetY,
-                CropRatioOverride = p.CropRatioOverride,
-                PendingRemovalRemoteId = p.PendingRemovalRemoteId,
-                UploadedOffsetX = p.UploadedOffsetX,
-                UploadedOffsetY = p.UploadedOffsetY,
-            })
+            .Select(ProjectWithoutThumbnail)
             .ToList();
+    }
+
+    /// <summary>Single-photo counterpart to GetAll, for callers that only need one (e.g.
+    /// TagFacesWindow's Previous/Next navigation) - not a full-library load just to find one row.
+    /// Null if the id no longer exists (photo deleted/moved out from under a stale reference).</summary>
+    public Photo? GetById(long id)
+    {
+        using var context = NewContext();
+        return context.Photos.AsNoTracking().Where(p => p.Id == id).Select(ProjectWithoutThumbnail).FirstOrDefault();
     }
 
     public byte[]? GetThumbnail(long id)
@@ -367,7 +383,7 @@ public class PhotoRepository
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s.SetProperty(p => p.Rating, rating));
     }
 
-    public void SetAvatarType(long id, string? avatarType, string? avatarCatalogId, float confidence)
+    public void SetAvatarType(long id, string? avatarType, long? avatarCatalogId, float confidence)
     {
         using var context = NewContext();
         context.Photos.Where(p => p.Id == id).ExecuteUpdate(s => s

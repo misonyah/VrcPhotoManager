@@ -17,6 +17,7 @@ public class VrcdnDbContext : DbContext
     public DbSet<KnownVrcUser> KnownVrcUsers => Set<KnownVrcUser>();
     public DbSet<VrcUserAlias> VrcUserAliases => Set<VrcUserAlias>();
     public DbSet<AvatarRegion> AvatarRegions => Set<AvatarRegion>();
+    public DbSet<AvatarCatalog> AvatarCatalogs => Set<AvatarCatalog>();
 
     private readonly string _dbPath;
 
@@ -151,6 +152,8 @@ public class VrcdnDbContext : DbContext
             entity.Property(r => r.AvatarDisplayName).HasColumnName("avatar_display_name");
             entity.Property(r => r.TaggedAt).HasColumnName("tagged_at");
             entity.Property(r => r.Deleted).HasColumnName("deleted").HasDefaultValue(false);
+            entity.Property(r => r.Confirmed).HasColumnName("confirmed").HasDefaultValue(true);
+            entity.Property(r => r.Confidence).HasColumnName("confidence");
         });
 
         modelBuilder.Entity<FaceLabel>(entity =>
@@ -222,6 +225,29 @@ public class VrcdnDbContext : DbContext
             entity.Property(u => u.UserId).HasColumnName("user_id");
             entity.Property(u => u.DisplayName).HasColumnName("display_name").IsRequired();
             entity.Property(u => u.LastSeenAt).HasColumnName("last_seen_at");
+        });
+
+        modelBuilder.Entity<AvatarCatalog>(entity =>
+        {
+            entity.ToTable("avatar_catalog");
+            entity.HasKey(c => c.Id);
+            entity.HasIndex(c => c.TrainedCatalogId).IsUnique().HasFilter("trained_catalog_id IS NOT NULL");
+            entity.HasIndex(c => c.BoothProduct).IsUnique().HasFilter("booth_product IS NOT NULL");
+            entity.HasIndex(c => new { c.GumroadUser, c.GumroadProduct }).IsUnique()
+                .HasFilter("gumroad_user IS NOT NULL AND gumroad_product IS NOT NULL");
+            entity.HasIndex(c => new { c.JinxxyUser, c.JinxxyProduct }).IsUnique()
+                .HasFilter("jinxxy_user IS NOT NULL AND jinxxy_product IS NOT NULL");
+
+            entity.Property(c => c.Id).HasColumnName("id");
+            entity.Property(c => c.TrainedCatalogId).HasColumnName("trained_catalog_id");
+            entity.Property(c => c.DisplayName).HasColumnName("display_name");
+            entity.Property(c => c.BoothProduct).HasColumnName("booth_product");
+            entity.Property(c => c.GumroadUser).HasColumnName("gumroad_user");
+            entity.Property(c => c.GumroadProduct).HasColumnName("gumroad_product");
+            entity.Property(c => c.JinxxyUser).HasColumnName("jinxxy_user");
+            entity.Property(c => c.JinxxyProduct).HasColumnName("jinxxy_product");
+            entity.Property(c => c.ParentItemId).HasColumnName("parent_item_id");
+            entity.Property(c => c.CreatedAt).HasColumnName("created_at");
         });
 
         modelBuilder.Entity<VrcUserAlias>(entity =>

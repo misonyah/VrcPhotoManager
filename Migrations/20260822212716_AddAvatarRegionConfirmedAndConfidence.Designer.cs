@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VrcPhotoManager.Data;
 
@@ -10,9 +11,11 @@ using VrcPhotoManager.Data;
 namespace VrcPhotoManager.Migrations
 {
     [DbContext(typeof(VrcdnDbContext))]
-    partial class VrcdnDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260822212716_AddAvatarRegionConfirmedAndConfidence")]
+    partial class AddAvatarRegionConfirmedAndConfidence
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -32,70 +35,6 @@ namespace VrcPhotoManager.Migrations
                     b.ToTable("settings", (string)null);
                 });
 
-            modelBuilder.Entity("VrcPhotoManager.Models.AvatarCatalog", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("id");
-
-                    b.Property<string>("BoothProduct")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("booth_product");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("DisplayName")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("display_name");
-
-                    b.Property<string>("GumroadProduct")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("gumroad_product");
-
-                    b.Property<string>("GumroadUser")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("gumroad_user");
-
-                    b.Property<string>("JinxxyProduct")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("jinxxy_product");
-
-                    b.Property<string>("JinxxyUser")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("jinxxy_user");
-
-                    b.Property<long?>("ParentItemId")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("parent_item_id");
-
-                    b.Property<string>("TrainedCatalogId")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("trained_catalog_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BoothProduct")
-                        .IsUnique()
-                        .HasFilter("booth_product IS NOT NULL");
-
-                    b.HasIndex("TrainedCatalogId")
-                        .IsUnique()
-                        .HasFilter("trained_catalog_id IS NOT NULL");
-
-                    b.HasIndex("GumroadUser", "GumroadProduct")
-                        .IsUnique()
-                        .HasFilter("gumroad_user IS NOT NULL AND gumroad_product IS NOT NULL");
-
-                    b.HasIndex("JinxxyUser", "JinxxyProduct")
-                        .IsUnique()
-                        .HasFilter("jinxxy_user IS NOT NULL AND jinxxy_product IS NOT NULL");
-
-                    b.ToTable("avatar_catalog", (string)null);
-                });
-
             modelBuilder.Entity("VrcPhotoManager.Models.AvatarRegion", b =>
                 {
                     b.Property<long>("Id")
@@ -103,8 +42,8 @@ namespace VrcPhotoManager.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("id");
 
-                    b.Property<long?>("AvatarCatalogId")
-                        .HasColumnType("INTEGER")
+                    b.Property<string>("AvatarCatalogId")
+                        .HasColumnType("TEXT")
                         .HasColumnName("avatar_catalog_id");
 
                     b.Property<string>("AvatarDisplayName")
@@ -344,8 +283,8 @@ namespace VrcPhotoManager.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("author_id");
 
-                    b.Property<long?>("AvatarCatalogId")
-                        .HasColumnType("INTEGER")
+                    b.Property<string>("AvatarCatalogId")
+                        .HasColumnType("TEXT")
                         .HasColumnName("avatar_catalog_id");
 
                     b.Property<string>("AvatarType")

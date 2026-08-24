@@ -20,4 +20,5 @@ public static class DefaultModelPaths
     public static string Ccip => Path.Combine(ModelsRoot, "CCIP");
     public static string FaceDetection => Path.Combine(ModelsRoot, "FaceDetection");
     public static string Avatar => Path.Combine(ModelsRoot, "Avatar");
+    public static string AvatarBodyDetection => Path.Combine(ModelsRoot, "AvatarBodyDetection");
 }

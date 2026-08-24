@@ -1,19 +1,27 @@
 <Window x:Class="VrcPhotoManager.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Width="620" SizeToContent="Height"
+        Title="Settings" Width="820" SizeToContent="Height"
         ResizeMode="NoResize">
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
+            <!-- "*" (not "Auto") is what actually makes the ScrollViewer below constrain/scroll
+                 its content instead of just reporting its full natural desired height regardless
+                 of the window's capped size - an "Auto" row lets a Grid child claim as much space
+                 as it wants during arrange, which pushed rows 1/2 (the note text and Save/Cancel
+                 buttons) below the window's actual visible bottom edge even with MaxHeight set on
+                 the Window itself (confirmed directly - this was still happening before this
+                 fix). -->
+            <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TabControl Grid.Row="0" MinHeight="480">
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <TabControl MinHeight="480">
             <TabItem Header="Models">
                 <StackPanel Margin="12">
-                    <TextBlock Text="WD14 Nudity Classifier Model" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
+                    <TextBlock Text="WD14 Nudity Classifier Model" FontSize="14" FontWeight="Bold" Margin="0,0,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
                         Used by "Classify Photos". Model: SmilingWolf/wd-vit-tagger-v3 (Hugging Face).
                     </TextBlock>
@@ -24,12 +32,14 @@
                         <TextBox x:Name="ModelDirTextBox" VerticalContentAlignment="Center" />
                     </DockPanel>
 
-                    <Button x:Name="DownloadButton" Content="Download Model Files" HorizontalAlignment="Left"
-                            Padding="8,4" Margin="0,0,0,8" Click="DownloadModel_Click"
-                            ToolTip="Download the WD14 model (~378 MB) and tag list into the folder above." />
-                    <TextBlock x:Name="DownloadStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+                    <DockPanel Margin="0,0,0,12" LastChildFill="True">
+                        <Button x:Name="DownloadButton" DockPanel.Dock="Left" Content="Download Model Files"
+                                Padding="8,4" Margin="0,0,8,0" Click="DownloadModel_Click"
+                                ToolTip="Download the WD14 model (~378 MB) and tag list into the folder above." />
+                        <TextBlock x:Name="DownloadStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" VerticalAlignment="Center" />
+                    </DockPanel>
 
-                    <TextBlock Text="CCIP Face-Matching Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+                    <TextBlock Text="CCIP Face-Matching Model" FontSize="14" FontWeight="Bold" Margin="0,12,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
                         Used by "Suggest Faces". Model: deepghs/ccip_onnx, caformer-24-randaug-pruned variant
                         (Hugging Face) - contrastively trained to tell anime characters apart, unlike a
@@ -42,12 +52,14 @@
                         <TextBox x:Name="CcipModelDirTextBox" VerticalContentAlignment="Center" />
                     </DockPanel>
 
-                    <Button x:Name="DownloadCcipButton" Content="Download CCIP Model Files" HorizontalAlignment="Left"
-                            Padding="8,4" Margin="0,0,0,8" Click="DownloadCcipModel_Click"
-                            ToolTip="Download the CCIP model files into the folder above." />
-                    <TextBlock x:Name="DownloadCcipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+                    <DockPanel Margin="0,0,0,12" LastChildFill="True">
+                        <Button x:Name="DownloadCcipButton" DockPanel.Dock="Left" Content="Download CCIP Model Files"
+                                Padding="8,4" Margin="0,0,8,0" Click="DownloadCcipModel_Click"
+                                ToolTip="Download the CCIP model files into the folder above." />
+                        <TextBlock x:Name="DownloadCcipStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" VerticalAlignment="Center" />
+                    </DockPanel>
 
-                    <TextBlock Text="Face Detection Model" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+                    <TextBlock Text="Face Detection Model" FontSize="14" FontWeight="Bold" Margin="0,12,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
                         Used by "Detect Faces". Model: deepghs/anime_face_detection, face_detect_v1.4_s
                         variant (Hugging Face, YOLOv8s) - noticeably better recall than the previously
@@ -60,12 +72,14 @@
                         <TextBox x:Name="FaceDetectionModelDirTextBox" VerticalContentAlignment="Center" />
                     </DockPanel>
 
-                    <Button x:Name="DownloadFaceDetectionButton" Content="Download Face Detection Model" HorizontalAlignment="Left"
-                            Padding="8,4" Margin="0,0,0,8" Click="DownloadFaceDetectionModel_Click"
-                            ToolTip="Download the face detection model (~45 MB) into the folder above." />
-                    <TextBlock x:Name="DownloadFaceDetectionStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+                    <DockPanel Margin="0,0,0,12" LastChildFill="True">
+                        <Button x:Name="DownloadFaceDetectionButton" DockPanel.Dock="Left" Content="Download Face Detection Model"
+                                Padding="8,4" Margin="0,0,8,0" Click="DownloadFaceDetectionModel_Click"
+                                ToolTip="Download the face detection model (~45 MB) into the folder above." />
+                        <TextBlock x:Name="DownloadFaceDetectionStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" VerticalAlignment="Center" />
+                    </DockPanel>
 
-                    <TextBlock Text="Avatar Type Classifier" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+                    <TextBlock Text="Avatar Type Classifier" FontSize="14" FontWeight="Bold" Margin="0,12,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
                         Used by "Classify Avatars". Model: misonyah/vrc-avatar-classifier (Hugging Face).
                     </TextBlock>
@@ -76,16 +90,38 @@
                         <TextBox x:Name="AvatarModelDirTextBox" VerticalContentAlignment="Center" />
                     </DockPanel>
 
-                    <Button x:Name="DownloadAvatarButton" Content="Download Avatar Model Files" HorizontalAlignment="Left"
-                            Padding="8,4" Margin="0,0,0,8" Click="DownloadAvatarModel_Click"
-                            ToolTip="Downloads model.onnx and labels.txt into the folder above." />
-                    <TextBlock x:Name="DownloadAvatarStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12" MinHeight="16" />
+                    <DockPanel Margin="0,0,0,12" LastChildFill="True">
+                        <Button x:Name="DownloadAvatarButton" DockPanel.Dock="Left" Content="Download Avatar Model Files"
+                                Padding="8,4" Margin="0,0,8,0" Click="DownloadAvatarModel_Click"
+                                ToolTip="Downloads model.onnx and labels.txt into the folder above." />
+                        <TextBlock x:Name="DownloadAvatarStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <TextBlock Text="Avatar Body Detection (optional)" FontSize="14" FontWeight="Bold" Margin="0,12,0,4" />
+                    <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
+                        Lets "Classify Avatars" identify each avatar separately in a group photo instead of
+                        one whole-frame guess. Model: deepghs/anime_person_detection (Hugging Face). Entirely
+                        optional - without this, Classify Avatars keeps its original single-guess behavior.
+                    </TextBlock>
+
+                    <TextBlock Text="Model folder (model.onnx):" Margin="0,0,0,4" />
+                    <DockPanel Margin="0,0,0,12">
+                        <Button DockPanel.Dock="Right" Content="Browse..." Padding="8,2" Margin="8,0,0,0" Click="BrowseAvatarBodyModelDir_Click" />
+                        <TextBox x:Name="AvatarBodyModelDirTextBox" VerticalContentAlignment="Center" />
+                    </DockPanel>
+
+                    <DockPanel Margin="0,0,0,12" LastChildFill="True">
+                        <Button x:Name="DownloadAvatarBodyButton" DockPanel.Dock="Left" Content="Download Avatar Body Detection Model"
+                                Padding="8,4" Margin="0,0,8,0" Click="DownloadAvatarBodyModel_Click"
+                                ToolTip="Download the avatar body detection model (~45 MB) into the folder above." />
+                        <TextBlock x:Name="DownloadAvatarBodyStatusText" TextWrapping="Wrap" Foreground="Gray" FontSize="11" VerticalAlignment="Center" />
+                    </DockPanel>
                 </StackPanel>
             </TabItem>
 
             <TabItem Header="Upload &amp; Sharing">
                 <StackPanel Margin="12">
-                    <TextBlock Text="Upload Image Format" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
+                    <TextBlock Text="Upload Image Format" FontSize="14" FontWeight="Bold" Margin="0,0,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,8">
                         JPEG (default) is smaller and uses less of your VRCDN quota. PNG is lossless (larger
                         files, no compression artifacts) but otherwise behaves identically - still no
@@ -97,7 +133,7 @@
                         <ComboBoxItem Content="png" ToolTip="Lossless, larger files - uses more VRCDN quota per photo." />
                     </ComboBox>
 
-                    <TextBlock Text="Upload Crop Presets" FontSize="16" FontWeight="Bold" Margin="0,0,0,4" />
+                    <TextBlock Text="Upload Crop Presets" FontSize="14" FontWeight="Bold" Margin="0,0,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
                         Reference only for now, not editable here. While hovering a photo, press [ / ] to
                         cycle it through these ratios - see the README's Keyboard Shortcuts section.
@@ -115,7 +151,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <TextBlock Text="VRCDN Photo Index (for a Udon world script)" FontSize="16" FontWeight="Bold" Margin="0,12,0,4" />
+                    <TextBlock Text="VRCDN Photo Index (for a Udon world script)" FontSize="14" FontWeight="Bold" Margin="0,12,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,8">
                         "Update VRCDN Index" (main window) publishes a list of every currently-uploaded
                         photo's URL to a GitHub Gist, so a Udon world script can randomly pick one - see the
@@ -171,6 +207,10 @@
                               Margin="0,0,0,12"
                               ToolTip="Once every face detected in a photo is tagged, marked &lt;unknown&gt;, or deleted (e.g. via Tag Faces' &quot;All tagged&quot; button), there's nothing left to find - skip re-running the ML detector on it.&#10;Turn off for a deliberate full rescan of everything, e.g. after switching to a better detector model." />
 
+                    <CheckBox x:Name="EnableExifEliminationCheckBox" Content="Identify the last person in a photo by elimination (VRCX presence data)"
+                              Margin="0,0,0,12"
+                              ToolTip="When a photo's VRCX presence data lists everyone who was there, and exactly one person is left unaccounted for while exactly one face is still unidentified, tag that face as that person - no face-matching involved, just elimination.&#10;A photo with VRCX's own native metadata auto-confirms directly; one relying on the weaker gamelog-inferred fallback lands as a normal pending suggestion instead." />
+
                     <TextBlock Text="Portal-hop detection window:" Margin="0,0,0,4"
                                ToolTip="How close a friend's departure from your previous instance and arrival into a photo's instance need to be to your own transition to count as &quot;traveled together&quot; (Photo Metadata's Traveled Together section).&#10;A real portal/invite hop isn't perfectly synchronized - you might go through before or after everyone else - so this needs some slack." />
                     <DockPanel Margin="0,0,0,12"
@@ -181,7 +221,35 @@
                     </DockPanel>
                 </StackPanel>
             </TabItem>
+
+            <TabItem Header="Avatars">
+                <DockPanel Margin="12">
+                    <TextBox x:Name="AvatarCatalogSearchTextBox" DockPanel.Dock="Top" Margin="0,0,0,8"
+                             TextChanged="AvatarCatalogSearchTextBox_TextChanged"
+                             ToolTip="Search cataloged avatars by name." />
+                    <Button x:Name="EditAvatarCatalogButton" DockPanel.Dock="Bottom" Content="Edit catalog info..."
+                            Margin="0,8,0,0" HorizontalAlignment="Left" Padding="8,2" IsEnabled="False"
+                            Click="EditAvatarCatalogButton_Click"
+                            ToolTip="Add Booth/Gumroad/Jinxxy links and a parent avatar for the selected entry." />
+                    <ListBox x:Name="AvatarCatalogListBox" MaxHeight="320" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             SelectionChanged="AvatarCatalogListBox_SelectionChanged">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,2">
+                                    <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" />
+                                    <TextBlock FontSize="11" Foreground="Gray">
+                                        <Run Text="{Binding StoresText, Mode=OneWay}" />
+                                        <Run Text=" " />
+                                        <Run Text="{Binding ParentText, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </TabItem>
         </TabControl>
+        </ScrollViewer>
 
         <TextBlock Grid.Row="1" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,12,0,12">
             Changes take effect the next time you start VRC Photo Manager.

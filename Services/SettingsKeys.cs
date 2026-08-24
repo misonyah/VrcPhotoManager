@@ -21,10 +21,18 @@ public static class SettingsKeys
     /// app - the old cascade was a ~1MB XML file, small enough to ship; this one is ~45MB.</summary>
     public const string FaceDetectionModelDir = "face_detection_model_dir";
     public const string AvatarModelDir = "avatar_model_dir";
+    /// <summary>deepghs/anime_person_detection's person_detect_v1.3_s (YOLOv8s, model.onnx) -
+    /// detects each individual avatar's body in a photo, so "Classify Avatars" can run the
+    /// existing whole-photo classifier per detected body instead of once for the whole frame -
+    /// see AvatarBodyDetectionService.cs. Optional, same as every other model here: with this
+    /// unconfigured, Classify Avatars just keeps its original single whole-photo-guess
+    /// behavior.</summary>
+    public const string AvatarBodyModelDir = "avatar_body_model_dir";
     public const string WdModelEtag = "wd14_model_etag";
     public const string CcipModelEtag = "ccip_model_etag";
     public const string FaceDetectionModelEtag = "face_detection_model_etag";
     public const string AvatarModelEtag = "avatar_model_etag";
+    public const string AvatarBodyModelEtag = "avatar_body_model_etag";
     public const string AutoCopyVrcdnUrlOnHover = "auto_copy_vrcdn_url_on_hover";
     public const string HoverPreviewDelaySeconds = "hover_preview_delay_seconds";
     public const string SkipResolvedPhotosOnFaceScan = "skip_resolved_photos_on_face_scan";
@@ -36,6 +44,15 @@ public static class SettingsKeys
     /// discussion landed on 90 seconds as the default, user-configurable since the right width
     /// depends on how a given friend group actually travels together.</summary>
     public const string PortalHopWindowSeconds = "portal_hop_window_seconds";
+    /// <summary>Default true. See FaceSuggestionService.RunAsync's elimination pass: when a
+    /// photo has VRCX presence data (photo_players or gamelog_inferred_players) and exactly one
+    /// detected face is still unidentified while exactly one listed person is unaccounted for,
+    /// that face is that person by pure elimination - no CCIP embedding involved at all. A
+    /// photo_players (native VRCX metadata) match auto-confirms directly; a
+    /// gamelog_inferred_players (weaker fallback - present in the instance, not necessarily in
+    /// frame) match lands as a normal pending suggestion instead. FaceLabelSource.ExifElimination
+    /// marks results from this pass specifically.</summary>
+    public const string EnableExifElimination = "enable_exif_elimination";
 
     // Session-state persistence (restore where you left off) - written once at Closing, read
     // once at startup, deliberately not live-synced on every change (ThumbnailSize alone can

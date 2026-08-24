@@ -12,45 +12,31 @@
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-
-        <!-- One row per manual-person/VRC-account match (FindManualPersonMergeSuggestions) -
-             empty and takes no space when there's nothing to suggest. -->
-        <ItemsControl x:Name="MergeSuggestionsList" Grid.Row="0" Margin="8,8,8,0">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Background="#FF3A3000" BorderBrush="Goldenrod" BorderThickness="1" CornerRadius="3"
-                            Padding="8,4" Margin="0,0,0,4">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Foreground="White" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="560">
-                                <Run Text="{Binding ManualName}" FontWeight="Bold" /><Run Text=" (manual) looks like the VRC account " /><Run Text="{Binding VrcDisplayName}" FontWeight="Bold" /><Run Text=" - merge them?" />
-                            </TextBlock>
-                            <Button Content="Merge" Margin="8,0,0,0" Padding="8,2" Click="MergeSuggestion_Click"
-                                    ToolTip="Link this manual entry to the VRC account.&#10;If that account is already linked elsewhere, both records' tags are combined." />
-                            <Button Content="Dismiss" Margin="4,0,0,0" Padding="8,2" Click="DismissMergeSuggestion_Click"
-                                    ToolTip="Not the same person - dismiss this suggestion." />
-                        </StackPanel>
-                    </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
 
         <!-- LayoutTransform (not RenderTransform) on the shared Image+Canvas container: it
              affects the layout pass, so the ScrollViewer correctly grows its scrollable extent
              as you zoom in, and it applies to the whole container as one visual unit - the face
              boxes on FaceCanvas are positioned using PhotoImage's own (pre-transform) ActualWidth/
              Height, so they stay correctly aligned at any zoom level without extra math. -->
-        <ScrollViewer x:Name="ImageScrollViewer" Grid.Row="1"
+        <ScrollViewer x:Name="ImageScrollViewer" Grid.Row="0"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                       PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
                       PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
                       PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
                       PreviewMouseUp="ImageScrollViewer_PreviewMouseUp"
                       LostMouseCapture="ImageScrollViewer_LostMouseCapture">
-            <Grid x:Name="ImageContainer">
+            <!-- HorizontalAlignment/VerticalAlignment pinned away from the Grid default (Stretch):
+                 without this, ScrollViewer stretches this container to fill the viewport on any
+                 axis that doesn't need scrolling yet - true near minimum zoom - and PhotoImage's
+                 own Stretch="Uniform" then re-fits itself to that inflated space, masking the
+                 first several zoom-in mouse-wheel ticks entirely (ZoomTransform.ScaleX changes,
+                 nothing visibly happens) until the real scaled size finally exceeds the viewport
+                 and stretching stops - a real report ("zoom doesn't do much for a few steps").
+                 Center keeps the natural "fit to window, centered" starting look. -->
+            <Grid x:Name="ImageContainer" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid.LayoutTransform>
                     <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
                 </Grid.LayoutTransform>
@@ -66,25 +52,76 @@
             </Grid>
         </ScrollViewer>
 
-        <DockPanel Grid.Row="2" Margin="8">
+        <!-- Floats on top of the photo (same Grid cell/row as ImageScrollViewer above, painted
+             after it so it renders on top) instead of living in its own "Auto" row above the
+             photo - a dedicated row grew/shrank the photo's available space every time this
+             appeared/disappeared, visibly shifting the image (a real report: "the appearing
+             banner... shouldn't jump the photo"). Floating here means showing/hiding it never
+             changes ImageScrollViewer's allocated size at all, so RedrawBoxes never needs an
+             extra nudge for it - the old TopBannerPanel_SizeChanged workaround this used to need
+             is gone along with the bug it was compensating for. VerticalAlignment="Top" keeps it
+             sized to its own content rather than stretching to fill the whole photo area (which
+             would swallow every click as if it were on the banner). -->
+        <StackPanel Grid.Row="0" VerticalAlignment="Top" Margin="8,8,8,0">
+            <!-- One row per manual-person/VRC-account match (FindManualPersonMergeSuggestions) -
+                 empty and takes no space when there's nothing to suggest. -->
+            <ItemsControl x:Name="MergeSuggestionsList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="#FF3A3000" BorderBrush="Goldenrod" BorderThickness="1" CornerRadius="3"
+                                Padding="8,4" Margin="0,0,0,4">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Foreground="White" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="560">
+                                    <Run Text="{Binding ManualName}" FontWeight="Bold" /><Run Text=" (manual) looks like the VRC account " /><Run Text="{Binding VrcDisplayName}" FontWeight="Bold" /><Run Text=" - merge them?" />
+                                </TextBlock>
+                                <Button Content="Merge" Margin="8,0,0,0" Padding="8,2" Click="MergeSuggestion_Click"
+                                        ToolTip="Link this manual entry to the VRC account.&#10;If that account is already linked elsewhere, both records' tags are combined." />
+                                <Button Content="Dismiss" Margin="4,0,0,0" Padding="8,2" Click="DismissMergeSuggestion_Click"
+                                        ToolTip="Not the same person - dismiss this suggestion." />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- Shown by MarkSuggestionsStale (TagFacesWindow.xaml.cs) right after a confirm,
+                 offering to re-score newly-updated people against whatever's currently filtered/
+                 visible in the main grid - see FaceSuggestionService.RunAsync's scopedPhotoIds. -->
+            <Border x:Name="StaleSuggestionsBanner" Background="#FF1E3A5F" BorderBrush="SteelBlue" BorderThickness="1"
+                    CornerRadius="3" Padding="8,4" Margin="0,0,0,4" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="StaleSuggestionsText" Foreground="White" VerticalAlignment="Center"
+                               TextWrapping="Wrap" MaxWidth="560" />
+                    <Button x:Name="RefreshSuggestionsButton" Content="Refresh now" Margin="8,0,0,0" Padding="8,2"
+                            Click="RefreshSuggestionsButton_Click"
+                            ToolTip="Re-score newly tagged people's updated references against every untagged/suggested face currently in view (the main grid's filtered set), so someone you just registered can start being suggested elsewhere right away instead of waiting for a full Suggest Faces run." />
+                    <Button Content="Dismiss" Margin="4,0,0,0" Padding="8,2" Click="DismissStaleSuggestionsBanner_Click"
+                            ToolTip="Hide this until another confirm makes it relevant again." />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <DockPanel Grid.Row="1" Margin="8">
             <Button x:Name="AllTaggedButton" DockPanel.Dock="Right" Click="AllTaggedButton_Click" Padding="8,2" VerticalAlignment="Center"
                     ToolTip="Accepts every pending suggestion (orange) as-is - same as clicking &quot;Confirm: {name}&quot; on each one individually." />
-            <Button x:Name="RemoveUntaggedButton" DockPanel.Dock="Right" Click="RemoveUntaggedButton_Click" Padding="8,2" Margin="0,0,8,0" VerticalAlignment="Center"
+            <Button x:Name="RemoveUntaggedButton" DockPanel.Dock="Right" Click="RemoveUntaggedButton_Click" Padding="8,2" Margin="8,0,8,0" VerticalAlignment="Center"
                     ToolTip="Marks every remaining untagged (yellow) box as a bad detection - same as clicking Delete box on each one individually.&#10;Kept in the database for reviewing detection quality later, just hidden from view here." />
-            <!-- Person/Avatar mode - which kind of box click-drag-on-empty-space creates, and
-                 which picker an existing box's own click opens (each box's hit-test rectangle
-                 has its OWN handler wired in RedrawBoxes/RedrawAvatarRegions, so this toggle
-                 only ever affects NEW boxes, never how an existing one behaves). Avatar regions
-                 are a separate box type (magenta) from face boxes, not a replacement for them -
-                 needed for group photos where more than one avatar is in frame at once, which a
-                 single whole-photo Classify Avatars guess can't represent. -->
+            <!-- Person/Avatar mode - which kind of box click-drag-on-empty-space creates, which
+                 picker an existing box's own click opens, AND (see RedrawBoxes) which box type is
+                 even drawn/visible at all - only the selected mode's boxes show, to cut down on
+                 clutter/misclicks from two overlapping box types at once. Avatar regions are a
+                 separate box type (magenta) from face boxes, not a replacement for them - needed
+                 for group photos where more than one avatar is in frame at once, which a single
+                 whole-photo Classify Avatars guess can't represent. -->
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
                 <RadioButton x:Name="PersonModeRadio" Content="Person" GroupName="TagMode" IsChecked="True" Margin="0,0,8,0"
+                             Checked="TagMode_Checked"
                              ToolTip="Click-drag draws a face box; clicking a box tags who it is." />
                 <RadioButton x:Name="AvatarModeRadio" Content="Avatar" GroupName="TagMode"
+                             Checked="TagMode_Checked"
                              ToolTip="Click-drag draws an avatar region (magenta); clicking a region tags which avatar it shows.&#10;Separate from face boxes - use this for group photos with more than one avatar in frame." />
             </StackPanel>
-            <TextBlock Text="Click a box to tag who/what it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, magenta = avatar region. Click-drag empty space to add a missed face/region (per the Person/Avatar toggle). Scroll to zoom, middle-drag to pan."
+            <TextBlock Text="Click a box to tag who/what it is. Green = confirmed, orange = suggested (click to confirm or correct), yellow = untagged, magenta = avatar region. Click-drag empty space to add a missed face/region (per the Person/Avatar toggle). Scroll to zoom, middle-drag to pan. Left/Right arrow keys go to the previous/next photo in view."
                        Foreground="Gray" Margin="0,0,8,0" VerticalAlignment="Center" TextWrapping="Wrap" />
         </DockPanel>
 
@@ -183,22 +220,58 @@
             </Border>
         </Popup>
 
-        <!-- Avatar-region picker - deliberately much simpler than PersonPickerPopup: avatars
-             come from a fixed catalog (the classifier's own AllEntries - see
-             AvatarTypeService.AllEntries), there's no "create new"/alias/rename workflow the
-             way manual people have, so a plain search-as-you-type list is enough. -->
+        <!-- Avatar-region picker - avatars come from a fixed catalog (the classifier's own
+             AllEntries - see AvatarTypeService.AllEntries), no "create new"/alias/rename
+             workflow for the avatar list itself the way manual people have. "Edit catalog info"
+             is a separate, narrower affordance: it doesn't add/rename entries in this list, it
+             edits the selected entry's AvatarCatalog row (store links, parent lineage) - see
+             AvatarCatalogEditWindow. -->
         <Popup x:Name="AvatarPickerPopup" Placement="Right" HorizontalOffset="8" StaysOpen="False" AllowsTransparency="True"
                Closed="AvatarPickerPopup_Closed">
             <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1" Padding="8" MaxWidth="260">
                 <StackPanel>
                     <TextBlock Text="Which avatar?" Foreground="White" FontWeight="Bold" Margin="0,0,0,6" />
+                    <!-- Only visible for an auto-detected, still-unconfirmed region (orange box -
+                         see RedrawBoxes) that already has a classified guess to accept. -->
+                    <Button x:Name="ConfirmAvatarRegionButton" Content="Confirm suggestion" Click="ConfirmAvatarRegionButton_Click"
+                            Margin="0,0,0,4" Visibility="Collapsed"
+                            ToolTip="Accept this auto-detected region's classified avatar as-is." />
                     <TextBox x:Name="AvatarSearchTextBox" Margin="0,0,0,4"
                              ToolTip="Type to search the classifier's known avatar list."
                              TextChanged="AvatarSearchTextBox_TextChanged" />
                     <!-- ItemsSource is List&lt;(string Label, string? CatalogId)&gt; - named tuple
                          element names are compile-time-only, the real runtime property is
                          Item1, hence DisplayMemberPath="Item1" rather than "Label". -->
-                    <ListBox x:Name="AvatarSearchListBox" MaxHeight="200" DisplayMemberPath="Item1" MouseUp="AvatarSearchListBox_MouseUp" />
+                    <ListBox x:Name="AvatarSearchListBox" MaxHeight="200" DisplayMemberPath="Item1"
+                             Background="Transparent" Foreground="White" BorderThickness="0"
+                             MouseUp="AvatarSearchListBox_MouseUp"
+                             SelectionChanged="AvatarSearchListBox_SelectionChanged">
+                        <!-- WPF's default (unstyled) ListBoxItem selected/hover state paints a
+                             plain white highlight with no foreground override - against this
+                             popup's dark background that made a selected row look like a blank
+                             white box swallowing its own text (a real report). Explicit
+                             Background/Foreground per state keeps text visible regardless of
+                             selection. -->
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="White" />
+                                <Setter Property="Padding" Value="4,2" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#FF3E3E42" />
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#FF094771" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                    <Button x:Name="EditCatalogInfoButton" Content="Edit catalog info..." Click="EditCatalogInfoButton_Click"
+                            Margin="0,4,0,0" IsEnabled="False"
+                            ToolTip="Add Booth/Gumroad/Jinxxy links and a parent-avatar (base avatar this one derives from) for the selected entry above." />
                     <Button x:Name="ClearAvatarTagButton" Content="Clear tag" Click="ClearAvatarTagButton_Click" Margin="0,4,0,0"
                             ToolTip="Remove this region's tag, leaving it untagged.&#10;The box itself stays - use Delete region to remove it instead." />
                     <Button Content="Delete region" Click="DeleteAvatarRegionButton_Click" Margin="0,4,0,0"

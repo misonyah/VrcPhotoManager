@@ -429,7 +429,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainViewModel vm) return;
         HidePreviewOverlay();
-        new Views.SettingsWindow(vm.Repo).Show();
+        new Views.SettingsWindow(vm.Repo, vm.AvatarCatalog).Show();
     }
 
     private void ViewMetadata_Click(object sender, RoutedEventArgs e)
@@ -529,7 +529,10 @@ public partial class MainWindow : Window
         }
 
         HidePreviewOverlay();
-        var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.AvatarRegions, vm.AvatarClassifier, vm.ProfileLookup, photo.Model);
+        var (pathByPhotoId, avatarTypeByPhotoId) = vm.GetPhotoPathsAndAvatarTypes();
+        var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.AvatarRegions, vm.AvatarCatalog, vm.AvatarClassifier, vm.ProfileLookup, photo.Model,
+            vm.CcipEmbedder, vm.GetVisiblePhotoIds(), pathByPhotoId, avatarTypeByPhotoId,
+            vm.SuggestionsMayBeStale, stale => vm.SuggestionsMayBeStale = stale);
         _openTagFacesWindow = window;
         window.Closed += (_, _) =>
         {

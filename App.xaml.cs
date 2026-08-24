@@ -163,9 +163,10 @@ public partial class App : Application
             var photos = new Data.PhotoRepository(dbPath);
             var faces = new Data.FaceRepository(dbPath);
             var avatarRegions = new Data.AvatarRegionRepository(dbPath);
+            var avatarCatalog = new Data.AvatarCatalogRepository(dbPath);
             var photo = photos.GetAll().First(p => p.Id == photoId);
             var lookup = Services.VrcxProfileLookupService.TryCreate(out _);
-            new Views.TagFacesWindow(faces, photos, avatarRegions, null, lookup, photo).ShowDialog();
+            new Views.TagFacesWindow(faces, photos, avatarRegions, avatarCatalog, null, lookup, photo).ShowDialog();
             ExitProcess();
         }
 
@@ -202,6 +203,18 @@ public partial class App : Application
         if (e.Args.Length == 1 && e.Args[0] == "--run-detect-faces")
         {
             RunDetectFacesDiagnostic();
+            ExitProcess();
+        }
+
+        if (e.Args.Length == 1 && e.Args[0] == "--run-classify-avatars")
+        {
+            RunClassifyAvatarsDiagnostic();
+            ExitProcess();
+        }
+
+        if (e.Args.Length == 2 && e.Args[0] == "--test-avatar-classify")
+        {
+            RunAvatarClassifySmokeTest(e.Args[1]);
             ExitProcess();
         }
 
@@ -348,6 +361,7 @@ public partial class App : Application
         var photos = photoRepo.GetAll();
         var pathById = photos.ToDictionary(p => p.Id, p => p.LocalPath);
         var avatarTypeById = photos.ToDictionary(p => p.Id, p => p.AvatarType);
+        Data.PhotoRepository? eliminationRepo = photoRepo.GetBoolSetting(Services.SettingsKeys.EnableExifElimination, true) ? photoRepo : null;
 
         // Same Task.Run(...).GetAwaiter().GetResult() pattern as RunVrcdnSyncDiagnostic -
         // OnStartup runs on the WPF Dispatcher thread; blocking directly on an async chain
@@ -355,14 +369,19 @@ public partial class App : Application
         Task.Run(async () =>
         {
             var result = await Services.FaceSuggestionService.RunAsync(
-                faceRepo, ccip, pathById, avatarTypeById, msg => Console.WriteLine(msg));
+                faceRepo, ccip, pathById, avatarTypeById, msg => Console.WriteLine(msg),
+                photos: eliminationRepo);
+            string exifPart = result.ExifEliminations > 0 ? $" {result.ExifEliminations} identified by VRCX-presence elimination." : "";
             if (result.NoEligiblePeople)
             {
-                Console.WriteLine($"No registered person has enough reference photos yet (need >= {Services.FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).");
+                Console.WriteLine(result.ExifEliminations > 0
+                    ? $"Suggest Faces done:{exifPart} No registered person has enough reference photos yet for CCIP matching (need >= {Services.FaceMatcher.MinReferenceEmbeddings})."
+                    : $"No registered person has enough reference photos yet (need >= {Services.FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).");
                 return;
             }
             Console.WriteLine($"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people"
-                + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : "."));
+                + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : ".")
+                + exifPart);
         }).GetAwaiter().GetResult();
     }
 
@@ -425,6 +444,153 @@ public partial class App : Application
 
         Console.WriteLine($"Face scan complete: {totalNew} new faces, {totalExisting} existing across {photos.Count} photos"
             + (totalRemoved > 0 ? $" ({totalRemoved} stale untagged boxes removed)." : "."));
+    }
+
+    /// <summary>Headless equivalent of clicking "Classify Avatars" in the running app - same
+    /// selection logic as MainViewModel.ClassifyAvatarsAsync (classify anything missing a result
+    /// or previously scored "no confident match", skip photos that already have per-region
+    /// results from a prior multi-avatar run), run sequentially rather than with bounded
+    /// concurrency since this is a one-off diagnostic, not a UI-responsiveness-sensitive path.
+    /// AvatarCatalogRepository.GetOrCreateByTrainedCatalogId resolves each classification's flat
+    /// "booth:"/"local:" id to a real AvatarCatalog row exactly like the real UI path does.</summary>
+    private static void RunClassifyAvatarsDiagnostic()
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        string dbPath = Path.Combine(dataDir, "vrcdn_manager.db");
+        var photoRepo = new Data.PhotoRepository(dbPath);
+        var avatarRegions = new Data.AvatarRegionRepository(dbPath);
+        var avatarCatalog = new Data.AvatarCatalogRepository(dbPath);
+
+        string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.AvatarModelDir);
+        if (modelDir is null || !Directory.Exists(modelDir))
+        {
+            modelDir = Directory.Exists(Services.DefaultModelPaths.Avatar) ? Services.DefaultModelPaths.Avatar : null;
+        }
+        if (modelDir is null)
+        {
+            Console.WriteLine("Avatar classifier model dir not configured (set it via Settings first).");
+            return;
+        }
+        var classifier = Services.AvatarTypeService.TryCreate(modelDir, out string? error);
+        if (classifier is null)
+        {
+            Console.WriteLine($"Unavailable: {error}");
+            return;
+        }
+
+        string? bodyModelDir = photoRepo.GetStringSetting(Services.SettingsKeys.AvatarBodyModelDir);
+        if (bodyModelDir is null || !Directory.Exists(bodyModelDir))
+        {
+            bodyModelDir = Directory.Exists(Services.DefaultModelPaths.AvatarBodyDetection)
+                ? Services.DefaultModelPaths.AvatarBodyDetection : null;
+        }
+        var bodyDetector = bodyModelDir is not null
+            ? Services.AvatarBodyDetectionService.TryCreate(bodyModelDir, out _)
+            : null;
+        Console.WriteLine(bodyDetector is not null
+            ? "Multi-avatar body detection available - group photos will get per-avatar regions."
+            : "Multi-avatar body detection not configured - every photo gets one whole-photo classification.");
+
+        var missingIds = photoRepo.GetPhotoIdsMissingAvatarType();
+        var retryIds = photoRepo.GetPhotoIdsWithNoConfidentMatch();
+        var regionIds = avatarRegions.GetPhotoIdsWithRegions();
+        var toClassify = photoRepo.GetAll()
+            .Where(p => (missingIds.Contains(p.Id) || retryIds.Contains(p.Id)) && !regionIds.Contains(p.Id))
+            .ToList();
+        if (toClassify.Count == 0) { Console.WriteLine("Nothing to classify - every photo already has an avatar-type result."); return; }
+        Console.WriteLine($"Classifying {toClassify.Count} photos...");
+
+        int processed = 0, matched = 0, multiAvatarPhotos = 0, regionsCreated = 0, failed = 0;
+        foreach (var photo in toClassify)
+        {
+            try
+            {
+                var bodies = bodyDetector?.DetectBodies(photo.LocalPath) ?? [];
+                if (bodies.Count < 2)
+                {
+                    var (label, catalogId, confidence) = classifier.Classify(photo.LocalPath);
+                    long? resolvedCatalogId = label is not null && catalogId is not null
+                        ? avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
+                        : null;
+                    photoRepo.SetAvatarType(photo.Id, label, resolvedCatalogId, confidence);
+                    if (label is not null) matched++;
+                }
+                else
+                {
+                    multiAvatarPhotos++;
+                    foreach (var body in bodies)
+                    {
+                        var (label, catalogId, confidence) = classifier.Classify(photo.LocalPath, (body.X, body.Y, body.Width, body.Height));
+                        long? resolvedCatalogId = label is not null && catalogId is not null
+                            ? avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
+                            : null;
+                        avatarRegions.AddAutoDetectedRegion(photo.Id, body.X, body.Y, body.Width, body.Height,
+                            resolvedCatalogId, label, confidence);
+                        regionsCreated++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Console.WriteLine($"Avatar classification failed for {photo.FileName}: {ex.Message}");
+            }
+
+            processed++;
+            if (processed % 25 == 0 || processed == toClassify.Count)
+            {
+                Console.WriteLine($"Classifying avatars... {processed}/{toClassify.Count}, {matched} matched, {multiAvatarPhotos} multi-avatar so far");
+            }
+        }
+
+        string multiAvatarPart = multiAvatarPhotos > 0
+            ? $" {multiAvatarPhotos} group photos got {regionsCreated} per-avatar regions instead (review in Tag Faces)."
+            : "";
+        Console.WriteLine($"Avatar classification complete: {matched}/{toClassify.Count} whole-photo matches"
+            + (failed > 0 ? $", {failed} failed." : ".") + multiAvatarPart);
+    }
+
+    /// <summary>Single-photo avatar-classify smoke test - unlike RunClassifyAvatarsDiagnostic's
+    /// batch path (which only logs ex.Message on failure), this prints the FULL exception
+    /// (type + stack) so a load/decode failure like WPF's BitmapDecoder throwing "Unexpected
+    /// property type or value" on a specific file's metadata can actually be diagnosed instead
+    /// of just counted.</summary>
+    private static void RunAvatarClassifySmokeTest(string imagePath)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrcdnManager");
+        var photoRepo = new Data.PhotoRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+
+        string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.AvatarModelDir);
+        if (modelDir is null || !Directory.Exists(modelDir))
+        {
+            modelDir = Directory.Exists(Services.DefaultModelPaths.Avatar) ? Services.DefaultModelPaths.Avatar : null;
+        }
+        if (modelDir is null)
+        {
+            Console.WriteLine("Avatar classifier model dir not configured (set it via Settings first).");
+            return;
+        }
+        var classifier = Services.AvatarTypeService.TryCreate(modelDir, out string? error);
+        if (classifier is null)
+        {
+            Console.WriteLine($"Unavailable: {error}");
+            return;
+        }
+
+        try
+        {
+            var (label, catalogId, confidence) = classifier.Classify(imagePath);
+            Console.WriteLine($"Label: {label ?? "(no confident match)"}");
+            Console.WriteLine($"CatalogId: {catalogId ?? "(none)"}");
+            Console.WriteLine($"Confidence: {confidence:F4}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("FAILED:");
+            Console.WriteLine(ex.ToString());
+        }
     }
 
     private static void RunVrcxProfileLookupDiagnostic(string vrcUserId)

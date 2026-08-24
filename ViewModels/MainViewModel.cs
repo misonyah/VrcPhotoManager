@@ -26,12 +26,14 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly CredentialStore _credentials;
     private readonly FaceRepository _faces;
     private readonly AvatarRegionRepository _avatarRegions;
+    private readonly AvatarCatalogRepository _avatarCatalog;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
     private string? _selfUserId;
     private CcipEmbeddingService? _ccipEmbedder;
     private WdTaggerService? _tagger;
     private AvatarTypeService? _avatarClassifier;
+    private AvatarBodyDetectionService? _avatarBodyDetector;
     private VrcdnApiClient? _api;
 
     /// <summary>Periodically pings VRCDN while logged in so an idle PHP session doesn't expire
@@ -576,8 +578,32 @@ public class MainViewModel : INotifyPropertyChanged
     /// code-behind, like MetadataWindow/SettingsWindow).</summary>
     public FaceRepository Faces => _faces;
     public AvatarRegionRepository AvatarRegions => _avatarRegions;
+    public AvatarCatalogRepository AvatarCatalog => _avatarCatalog;
     public AvatarTypeService? AvatarClassifier => _avatarClassifier;
     public VrcxProfileLookupService? ProfileLookup => _profileLookup;
+    public CcipEmbeddingService? CcipEmbedder => _ccipEmbedder;
+
+    /// <summary>Currently filtered/sorted photo ids, in the order shown in the main grid - what
+    /// Tag Faces' incremental "refresh suggestions for what's in view" banner scopes itself to
+    /// (see FaceSuggestionService.RunAsync's scopedPhotoIds). Deliberately the FILTERED set, not
+    /// the whole library - the point is a fast, bounded refresh, not a standing full rescan.</summary>
+    public List<long> GetVisiblePhotoIds() => GetFilteredSortedPhotos().Select(p => p.Model.Id).ToList();
+
+    /// <summary>True once a Tag Faces confirm has happened without the incremental "refresh
+    /// suggestions for what's in view" pass having caught up yet - read by MainWindow.OpenTagFaces
+    /// to decide whether a freshly-opened Tag Faces window should show that banner immediately,
+    /// even if the confirm that set this happened in an earlier (now-closed) Tag Faces window -
+    /// that window is a singleton, fully re-created per photo, so this flag is what actually
+    /// survives across those separate openings. Written by TagFacesWindow itself via the
+    /// setSuggestionsStale callback passed into its constructor.</summary>
+    public bool SuggestionsMayBeStale { get; set; }
+
+    /// <summary>The two dictionaries FaceSuggestionService.RunAsync needs, built the same way
+    /// SuggestFacesAsync already builds them for its own (unscoped) full-library run - reused
+    /// as-is by Tag Faces' incremental refresh, which only narrows scopedPhotoIds, not these.</summary>
+    public (Dictionary<long, string> PathByPhotoId, Dictionary<long, string?> AvatarTypeByPhotoId) GetPhotoPathsAndAvatarTypes() =>
+        (_allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath),
+         _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType));
 
     /// <summary>Read fresh (not cached) each time - it's a single cheap SQLite lookup, so
     /// there's no need for a separate "reload after Settings closes" step.</summary>
@@ -627,6 +653,7 @@ public class MainViewModel : INotifyPropertyChanged
         _credentials = new CredentialStore(_repo);
         _faces = new FaceRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _avatarRegions = new AvatarRegionRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
+        _avatarCatalog = new AvatarCatalogRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         // Gated on ScanLibrary/DetectFaces having succeeded at least once (not just this
@@ -701,6 +728,18 @@ public class MainViewModel : INotifyPropertyChanged
         {
             StatusMessage = $"Avatar classifier unavailable: {avatarError}";
         }
+
+        // Optional, unlike every other model here it's not gated behind CanExecute on any
+        // command - it's not configured means Classify Avatars just keeps its original
+        // whole-photo-only behavior (see ClassifyAvatarsAsync), not "unavailable".
+        var (avatarBodyDetector, _) = await Task.Run(() =>
+        {
+            string? modelDir = ResolveAvatarBodyModelDir();
+            if (modelDir is null) return (null, (string?)null);
+            var d = AvatarBodyDetectionService.TryCreate(modelDir, out string? error);
+            return (d, error);
+        });
+        _avatarBodyDetector = avatarBodyDetector;
 
         var (faceDetector, faceDetectorError) = await Task.Run(() =>
         {
@@ -1211,17 +1250,29 @@ public class MainViewModel : INotifyPropertyChanged
 
         var pathById = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath);
         var avatarTypeByPhotoId = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType);
+        PhotoRepository? eliminationRepo = _repo.GetBoolSetting(SettingsKeys.EnableExifElimination, true) ? _repo : null;
         var result = await FaceSuggestionService.RunAsync(
-            _faces, _ccipEmbedder, pathById, avatarTypeByPhotoId, msg => StatusMessage = msg);
+            _faces, _ccipEmbedder, pathById, avatarTypeByPhotoId, msg => StatusMessage = msg,
+            photos: eliminationRepo);
 
+        string exifPart = result.ExifEliminations > 0
+            ? $" {result.ExifEliminations} identified by VRCX-presence elimination."
+            : "";
+
+        // Elimination can succeed with zero CCIP-eligible people (it needs no reference photos
+        // at all - see FaceSuggestionService.RunAsync's doc comment), so this no longer bails
+        // out to a flatly discouraging message when that's the only thing that happened.
         if (result.NoEligiblePeople)
         {
-            StatusMessage = $"No registered person has enough reference photos yet (need >= {FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).";
+            StatusMessage = result.ExifEliminations > 0
+                ? $"Suggest Faces done:{exifPart} No registered person has enough reference photos yet for CCIP matching (need >= {FaceMatcher.MinReferenceEmbeddings})."
+                : $"No registered person has enough reference photos yet (need >= {FaceMatcher.MinReferenceEmbeddings}: profile picture + confirmed tags combined).";
             return;
         }
 
         StatusMessage = $"Suggest Faces done: {result.Embedded} embeddings computed, {result.Suggested} new suggestions across {result.EligiblePeople} eligible people"
-            + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : ".");
+            + (result.EliminationsApplied > 0 ? $" ({result.EliminationsApplied} faces had a candidate eliminated - already confirmed elsewhere in the same photo)." : ".")
+            + exifPart;
         RecordActionSuccess("SuggestFaces", nameof(SuggestFacesTooltip));
     }
 
@@ -1421,6 +1472,13 @@ public class MainViewModel : INotifyPropertyChanged
         return Directory.Exists(DefaultModelPaths.Avatar) ? DefaultModelPaths.Avatar : null;
     }
 
+    private string? ResolveAvatarBodyModelDir()
+    {
+        string? configured = _repo.GetStringSetting(SettingsKeys.AvatarBodyModelDir);
+        if (configured is not null && Directory.Exists(configured)) return configured;
+        return Directory.Exists(DefaultModelPaths.AvatarBodyDetection) ? DefaultModelPaths.AvatarBodyDetection : null;
+    }
+
     /// <summary>
     /// Runs the WD14 classifier in-process for any photo that still has no rating.
     /// </summary>
@@ -1481,32 +1539,70 @@ public class MainViewModel : INotifyPropertyChanged
     /// (AvatarTypeConfidence set, AvatarType null) - Plan A's label set grows over time as its
     /// pipeline is re-run and republished, so a photo that missed against today's model is
     /// worth retrying once a bigger model is downloaded, not permanently skipped like
-    /// ClassifyPhotosAsync's "already has a value" photos.</summary>
+    /// ClassifyPhotosAsync's "already has a value" photos.
+    ///
+    /// When _avatarBodyDetector is configured (optional - see its loading in InitializeAsync),
+    /// each photo first goes through automatic body detection: 0-1 bodies falls through to the
+    /// original whole-photo classification below unchanged, but 2+ bodies means a real group
+    /// shot - each detected body gets classified on its own crop and written as its own
+    /// AvatarRegion (auto-detected, unconfirmed - see AvatarRegionRepository.
+    /// AddAutoDetectedRegion), same "review in Tag Faces" flow as a face suggestion. That photo's
+    /// Photo.AvatarType is deliberately left alone (never set) in this case - a single whole-
+    /// photo label would misrepresent a photo that's now known to have several different
+    /// avatars, and GetPhotoIdsWithRegions is what actually prevents it from looking "still
+    /// missing" and getting re-processed forever.</summary>
     private async Task ClassifyAvatarsAsync()
     {
         if (_avatarClassifier is null) { StatusMessage = "Avatar classifier not available."; return; }
 
         var missingIds = _repo.GetPhotoIdsMissingAvatarType();
         var retryIds = _repo.GetPhotoIdsWithNoConfidentMatch();
-        var toClassify = _allPhotos.Where(p => missingIds.Contains(p.Model.Id) || retryIds.Contains(p.Model.Id)).ToList();
+        var regionIds = _avatarRegions.GetPhotoIdsWithRegions();
+        var toClassify = _allPhotos.Where(p => (missingIds.Contains(p.Model.Id) || retryIds.Contains(p.Model.Id))
+            && !regionIds.Contains(p.Model.Id)).ToList();
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has an avatar-type result."; return; }
 
-        int done = 0, failed = 0;
-        // See ClassifyPhotosAsync for why bounded concurrency here is safe: AvatarTypeService
-        // serializes its own session.Run() calls internally, so only the CPU-bound
-        // preprocessing overlaps across threads.
+        int done = 0, failed = 0, multiAvatarPhotos = 0, regionsCreated = 0;
+        // See ClassifyPhotosAsync for why bounded concurrency here is safe: AvatarTypeService/
+        // AvatarBodyDetectionService each serialize their own session.Run() calls internally, so
+        // only the CPU-bound preprocessing overlaps across threads.
         using var semaphore = new SemaphoreSlim(Environment.ProcessorCount);
         var tasks = toClassify.Select(async vm =>
         {
             await semaphore.WaitAsync();
             try
             {
-                var (label, catalogId, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
-                vm.Model.AvatarType = label;
-                vm.Model.AvatarCatalogId = catalogId;
-                vm.Model.AvatarTypeConfidence = confidence;
-                _repo.SetAvatarType(vm.Model.Id, label, catalogId, confidence);
-                vm.NotifyAvatarTypeChanged();
+                List<BodyBox> bodies = _avatarBodyDetector is not null
+                    ? await Task.Run(() => _avatarBodyDetector.DetectBodies(vm.Model.LocalPath))
+                    : [];
+
+                if (bodies.Count < 2)
+                {
+                    var (label, catalogId, confidence) = await Task.Run(() => _avatarClassifier.Classify(vm.Model.LocalPath));
+                    long? resolvedCatalogId = label is not null && catalogId is not null
+                        ? _avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
+                        : null;
+                    vm.Model.AvatarType = label;
+                    vm.Model.AvatarCatalogId = resolvedCatalogId;
+                    vm.Model.AvatarTypeConfidence = confidence;
+                    _repo.SetAvatarType(vm.Model.Id, label, resolvedCatalogId, confidence);
+                    vm.NotifyAvatarTypeChanged();
+                }
+                else
+                {
+                    multiAvatarPhotos++;
+                    foreach (var body in bodies)
+                    {
+                        var (label, catalogId, confidence) = await Task.Run(() =>
+                            _avatarClassifier.Classify(vm.Model.LocalPath, (body.X, body.Y, body.Width, body.Height)));
+                        long? resolvedCatalogId = label is not null && catalogId is not null
+                            ? _avatarCatalog.GetOrCreateByTrainedCatalogId(catalogId, label)
+                            : null;
+                        _avatarRegions.AddAutoDetectedRegion(vm.Model.Id, body.X, body.Y, body.Width, body.Height,
+                            resolvedCatalogId, label, confidence);
+                        regionsCreated++;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1526,9 +1622,12 @@ public class MainViewModel : INotifyPropertyChanged
         });
         await Task.WhenAll(tasks);
 
-        StatusMessage = failed > 0
+        string multiAvatarPart = multiAvatarPhotos > 0
+            ? $" {multiAvatarPhotos} group photos got {regionsCreated} per-avatar regions instead (review in Tag Faces)."
+            : "";
+        StatusMessage = (failed > 0
             ? $"Classified {done - failed} photos' avatar types ({failed} failed)."
-            : $"Classified {done} photos' avatar types.";
+            : $"Classified {done} photos' avatar types.") + multiAvatarPart;
         RecordActionSuccess("ClassifyAvatars", nameof(ClassifyAvatarsTooltip));
         RefreshAvatarTypeFilterOptions();
         RebuildRows();

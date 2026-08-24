@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using Microsoft.Win32;
 using VrcPhotoManager.Data;
+using VrcPhotoManager.Models;
 using VrcPhotoManager.Services;
 using VrcPhotoManager.ViewModels;
 
@@ -12,23 +14,33 @@ namespace VrcPhotoManager.Views;
 public partial class SettingsWindow : Window
 {
     private readonly PhotoRepository _repo;
+    private readonly AvatarCatalogRepository _avatarCatalog;
     private readonly CredentialStore _credentials;
     private readonly ModelDownloadService _downloader = new();
     private CancellationTokenSource? _downloadCts;
-    private bool _isDownloading;
 
-    public SettingsWindow(PhotoRepository repo)
+    public SettingsWindow(PhotoRepository repo, AvatarCatalogRepository avatarCatalog)
     {
         InitializeComponent();
+        _avatarCatalog = avatarCatalog;
         _credentials = new CredentialStore(repo);
+        // SizeToContent="Height" alone would let this window grow past the screen on a
+        // packed tab (e.g. Avatars with a long catalog) - capping MaxHeight to the primary
+        // monitor's work area (taskbar excluded) means it still grows to fit content up to
+        // that point, then the ScrollViewer around the TabControl takes over instead of the
+        // window running off-screen. Not multi-monitor-aware (WorkArea reflects the primary
+        // screen only, not whichever one this window actually opens on via OpenNearCursor
+        // below) - acceptable given this is a bounded UI polish fix, not a multi-monitor
+        // layout feature.
+        MaxHeight = SystemParameters.WorkArea.Height - 40;
         DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
-        // A download in progress must not be silently orphaned: the accidental "click the
-        // main window while a download is running" case is blocked outright (stillOpenGuard
-        // skips the close instead of letting it happen), while a deliberate close (X button,
-        // Alt+F4, Cancel button) is still allowed through but cancels the download first via
-        // the Closing handler below - either way nothing keeps running on the thread pool
-        // with no UI left to show progress or cancel it.
-        DialogWindowBehavior.CloseOnDeactivated(this, stillOpenGuard: () => _isDownloading);
+        // Deliberately NOT DialogWindowBehavior.CloseOnDeactivated here - that's meant for
+        // quick, disposable utility popups (its own doc comment says so), and closing this
+        // window the instant ANY other window/app takes focus (an OS notification, alt-tabbing
+        // to copy a folder path or a token) silently threw away an in-progress Settings session
+        // with no way back short of reopening it from scratch - confirmed as a real reported
+        // symptom, not a hypothetical. A real Settings dialog should stay open until the user
+        // closes it (X, Cancel, or Save), same as virtually every other app's settings window.
         DialogWindowBehavior.OpenNearCursor(this);
         Closing += (_, _) => _downloadCts?.Cancel();
         _repo = repo;
@@ -54,12 +66,16 @@ public partial class SettingsWindow : Window
         string? savedFaceDetectionDir = _repo.GetStringSetting(SettingsKeys.FaceDetectionModelDir);
         FaceDetectionModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedFaceDetectionDir) ? DefaultModelPaths.FaceDetection : savedFaceDetectionDir;
 
+        string? savedAvatarBodyDir = _repo.GetStringSetting(SettingsKeys.AvatarBodyModelDir);
+        AvatarBodyModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedAvatarBodyDir) ? DefaultModelPaths.AvatarBodyDetection : savedAvatarBodyDir;
+
         string? savedAvatarDir = _repo.GetStringSetting(SettingsKeys.AvatarModelDir);
         AvatarModelDirTextBox.Text = string.IsNullOrWhiteSpace(savedAvatarDir) ? DefaultModelPaths.Avatar : savedAvatarDir;
 
         AutoCopyUrlCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover);
         HoverDelaySlider.Value = _repo.GetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, 0.25);
         SkipResolvedPhotosCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, true);
+        EnableExifEliminationCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.EnableExifElimination, true);
         PortalHopWindowSlider.Value = _repo.GetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, 90);
 
         // GistTokenBox is deliberately left blank rather than showing the saved token - it's
@@ -81,8 +97,56 @@ public partial class SettingsWindow : Window
         DownloadCcipStatusText.Text = GetModelStatusText(CcipModelDirTextBox.Text, "model_feat.onnx", "model_metrics.onnx");
         DownloadFaceDetectionStatusText.Text = GetModelStatusText(FaceDetectionModelDirTextBox.Text, "model.onnx");
         DownloadAvatarStatusText.Text = GetModelStatusText(AvatarModelDirTextBox.Text, "model.onnx", "labels.txt");
+        DownloadAvatarBodyStatusText.Text = GetModelStatusText(AvatarBodyModelDirTextBox.Text, "model.onnx");
 
         CropPresetsList.ItemsSource = MainViewModel.UploadCropPresets.Select(DescribeCropPreset).ToList();
+
+        RefreshAvatarCatalogList();
+    }
+
+    private record AvatarCatalogRow(long Id, string DisplayName, string StoresText, string ParentText);
+
+    private static string DescribeStores(AvatarCatalog c)
+    {
+        var stores = new List<string>();
+        if (c.BoothProduct is not null) stores.Add("Booth");
+        if (c.GumroadUser is not null) stores.Add("Gumroad");
+        if (c.JinxxyUser is not null) stores.Add("Jinxxy");
+        return stores.Count > 0 ? string.Join(", ", stores) : "(no store links yet)";
+    }
+
+    /// <summary>Re-runs the search (or lists everything when query is blank - same "browse the
+    /// full list" convention as SearchAvatarEntries in TagFacesWindow) and resolves each row's
+    /// parent name for display. A second, unfiltered Search("") call just to build the
+    /// id->name lookup is simplest here - this list is at most a few hundred rows, not worth a
+    /// dedicated repository query.</summary>
+    private void RefreshAvatarCatalogList(string query = "")
+    {
+        var all = _avatarCatalog.Search("");
+        var byId = all.ToDictionary(c => c.Id);
+        var results = string.IsNullOrWhiteSpace(query) ? all : _avatarCatalog.Search(query);
+        AvatarCatalogListBox.ItemsSource = results.Select(c => new AvatarCatalogRow(
+            c.Id,
+            c.DisplayName ?? "(unnamed)",
+            DescribeStores(c),
+            c.ParentItemId is long parentId && byId.TryGetValue(parentId, out var parent)
+                ? $"Based on: {parent.DisplayName ?? "(unnamed)"}"
+                : ""
+        )).ToList();
+        EditAvatarCatalogButton.IsEnabled = false;
+    }
+
+    private void AvatarCatalogSearchTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        RefreshAvatarCatalogList(AvatarCatalogSearchTextBox.Text);
+
+    private void AvatarCatalogListBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        EditAvatarCatalogButton.IsEnabled = AvatarCatalogListBox.SelectedItem is not null;
+
+    private void EditAvatarCatalogButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AvatarCatalogListBox.SelectedItem is not AvatarCatalogRow row) return;
+        new AvatarCatalogEditWindow(_avatarCatalog, row.Id).ShowDialog();
+        RefreshAvatarCatalogList(AvatarCatalogSearchTextBox.Text);
     }
 
     /// <summary>A real class rather than a (string Name, string Detail) tuple - WPF data
@@ -150,7 +214,6 @@ public partial class SettingsWindow : Window
         }
 
         DownloadButton.IsEnabled = false;
-        _isDownloading = true;
         _downloadCts = new CancellationTokenSource();
         var progress = new Progress<string>(msg => DownloadStatusText.Text = msg);
         try
@@ -185,7 +248,6 @@ public partial class SettingsWindow : Window
         finally
         {
             DownloadButton.IsEnabled = true;
-            _isDownloading = false;
         }
     }
 
@@ -209,7 +271,6 @@ public partial class SettingsWindow : Window
         }
 
         DownloadCcipButton.IsEnabled = false;
-        _isDownloading = true;
         _downloadCts = new CancellationTokenSource();
         var progress = new Progress<string>(msg => DownloadCcipStatusText.Text = msg);
         try
@@ -244,7 +305,6 @@ public partial class SettingsWindow : Window
         finally
         {
             DownloadCcipButton.IsEnabled = true;
-            _isDownloading = false;
         }
     }
 
@@ -268,7 +328,6 @@ public partial class SettingsWindow : Window
         }
 
         DownloadFaceDetectionButton.IsEnabled = false;
-        _isDownloading = true;
         _downloadCts = new CancellationTokenSource();
         var progress = new Progress<string>(msg => DownloadFaceDetectionStatusText.Text = msg);
         try
@@ -303,7 +362,63 @@ public partial class SettingsWindow : Window
         finally
         {
             DownloadFaceDetectionButton.IsEnabled = true;
-            _isDownloading = false;
+        }
+    }
+
+    private void BrowseAvatarBodyModelDir_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select avatar body detection model folder" };
+        if (dialog.ShowDialog() == true)
+        {
+            AvatarBodyModelDirTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private async void DownloadAvatarBodyModel_Click(object sender, RoutedEventArgs e)
+    {
+        string targetDir = AvatarBodyModelDirTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(targetDir))
+        {
+            MessageBox.Show(this, "Enter or browse to a model folder first (it will be created if it doesn't exist).",
+                "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        DownloadAvatarBodyButton.IsEnabled = false;
+        _downloadCts = new CancellationTokenSource();
+        var progress = new Progress<string>(msg => DownloadAvatarBodyStatusText.Text = msg);
+        try
+        {
+            bool haveFile = File.Exists(Path.Combine(targetDir, "model.onnx"));
+            string? localEtag = _repo.GetStringSetting(SettingsKeys.AvatarBodyModelEtag);
+
+            DownloadAvatarBodyStatusText.Text = "Checking for updates...";
+            string? remoteEtag = await _downloader.GetRemoteAvatarBodyModelETagAsync(_downloadCts.Token);
+
+            if (haveFile && remoteEtag is not null && remoteEtag == localEtag)
+            {
+                DownloadAvatarBodyStatusText.Text = "Already up to date.";
+                return;
+            }
+
+            await _downloader.DownloadAvatarBodyModelAsync(targetDir, progress, _downloadCts.Token);
+            if (remoteEtag is not null)
+            {
+                _repo.SetStringSetting(SettingsKeys.AvatarBodyModelEtag, remoteEtag);
+            }
+            DownloadAvatarBodyStatusText.Text += " Restart VRC Photo Manager to use it.";
+        }
+        catch (OperationCanceledException)
+        {
+            DownloadAvatarBodyStatusText.Text = "Download cancelled.";
+        }
+        catch (Exception ex)
+        {
+            DownloadAvatarBodyStatusText.Text = $"Download failed: {ex.Message}";
+        }
+        finally
+        {
+            DownloadAvatarBodyButton.IsEnabled = true;
         }
     }
 
@@ -327,7 +442,6 @@ public partial class SettingsWindow : Window
         }
 
         DownloadAvatarButton.IsEnabled = false;
-        _isDownloading = true;
         _downloadCts = new CancellationTokenSource();
         var progress = new Progress<string>(msg => DownloadAvatarStatusText.Text = msg);
         try
@@ -362,7 +476,6 @@ public partial class SettingsWindow : Window
         finally
         {
             DownloadAvatarButton.IsEnabled = true;
-            _isDownloading = false;
         }
     }
 
@@ -376,9 +489,11 @@ public partial class SettingsWindow : Window
         _repo.SetStringSetting(SettingsKeys.CcipModelDir, CcipModelDirTextBox.Text.Trim());
         _repo.SetStringSetting(SettingsKeys.FaceDetectionModelDir, FaceDetectionModelDirTextBox.Text.Trim());
         _repo.SetStringSetting(SettingsKeys.AvatarModelDir, AvatarModelDirTextBox.Text.Trim());
+        _repo.SetStringSetting(SettingsKeys.AvatarBodyModelDir, AvatarBodyModelDirTextBox.Text.Trim());
         _repo.SetBoolSetting(SettingsKeys.AutoCopyVrcdnUrlOnHover, AutoCopyUrlCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.HoverPreviewDelaySeconds, HoverDelaySlider.Value);
         _repo.SetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, SkipResolvedPhotosCheckBox.IsChecked == true);
+        _repo.SetBoolSetting(SettingsKeys.EnableExifElimination, EnableExifEliminationCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, PortalHopWindowSlider.Value);
 
         // GistTokenBox left empty means "don't change the saved token" - only overwrite it when
@@ -395,7 +510,6 @@ public partial class SettingsWindow : Window
         string uploadFormat = (UploadFormatBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Content as string ?? "jpg";
         _repo.SetStringSetting(SettingsKeys.UploadImageFormat, uploadFormat);
 
-        DialogResult = true;
         Close();
     }
 
@@ -412,7 +526,6 @@ public partial class SettingsWindow : Window
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
         _downloadCts?.Cancel();
-        DialogResult = false;
         Close();
     }
 }

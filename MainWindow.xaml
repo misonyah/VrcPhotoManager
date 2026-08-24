@@ -403,7 +403,7 @@
             <!-- Action buttons - all the same width via a fixed-width vertical StackPanel
                  (Button's default HorizontalAlignment is Stretch, so each fills it). -->
             <StackPanel Grid.Column="1" Orientation="Vertical" Width="170" Margin="8">
-                <Button Content="Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
+                <Button Content="VRCDN Login" Command="{Binding LoginCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding LoginTooltip}">
                     <Button.Style>
                         <Style TargetType="Button">

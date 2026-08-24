@@ -26,6 +26,11 @@ public class ModelDownloadService
     /// YOLOv8s, single "face" class - see FaceDetectionService.cs's doc comment.</summary>
     private const string FaceDetectionModelRepoBaseUrl = "https://huggingface.co/deepghs/anime_face_detection/resolve/main/face_detect_v1.4_s";
     private const string AvatarModelRepoBaseUrl = "https://huggingface.co/misonyah/vrc-avatar-classifier/resolve/main";
+    /// <summary>deepghs/anime_person_detection's "person_detect_v1.3_s" variant - YOLOv8s,
+    /// single "person" class, MIT-licensed, same family/convention as the face detector above.
+    /// F1=0.86 per its own threshold.json - see AvatarBodyDetectionService.cs's doc comment for
+    /// why this exists (automatic multi-avatar disambiguation in a group photo).</summary>
+    private const string AvatarBodyModelRepoBaseUrl = "https://huggingface.co/deepghs/anime_person_detection/resolve/main/person_detect_v1.3_s";
 
     public async Task DownloadWdTaggerModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
     {
@@ -59,6 +64,13 @@ public class ModelDownloadService
         await DownloadFileAsync(http, $"{AvatarModelRepoBaseUrl}/labels.txt", Path.Combine(targetDir, "labels.txt"), "labels.txt", progress, ct);
     }
 
+    public async Task DownloadAvatarBodyModelAsync(string targetDir, IProgress<string> progress, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(targetDir);
+        using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        await DownloadFileAsync(http, $"{AvatarBodyModelRepoBaseUrl}/model.onnx", Path.Combine(targetDir, "model.onnx"), "model.onnx", progress, ct);
+    }
+
     public Task<string?> GetRemoteWdTaggerModelETagAsync(CancellationToken ct = default) =>
         GetRemoteETagAsync($"{ModelRepoBaseUrl}/model.onnx", ct);
 
@@ -70,6 +82,9 @@ public class ModelDownloadService
 
     public Task<string?> GetRemoteAvatarModelETagAsync(CancellationToken ct = default) =>
         GetRemoteETagAsync($"{AvatarModelRepoBaseUrl}/model.onnx", ct);
+
+    public Task<string?> GetRemoteAvatarBodyModelETagAsync(CancellationToken ct = default) =>
+        GetRemoteETagAsync($"{AvatarBodyModelRepoBaseUrl}/model.onnx", ct);
 
     /// <summary>Cheap version check for a model: a HEAD request against the given
     /// "resolve/main" file URL with redirects disabled, reading the content-hash ETag

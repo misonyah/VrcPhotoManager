@@ -4,6 +4,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using OpenCvSharp;
 
 namespace VrcPhotoManager.Services;
 
@@ -120,9 +121,18 @@ public class AvatarTypeService : IDisposable
     /// callers store this as "no confident match" rather than forcing a guess. CatalogId is
     /// the stable identity for whatever Label resolves to (null exactly when Label is null, or
     /// when this model directory has no catalog_ids.txt - see the _catalogIds field doc).</summary>
-    public (string? Label, string? CatalogId, float Confidence) Classify(string imagePath)
+    public (string? Label, string? CatalogId, float Confidence) Classify(string imagePath) =>
+        Classify(imagePath, cropRegion: null);
+
+    /// <summary>Region-scoped overload - crops to (x, y, width, height) in the source image's
+    /// native pixel space before the same preprocessing/inference pipeline, so an individual
+    /// detected avatar body (AvatarBodyDetectionService) can be classified on its own instead of
+    /// the whole photo. See docs/superpowers/specs/2026-08-02-avatar-type-detector-design.md's
+    /// "Explicit v1 scope boundaries" for why this didn't exist originally (multi-avatar
+    /// disambiguation needs a body-detection step first, which this pairs with).</summary>
+    public (string? Label, string? CatalogId, float Confidence) Classify(string imagePath, (int X, int Y, int Width, int Height)? cropRegion)
     {
-        float[] input = Preprocess(imagePath);
+        float[] input = Preprocess(imagePath, cropRegion);
         float[] logits;
         lock (_inferenceLock)
         {
@@ -153,10 +163,42 @@ public class AvatarTypeService : IDisposable
         return exp.Select(x => x / sum).ToArray();
     }
 
-    private static float[] Preprocess(string imagePath)
+    /// <summary>WPF's BitmapDecoder is the primary path (matches the rest of this method's
+    /// resize/pad math exactly), but WIC's metadata parser can reject a JPEG outright -
+    /// COMException 0x88982F8E "Unexpected property type or value" - over a malformed/unusual
+    /// EXIF property even when the actual pixel data is perfectly fine elsewhere (confirmed
+    /// against a real photo: both Pillow and OpenCV decode it without complaint). Falling back
+    /// to OpenCvSharp - already a project dependency, used by AvatarBodyDetectionService/
+    /// FaceDetectionService, and doesn't parse metadata at all - recovers those photos instead
+    /// of just failing them.</summary>
+    private static float[] Preprocess(string imagePath, (int X, int Y, int Width, int Height)? cropRegion = null)
+    {
+        try
+        {
+            return PreprocessWpf(imagePath, cropRegion);
+        }
+        catch (FileFormatException)
+        {
+            return PreprocessOpenCv(imagePath, cropRegion);
+        }
+    }
+
+    private static float[] PreprocessWpf(string imagePath, (int X, int Y, int Width, int Height)? cropRegion)
     {
         var decoder = BitmapDecoder.Create(new Uri(imagePath), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
         BitmapSource source = decoder.Frames[0];
+
+        if (cropRegion is (int x, int y, int width, int height))
+        {
+            // Clamped against the actual decoded size - a detected body box can end up
+            // fractionally outside the frame after NMS/rounding, and CroppedBitmap throws
+            // rather than clamping itself.
+            int clampedX = Math.Clamp(x, 0, source.PixelWidth - 1);
+            int clampedY = Math.Clamp(y, 0, source.PixelHeight - 1);
+            int clampedWidth = Math.Clamp(width, 1, source.PixelWidth - clampedX);
+            int clampedHeight = Math.Clamp(height, 1, source.PixelHeight - clampedY);
+            source = new CroppedBitmap(source, new Int32Rect(clampedX, clampedY, clampedWidth, clampedHeight));
+        }
 
         if (source.PixelWidth > 1024 || source.PixelHeight > 1024)
         {
@@ -172,8 +214,8 @@ public class AvatarTypeService : IDisposable
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
-            dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, InputSize, InputSize));
-            dc.DrawImage(source, new Rect((InputSize - drawWidth) / 2, (InputSize - drawHeight) / 2, drawWidth, drawHeight));
+            dc.DrawRectangle(Brushes.White, null, new System.Windows.Rect(0, 0, InputSize, InputSize));
+            dc.DrawImage(source, new System.Windows.Rect((InputSize - drawWidth) / 2, (InputSize - drawHeight) / 2, drawWidth, drawHeight));
         }
         var rtb = new RenderTargetBitmap(InputSize, InputSize, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(visual);
@@ -196,6 +238,71 @@ public class AvatarTypeService : IDisposable
             tensorData[pixelIndex] = (r - ImageNetMean[0]) / ImageNetStd[0];
             tensorData[channelSize + pixelIndex] = (g - ImageNetMean[1]) / ImageNetStd[1];
             tensorData[2 * channelSize + pixelIndex] = (b - ImageNetMean[2]) / ImageNetStd[2];
+        }
+        return tensorData;
+    }
+
+    /// <summary>Same resize (aspect-preserving, longer side to InputSize) + white-pad-to-square
+    /// + ImageNet normalization as PreprocessWpf, just built on OpenCvSharp's Mat instead of
+    /// WPF's BitmapSource - see Preprocess's doc comment for why this fallback exists. Not held
+    /// to pixel-identical parity with PreprocessWpf (unlike the train.py/C# parity this class's
+    /// own doc comment warns about) - this path only ever runs for a file WPF already couldn't
+    /// decode at all, so "produces a working classification" matters here, not exact parity
+    /// with a decode that never happens for these files anyway.</summary>
+    private static float[] PreprocessOpenCv(string imagePath, (int X, int Y, int Width, int Height)? cropRegion)
+    {
+        using var decoded = Cv2.ImRead(imagePath, ImreadModes.Color);
+        if (decoded.Empty())
+        {
+            throw new InvalidDataException($"Could not read image: {imagePath}");
+        }
+
+        Mat source = decoded;
+        if (cropRegion is (int x, int y, int width, int height))
+        {
+            int clampedX = Math.Clamp(x, 0, source.Width - 1);
+            int clampedY = Math.Clamp(y, 0, source.Height - 1);
+            int clampedWidth = Math.Clamp(width, 1, source.Width - clampedX);
+            int clampedHeight = Math.Clamp(height, 1, source.Height - clampedY);
+            source = new Mat(source, new OpenCvSharp.Rect(clampedX, clampedY, clampedWidth, clampedHeight));
+        }
+
+        if (source.Width > 1024 || source.Height > 1024)
+        {
+            double scale1024 = 1024.0 / Math.Max(source.Width, source.Height);
+            var downscaled = new Mat();
+            Cv2.Resize(source, downscaled, new OpenCvSharp.Size(0, 0), scale1024, scale1024, InterpolationFlags.Area);
+            source = downscaled;
+        }
+
+        double side = Math.Max(source.Width, source.Height);
+        double drawScale = InputSize / side;
+        int drawWidth = Math.Max(1, (int)Math.Round(source.Width * drawScale));
+        int drawHeight = Math.Max(1, (int)Math.Round(source.Height * drawScale));
+
+        using var resized = new Mat();
+        Cv2.Resize(source, resized, new OpenCvSharp.Size(drawWidth, drawHeight), interpolation: InterpolationFlags.Area);
+
+        using var canvas = new Mat(InputSize, InputSize, MatType.CV_8UC3, new Scalar(255, 255, 255));
+        int offsetX = (InputSize - drawWidth) / 2;
+        int offsetY = (InputSize - drawHeight) / 2;
+        resized.CopyTo(canvas[new OpenCvSharp.Rect(offsetX, offsetY, drawWidth, drawHeight)]);
+
+        using var rgb = new Mat();
+        Cv2.CvtColor(canvas, rgb, ColorConversionCodes.BGR2RGB);
+
+        float[] tensorData = new float[3 * InputSize * InputSize];
+        int channelSize = InputSize * InputSize;
+        for (int py = 0; py < InputSize; py++)
+        {
+            for (int pxi = 0; pxi < InputSize; pxi++)
+            {
+                Vec3b pixel = rgb.At<Vec3b>(py, pxi);
+                int pixelIndex = py * InputSize + pxi;
+                tensorData[pixelIndex] = (pixel[0] / 255f - ImageNetMean[0]) / ImageNetStd[0];
+                tensorData[channelSize + pixelIndex] = (pixel[1] / 255f - ImageNetMean[1]) / ImageNetStd[1];
+                tensorData[2 * channelSize + pixelIndex] = (pixel[2] / 255f - ImageNetMean[2]) / ImageNetStd[2];
+            }
         }
         return tensorData;
     }

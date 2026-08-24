@@ -19,6 +19,11 @@ Releases/
 wd14-model/
 wd14-index.db
 
+# VrcdnDbContextFactory's design-time fallback db, created by `dotnet ef` tooling commands
+# (migrations add/database update) run without an explicit --connection - never the real app
+# database, which lives in %LocalAppData%\VrcdnManager instead (see above).
+design_time.db
+
 # Subagent-driven-development scratch (ledger, briefs, review packages) - not repo content.
 .superpowers/
 

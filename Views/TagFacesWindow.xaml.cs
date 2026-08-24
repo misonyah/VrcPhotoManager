@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using VrcPhotoManager.Data;
 using VrcPhotoManager.Models;
 using VrcPhotoManager.Services;
@@ -17,9 +18,23 @@ public partial class TagFacesWindow : Window
     private readonly FaceRepository _faces;
     private readonly PhotoRepository _photos;
     private readonly AvatarRegionRepository _avatarRegionRepo;
+    private readonly AvatarCatalogRepository _avatarCatalogRepo;
     private readonly AvatarTypeService? _avatarClassifier;
     private readonly VrcxProfileLookupService? _profileLookup;
-    private readonly Photo _photo;
+    private Photo _photo;
+
+    // Incremental "refresh suggestions for what's in view" banner (see MarkSuggestionsStale) -
+    // all null/empty when the caller didn't wire this up (e.g. App.xaml.cs's headless
+    // diagnostic), in which case the banner simply never shows. _setSuggestionsStale round-trips
+    // staleness to MainViewModel so it survives this window being closed and a fresh one opened
+    // for the next photo (this window is a singleton, fully re-created each time - see
+    // MainWindow.OpenTagFaces).
+    private readonly CcipEmbeddingService? _ccipEmbedder;
+    private readonly List<long> _scopedPhotoIds;
+    private readonly IReadOnlyDictionary<long, string> _pathByPhotoId;
+    private readonly IReadOnlyDictionary<long, string?> _avatarTypeByPhotoId;
+    private readonly Action<bool>? _setSuggestionsStale;
+    private bool _isRefreshingSuggestions;
 
     private List<AvatarRegion> _avatarRegionsList = [];
     private long _activeAvatarRegionId;
@@ -162,7 +177,14 @@ public partial class TagFacesWindow : Window
     private record ManualPersonMergeSuggestion(long ManualPersonId, string ManualName, string VrcUserId, string VrcDisplayName);
 
     public TagFacesWindow(FaceRepository faces, PhotoRepository photos, AvatarRegionRepository avatarRegions,
-        AvatarTypeService? avatarClassifier, VrcxProfileLookupService? profileLookup, Photo photo)
+        AvatarCatalogRepository avatarCatalog,
+        AvatarTypeService? avatarClassifier, VrcxProfileLookupService? profileLookup, Photo photo,
+        CcipEmbeddingService? ccipEmbedder = null,
+        IReadOnlyList<long>? scopedPhotoIds = null,
+        IReadOnlyDictionary<long, string>? pathByPhotoId = null,
+        IReadOnlyDictionary<long, string?>? avatarTypeByPhotoId = null,
+        bool suggestionsMayBeStale = false,
+        Action<bool>? setSuggestionsStale = null)
     {
         InitializeComponent();
         DialogWindowBehavior.HideMinimizeAndMaximizeButtons(this);
@@ -175,10 +197,14 @@ public partial class TagFacesWindow : Window
         _faces = faces;
         _photos = photos;
         _avatarRegionRepo = avatarRegions;
+        _avatarCatalogRepo = avatarCatalog;
         _avatarClassifier = avatarClassifier;
         _profileLookup = profileLookup;
-        _photo = photo;
-        Title = $"Tag Faces - {photo.FileName}";
+        _ccipEmbedder = ccipEmbedder;
+        _scopedPhotoIds = scopedPhotoIds?.ToList() ?? [];
+        _pathByPhotoId = pathByPhotoId ?? new Dictionary<long, string>();
+        _avatarTypeByPhotoId = avatarTypeByPhotoId ?? new Dictionary<long, string?>();
+        _setSuggestionsStale = setSuggestionsStale;
         // Friends + self are cheap (a small VRCX table + two trivial lookups), so still read
         // live. The rest of what search/merge-suggestions need - the known-VRC-user cache and
         // recorded aliases - now come from OUR OWN local tables only, no VRCX gamelog query
@@ -199,6 +225,51 @@ public partial class TagFacesWindow : Window
         _knownVrcUsers = _faces.GetKnownVrcUsers();
         _aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
 
+        MergeSuggestionsList.ItemsSource = _mergeSuggestions;
+        LoadPhoto(photo);
+        if (suggestionsMayBeStale) _ = ShowStaleSuggestionsBannerAsync();
+        // ScrollViewer gives its content infinite measure space on both axes (needed so it
+        // can scroll once zoomed past the viewport), which means Stretch="Uniform" no longer
+        // auto-fits the image to the window - Image just reports its native pixel size. Wait
+        // for the window's first layout pass (Loaded) to know the real viewport size, then set
+        // an initial zoom that reproduces the old "fit to window" starting view. Prev/Next
+        // navigation (NavigateToPhoto) calls InitializeZoom directly instead - by then the
+        // window's already been through its first layout pass, so there's no Loaded to wait for.
+        Loaded += (_, _) => InitializeZoom();
+        // Escape/right-click (below) can now close this window while the person-picker popup
+        // is still open (e.g. mid-tagging a freshly-drawn manual box) - explicitly close the
+        // popup first rather than trusting WPF to tear it down on its own, so
+        // PersonPickerPopup_Closed's abandoned-box cleanup reliably runs through the same
+        // path it always does, instead of assuming a Window closing cascades to an open
+        // Popup's Closed event.
+        Closing += (_, _) =>
+        {
+            if (PersonPickerPopup.IsOpen) PersonPickerPopup.IsOpen = false;
+        };
+    }
+
+    /// <summary>Everything specific to the photo currently being tagged - shared by the
+    /// constructor's initial load and NavigateToPhoto (Left/Right arrow keys - see
+    /// TagFacesWindow_PreviewKeyDown), so navigating between photos in the same batch doesn't
+    /// need to close and reopen this window (a real ask: doing that manually meant closing, then
+    /// middle-clicking the next photo in the grid). Deliberately does NOT touch
+    /// _friends/_self/_knownVrcUsers/_aliasesByUserId (loaded once in the constructor, not
+    /// per-photo) or zoom (left to the caller - the constructor defers to Loaded, navigation
+    /// calls InitializeZoom directly - see their respective call sites).</summary>
+    private void LoadPhoto(Photo photo)
+    {
+        _photo = photo;
+        Title = $"Tag Faces - {photo.FileName}";
+        _pendingManualFaceId = null;
+        _pendingManualAvatarRegionId = null;
+        _renamingPersonId = null;
+        _editingAliasesForUserId = null;
+        if (PersonPickerPopup.IsOpen) PersonPickerPopup.IsOpen = false;
+        if (AvatarPickerPopup.IsOpen) AvatarPickerPopup.IsOpen = false;
+        RenameHintText.Visibility = Visibility.Collapsed;
+        AliasEditorPanel.Visibility = Visibility.Collapsed;
+        ClearTagButton.Visibility = Visibility.Collapsed;
+
         try
         {
             var bitmap = new BitmapImage();
@@ -218,26 +289,35 @@ public partial class TagFacesWindow : Window
         LoadFaceData();
         // Reads _personsById, which LoadFaceData just populated - computed here (not earlier,
         // where it originally sat and silently iterated an empty dictionary every time,
-        // never once surfacing a real match) deliberately after that call.
-        _mergeSuggestions = new ObservableCollection<ManualPersonMergeSuggestion>(FindManualPersonMergeSuggestions());
-        MergeSuggestionsList.ItemsSource = _mergeSuggestions;
+        // never once surfacing a real match) deliberately after that call. Clear-and-refill the
+        // existing collection (not a new instance) - MergeSuggestionsList's binding is set once,
+        // outside this method, and only reacts to CollectionChanged on whatever instance it's
+        // already bound to.
+        _mergeSuggestions.Clear();
+        foreach (var suggestion in FindManualPersonMergeSuggestions()) _mergeSuggestions.Add(suggestion);
         RedrawBoxes();
-        // ScrollViewer gives its content infinite measure space on both axes (needed so it
-        // can scroll once zoomed past the viewport), which means Stretch="Uniform" no longer
-        // auto-fits the image to the window - Image just reports its native pixel size. Wait
-        // for the window's first layout pass (Loaded) to know the real viewport size, then set
-        // an initial zoom that reproduces the old "fit to window" starting view.
-        Loaded += (_, _) => InitializeZoom();
-        // Escape/right-click (below) can now close this window while the person-picker popup
-        // is still open (e.g. mid-tagging a freshly-drawn manual box) - explicitly close the
-        // popup first rather than trusting WPF to tear it down on its own, so
-        // PersonPickerPopup_Closed's abandoned-box cleanup reliably runs through the same
-        // path it always does, instead of assuming a Window closing cascades to an open
-        // Popup's Closed event.
-        Closing += (_, _) =>
-        {
-            if (PersonPickerPopup.IsOpen) PersonPickerPopup.IsOpen = false;
-        };
+    }
+
+    /// <summary>Left/Right arrow keys (see TagFacesWindow_PreviewKeyDown) - offset is -1
+    /// (previous) or +1 (next) within _scopedPhotoIds, the same filtered/sorted set the main
+    /// grid shows. A silent no-op past either end (no wraparound), or if the target id no longer
+    /// resolves to a real photo (deleted/moved out from under a stale scopedPhotoIds reference) -
+    /// no visual affordance needed for a keyboard shortcut simply doing nothing at a boundary.</summary>
+    private void NavigateToPhoto(int offset)
+    {
+        int index = _scopedPhotoIds.IndexOf(_photo.Id);
+        if (index < 0) return;
+        int targetIndex = index + offset;
+        if (targetIndex < 0 || targetIndex >= _scopedPhotoIds.Count) return;
+        if (_photos.GetById(_scopedPhotoIds[targetIndex]) is not Photo target) return;
+
+        LoadPhoto(target);
+        // Deferred, not called synchronously right here - PhotoImage.Source just changed, and
+        // this gives WPF's layout system an actual pass to settle before InitializeZoom reads
+        // anything - same "wait for a real layout pass" precedent as MainWindow's own
+        // scroll-position restore (RestoreScrollPositionOnce) for the same class of timing
+        // issue. Loaded priority runs after layout/render, ahead of user input.
+        Dispatcher.BeginInvoke(InitializeZoom, DispatcherPriority.Loaded);
     }
 
     /// <summary>Escape closes the window outright - quicker than hunting for the X, and there's
@@ -264,6 +344,17 @@ public partial class TagFacesWindow : Window
             e.Handled = true;
             DeleteFaceButton_Click(sender, e);
         }
+
+        // Left/Right navigate photos - takes over from WPF's default directional-navigation
+        // behavior, which would otherwise move keyboard focus between this window's controls
+        // (buttons, radio buttons) on these same keys. Skipped whenever a text box has focus
+        // (typing in NewPersonNameTextBox or AvatarSearchTextBox) so the keys still move the
+        // text cursor normally there instead of jumping to a different photo mid-type.
+        if ((e.Key == Key.Left || e.Key == Key.Right) && Keyboard.FocusedElement is not TextBox)
+        {
+            e.Handled = true;
+            NavigateToPhoto(e.Key == Key.Left ? -1 : 1);
+        }
     }
 
     /// <summary>
@@ -288,14 +379,32 @@ public partial class TagFacesWindow : Window
         Close();
     }
 
+    /// <summary>Reads the actual loaded bitmap's size (PhotoImage.Source, always available
+    /// immediately after LoadPhoto - BitmapCacheOption.OnLoad makes it synchronous), not
+    /// _photo.Width/Height - those come from the database's cached metadata, which is null
+    /// until a library scan has processed this specific photo (a real report: navigating into a
+    /// not-yet-scanned photo silently skipped fitting entirely and just kept whatever zoom the
+    /// previous photo had).
+    /// Uses bitmap.Width/Height (DPI-adjusted device-independent size, i.e. PixelWidth * 96 /
+    /// bitmap.DpiX), NOT PixelWidth/PixelHeight (raw pixel count) - a second real report ("photo
+    /// shows smaller than it should be") traced to exactly that distinction: ActualWidth here is
+    /// in WPF's device-independent unit system, and dividing it by a raw pixel count silently
+    /// assumes the source PNG's embedded DPI is exactly 96. If it isn't (plausible for a
+    /// screenshot captured on a scaled display), the fit comes out systematically wrong by that
+    /// ratio. GetImageToCanvasTransform never had this bug - it reads PhotoImage.ActualWidth,
+    /// which is whatever WPF actually rendered the image at (already DPI-correct), rather than
+    /// hand-computing a size from raw pixel counts - which is exactly why box positioning stayed
+    /// fine while only the zoom was off. Deliberately still PixelWidth/PixelHeight over there,
+    /// though - detected_faces coordinates are stored in true native-pixel space, not this
+    /// device-independent one.</summary>
     private void InitializeZoom()
     {
-        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight || imgWidth == 0 || imgHeight == 0)
+        if (PhotoImage.Source is not BitmapImage bitmap || bitmap.Width <= 0 || bitmap.Height <= 0)
             return;
         if (ImageScrollViewer.ActualWidth == 0 || ImageScrollViewer.ActualHeight == 0)
             return;
 
-        _fitZoomScale = Math.Min(ImageScrollViewer.ActualWidth / imgWidth, ImageScrollViewer.ActualHeight / imgHeight);
+        _fitZoomScale = Math.Min(ImageScrollViewer.ActualWidth / bitmap.Width, ImageScrollViewer.ActualHeight / bitmap.Height);
         ZoomTransform.ScaleX = _fitZoomScale;
         ZoomTransform.ScaleY = _fitZoomScale;
 
@@ -488,8 +597,12 @@ public partial class TagFacesWindow : Window
     /// </summary>
     private (double OffsetX, double OffsetY, double Scale) GetImageToCanvasTransform()
     {
-        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight || imgWidth == 0 || imgHeight == 0)
+        // Real loaded bitmap size, not _photo.Width/Height (database-cached metadata, null
+        // until a library scan has processed this specific photo - see InitializeZoom's doc
+        // comment for the same fix applied there).
+        if (PhotoImage.Source is not BitmapImage bitmap || bitmap.PixelWidth == 0 || bitmap.PixelHeight == 0)
             return (0, 0, 0);
+        int imgWidth = bitmap.PixelWidth, imgHeight = bitmap.PixelHeight;
         if (PhotoImage.ActualWidth == 0 || PhotoImage.ActualHeight == 0)
             return (0, 0, 0);
 
@@ -497,6 +610,11 @@ public partial class TagFacesWindow : Window
         var imageOrigin = PhotoImage.TranslatePoint(new Point(0, 0), FaceCanvas);
         return (imageOrigin.X, imageOrigin.Y, scale);
     }
+
+    /// <summary>Switching Person/Avatar mode changes which box type RedrawBoxes actually draws
+    /// (see its own comments) - fires immediately on toggle so the now-irrelevant boxes vanish
+    /// right away instead of lingering until some unrelated redraw.</summary>
+    private void TagMode_Checked(object sender, RoutedEventArgs e) => RedrawBoxes();
 
     private void RedrawBoxes()
     {
@@ -522,12 +640,21 @@ public partial class TagFacesWindow : Window
         // zoom level.
         double labelFontSize = 13.0 / zoomScale;
         double labelPaddingH = 2.0 / zoomScale;
+        // Only the currently selected mode's boxes are drawn - showing both face boxes and
+        // avatar regions at once cluttered the view and made it easy to misclick, since a face
+        // is typically positioned inside (or very near) the avatar region around the same
+        // person. An existing box's own click handler still opens its picker regardless of
+        // mode when it IS drawn (see the avatar-region loop's own comment) - this only changes
+        // which set is visible/hit-testable at all, not that per-box behavior.
+        if (PersonModeRadio.IsChecked == true)
+        {
         foreach (var face in _detectedFaces)
         {
             _labelsByFaceId.TryGetValue(face.Id, out var label);
             bool confirmed = label is not null && label.Confirmed && label.PersonId is not null;
             bool suggested = label is not null && !label.Confirmed
-                && label.Source == FaceLabelSource.EmbeddingMatch && label.PersonId is not null;
+                && (label.Source == FaceLabelSource.EmbeddingMatch || label.Source == FaceLabelSource.ExifElimination)
+                && label.PersonId is not null;
             // High-confidence combined-score suggestion (avatar/co-occurrence boosts pushed it
             // past FaceMatcher.AutoTagThreshold) - still Confirmed=false like `suggested` above
             // (a human must still open this photo before it's treated as reviewed or feeds
@@ -619,15 +746,24 @@ public partial class TagFacesWindow : Window
                 FaceCanvas.Children.Add(nameLabel);
             }
         }
+        }
 
         // Avatar regions - same hit-target/visual-border/name-label shape as the face loop
-        // above, just their own color (magenta, distinct from every face-box color already in
-        // use) and their own click handler (AvatarBox_MouseLeftButtonUp), so an existing
-        // region's click always opens the avatar picker regardless of which mode (Person/
-        // Avatar) is currently selected - only NEW box creation is mode-gated.
+        // above, just their own colors (magenta/yellow/orange, distinct from every face-box
+        // color already in use) and their own click handler (AvatarBox_MouseLeftButtonUp). Drawn
+        // only in Avatar mode, same "only the selected mode's boxes are visible" reasoning as
+        // the face loop above - switch back to Person mode to review/correct a face box while
+        // this photo also has avatar regions.
+        if (AvatarModeRadio.IsChecked == true)
+        {
         foreach (var region in _avatarRegionsList)
         {
-            Brush regionColor = region.AvatarCatalogId is not null ? Brushes.Magenta : Brushes.Yellow;
+            // Orange (same visual language as an unconfirmed face suggestion) for an
+            // auto-detected region (AvatarBodyDetectionService) still awaiting review -
+            // Confirmed is always true for a manual region (see AvatarRegion.Confirmed's doc
+            // comment), so this branch only ever applies to the auto-detected case.
+            Brush regionColor = !region.Confirmed ? Brushes.Orange
+                : region.AvatarCatalogId is not null ? Brushes.Magenta : Brushes.Yellow;
 
             double left = offsetX + region.X * scale;
             double top = offsetY + region.Y * scale;
@@ -670,9 +806,15 @@ public partial class TagFacesWindow : Window
 
             if (region.AvatarDisplayName is not null)
             {
+                // Confidence suffix only for a still-unconfirmed (auto-detected) region - same
+                // "(0.XX)" convention as a face suggestion's confidence display; a confirmed
+                // region (manual, or already reviewed) just shows the plain name.
+                string labelText = !region.Confirmed && region.Confidence is float confidence
+                    ? $"{region.AvatarDisplayName} ({confidence:F2})"
+                    : region.AvatarDisplayName;
                 var nameLabel = new TextBlock
                 {
-                    Text = region.AvatarDisplayName,
+                    Text = labelText,
                     Background = regionColor,
                     Foreground = Brushes.Black,
                     FontSize = labelFontSize,
@@ -682,6 +824,7 @@ public partial class TagFacesWindow : Window
                 Canvas.SetTop(nameLabel, top + height);
                 FaceCanvas.Children.Add(nameLabel);
             }
+        }
         }
     }
 
@@ -763,7 +906,8 @@ public partial class TagFacesWindow : Window
 
         var (offsetX, offsetY, scale) = GetImageToCanvasTransform();
         if (scale <= 0) return;
-        if (_photo.Width is not int imgWidth || _photo.Height is not int imgHeight) return;
+        if (PhotoImage.Source is not BitmapImage bitmap) return;
+        int imgWidth = bitmap.PixelWidth, imgHeight = bitmap.PixelHeight;
 
         int x = (int)Math.Clamp((canvasLeft - offsetX) / scale, 0, imgWidth);
         int y = (int)Math.Clamp((canvasTop - offsetY) / scale, 0, imgHeight);
@@ -827,9 +971,12 @@ public partial class TagFacesWindow : Window
         _activeAvatarRegionId = regionId;
         var region = _avatarRegionsList.FirstOrDefault(r => r.Id == regionId);
         ClearAvatarTagButton.Visibility = region?.AvatarCatalogId is not null ? Visibility.Visible : Visibility.Collapsed;
+        ConfirmAvatarRegionButton.Visibility = region is { Confirmed: false, AvatarCatalogId: not null }
+            ? Visibility.Visible : Visibility.Collapsed;
 
         AvatarSearchTextBox.Text = "";
         AvatarSearchListBox.ItemsSource = SearchAvatarEntries("");
+        EditCatalogInfoButton.IsEnabled = false;
 
         AvatarPickerPopup.PlacementTarget = box;
         AvatarPickerPopup.IsOpen = true;
@@ -853,13 +1000,46 @@ public partial class TagFacesWindow : Window
         AvatarSearchListBox.ItemsSource = SearchAvatarEntries(AvatarSearchTextBox.Text);
     }
 
+    private void AvatarSearchListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        EditCatalogInfoButton.IsEnabled = AvatarSearchListBox.SelectedItem is ValueTuple<string, string?>;
+    }
+
+    /// <summary>Resolves the selected entry to its AvatarCatalog row (auto-creating one on first
+    /// use, same as an actual pick would - see AvatarCatalogRepository.
+    /// GetOrCreateByTrainedCatalogId) and opens AvatarCatalogEditWindow for it. Doesn't tag the
+    /// region - editing catalog info and picking an avatar for this region are independent
+    /// actions.</summary>
+    private void EditCatalogInfoButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AvatarSearchListBox.SelectedItem is not ValueTuple<string, string?> selected) return;
+        string label = selected.Item1;
+        string? catalogId = selected.Item2;
+        if (catalogId is null) return; // no confident-match entries never appear in this list, but guard anyway
+
+        long resolvedCatalogId = _avatarCatalogRepo.GetOrCreateByTrainedCatalogId(catalogId, label);
+        new AvatarCatalogEditWindow(_avatarCatalogRepo, resolvedCatalogId).ShowDialog();
+    }
+
     private void AvatarSearchListBox_MouseUp(object sender, MouseButtonEventArgs e)
     {
         if (AvatarSearchListBox.SelectedItem is not ValueTuple<string, string?> selected) return;
         string label = selected.Item1;
         string? catalogId = selected.Item2;
+        long? resolvedCatalogId = catalogId is not null
+            ? _avatarCatalogRepo.GetOrCreateByTrainedCatalogId(catalogId, label)
+            : null;
         _pendingManualAvatarRegionId = null; // resolved - not a backed-out draw
-        _avatarRegionRepo.SetRegionTag(_activeAvatarRegionId, catalogId, label);
+        _avatarRegionRepo.SetRegionTag(_activeAvatarRegionId, resolvedCatalogId, label);
+        AvatarPickerPopup.IsOpen = false;
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void ConfirmAvatarRegionButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingManualAvatarRegionId = null;
+        _avatarRegionRepo.ConfirmRegion(_activeAvatarRegionId);
         AvatarPickerPopup.IsOpen = false;
         LoadFaceData();
         RedrawBoxes();
@@ -958,7 +1138,8 @@ public partial class TagFacesWindow : Window
         var items = new List<PickerItem>();
 
         bool isSuggestion = existing is not null && !existing.Confirmed
-            && existing.Source == FaceLabelSource.EmbeddingMatch && existing.PersonId is not null;
+            && (existing.Source == FaceLabelSource.EmbeddingMatch || existing.Source == FaceLabelSource.ExifElimination)
+            && existing.PersonId is not null;
         if (isSuggestion && _personsById.TryGetValue(existing!.PersonId!.Value, out var suggestedPerson))
         {
             items.Add(new PickerItem($"Confirm: {suggestedPerson.Name}", suggestedPerson.VrcUserId, suggestedPerson.Id, IsConfirmSuggestion: true));
@@ -1041,7 +1222,12 @@ public partial class TagFacesWindow : Window
 
         if (item.IsConfirmSuggestion)
         {
-            ApplyTag(_personsById[item.ExistingPersonId!.Value], FaceLabelSource.EmbeddingMatch);
+            // Preserves the actual stored source (EmbeddingMatch or ExifElimination) rather than
+            // hardcoding EmbeddingMatch, so confirming an elimination-derived suggestion keeps
+            // that provenance instead of silently relabeling it as a CCIP match.
+            var confirmSource = _labelsByFaceId.TryGetValue(_activeFaceId, out var currentLabel)
+                ? currentLabel.Source : FaceLabelSource.EmbeddingMatch;
+            ApplyTag(_personsById[item.ExistingPersonId!.Value], confirmSource);
             _faces.ResolveSuggestionLog(_activeFaceId, SuggestionOutcome.ConfirmedAsIs);
             return;
         }
@@ -1321,13 +1507,16 @@ public partial class TagFacesWindow : Window
     {
         _pendingManualFaceId = null;
         PersonPickerPopup.IsOpen = false;
+        bool confirmedAny = false;
         foreach (var face in _detectedFaces)
         {
             if (!_labelsByFaceId.TryGetValue(face.Id, out var label)) continue;
             if (label.Confirmed || label.PersonId is null) continue;
             _faces.UpsertFaceLabel(face.Id, label.PersonId.Value, confirmed: true, label.Source);
             _faces.ResolveSuggestionLog(face.Id, SuggestionOutcome.ConfirmedAsIs);
+            confirmedAny = true;
         }
+        if (confirmedAny) MarkSuggestionsStale();
         LoadFaceData();
         RedrawBoxes();
     }
@@ -1354,7 +1543,96 @@ public partial class TagFacesWindow : Window
     private void ApplyTag(RegisteredPerson person, FaceLabelSource source = FaceLabelSource.Manual)
     {
         _faces.UpsertFaceLabel(_activeFaceId, person.Id, confirmed: true, source);
+        MarkSuggestionsStale();
         LoadFaceData();
         RedrawBoxes();
+    }
+
+    /// <summary>A confirm just happened, so whoever it was for may now have different (or
+    /// their first-ever) reference embeddings - other faces already in view could newly deserve
+    /// a suggestion for them without waiting for a full library-wide Suggest Faces run. Shows
+    /// this window's own banner immediately, and tells the caller (MainWindow, via
+    /// _setSuggestionsStale) so a DIFFERENT Tag Faces window opened later for another photo -
+    /// this window is a singleton, fully re-created each time - still knows to offer it too, even
+    /// if this window gets closed without anyone clicking "Refresh now". A no-op when the caller
+    /// didn't wire the feature up at all (ccipEmbedder/scopedPhotoIds never provided - see the
+    /// constructor).</summary>
+    private void MarkSuggestionsStale()
+    {
+        if (_ccipEmbedder is null || _scopedPhotoIds.Count == 0) return;
+        _setSuggestionsStale?.Invoke(true);
+        _ = ShowStaleSuggestionsBannerAsync();
+    }
+
+    /// <summary>Rough, deliberately-labeled-as-approximate estimate, not a measurement - actual
+    /// per-face cost varies with hardware (DirectML vs CPU execution provider) and image size.
+    /// Embedding a not-yet-seen face needs a full image decode + CCIP backbone forward pass;
+    /// scoring an already-embedded face only needs CCIP's much smaller metric-head model, so the
+    /// two get very different weights.</summary>
+    private const double EstimatedSecondsPerEmbed = 0.1;
+    private const double EstimatedSecondsPerScore = 0.02;
+
+    /// <summary>Bumped by every method that overwrites StaleSuggestionsText for its own reason
+    /// (this one, a refresh starting/finishing, dismiss) - a background estimate that finishes
+    /// after something newer has already taken over just checks its own stamp and gives up
+    /// instead of clobbering that newer text. Matters because rapid-fire tagging can start
+    /// several of these estimate calculations before the first one's DB scan even returns.</summary>
+    private int _staleBannerGeneration;
+
+    /// <summary>The two DB scans behind the estimate below used to run synchronously on the UI
+    /// thread on every single confirm - a real report ("matching faces makes the app not
+    /// responding") traced to exactly this: with no active filter, scopedPhotoIds is the WHOLE
+    /// library, and EF Core's translated `WHERE photo_id IN (...)` over thousands of ids is not
+    /// free. The banner now appears instantly with a placeholder, and the real counts (hence the
+    /// estimate) fill in once the backgrounded scan actually returns.</summary>
+    private async Task ShowStaleSuggestionsBannerAsync()
+    {
+        int generation = ++_staleBannerGeneration;
+        StaleSuggestionsText.Text = $"Someone was just tagged - checking how much there is to refresh for the {_scopedPhotoIds.Count} photos in view...";
+        RefreshSuggestionsButton.IsEnabled = false;
+        StaleSuggestionsBanner.Visibility = Visibility.Visible;
+        RedrawBoxes(); // banner appearing changed Row 0's height - reposition the face boxes now, not on whatever unrelated event happens to trigger it next
+
+        var counts = await Task.Run(() => (
+            Embed: _faces.GetDetectedFacesWithoutEmbedding(_scopedPhotoIds).Count,
+            Score: _faces.GetFacesNeedingSuggestion(_scopedPhotoIds).Count));
+        if (generation != _staleBannerGeneration) return; // superseded by a newer confirm/action meanwhile
+
+        double estimatedSeconds = counts.Embed * EstimatedSecondsPerEmbed + counts.Score * EstimatedSecondsPerScore;
+        StaleSuggestionsText.Text = counts.Embed + counts.Score == 0
+            ? "Someone was just tagged - suggestions for the photos in view are already up to date."
+            : $"Someone was just tagged - refresh suggestions for the {_scopedPhotoIds.Count} photos currently in view? (~{Math.Max(1, (int)Math.Ceiling(estimatedSeconds))}s estimated)";
+        RefreshSuggestionsButton.IsEnabled = counts.Embed + counts.Score > 0;
+    }
+
+    private async void RefreshSuggestionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSuggestions || _ccipEmbedder is null) return;
+        _staleBannerGeneration++; // invalidate any estimate scan still in flight
+        _isRefreshingSuggestions = true;
+        RefreshSuggestionsButton.IsEnabled = false;
+        PhotoRepository? eliminationRepo = _photos.GetBoolSetting(SettingsKeys.EnableExifElimination, true) ? _photos : null;
+        var result = await FaceSuggestionService.RunAsync(
+            _faces, _ccipEmbedder, _pathByPhotoId, _avatarTypeByPhotoId,
+            msg => StaleSuggestionsText.Text = msg, _scopedPhotoIds, eliminationRepo);
+        _isRefreshingSuggestions = false;
+        _setSuggestionsStale?.Invoke(false);
+        // Left visible (dismiss it explicitly, or it's replaced next time MarkSuggestionsStale
+        // fires) showing what the refresh actually found, rather than silently vanishing -
+        // "0 new suggestions" is a legitimate, useful answer to see, not just a success/failure.
+        string exifPart = result.ExifEliminations > 0 ? $" ({result.ExifEliminations} by VRCX-presence elimination)" : "";
+        StaleSuggestionsText.Text = $"Suggestions refreshed: {result.Suggested} new{exifPart} across the {_scopedPhotoIds.Count} photos in view.";
+        RefreshSuggestionsButton.IsEnabled = false;
+        // The current photo is itself one of the scoped photos - a face here could have just
+        // picked up a fresh suggestion (or lost a stale one, see RunAsync's !accept branch).
+        LoadFaceData();
+        RedrawBoxes();
+    }
+
+    private void DismissStaleSuggestionsBanner_Click(object sender, RoutedEventArgs e)
+    {
+        _staleBannerGeneration++; // invalidate any estimate scan still in flight
+        StaleSuggestionsBanner.Visibility = Visibility.Collapsed;
+        RedrawBoxes(); // banner disappearing changed Row 0's height back - reposition the face boxes now
     }
 }

@@ -33,12 +33,13 @@ public class Photo
     public string? AvatarType { get; set; }
     public float? AvatarTypeConfidence { get; set; }
 
-    /// <summary>The stable "booth:&lt;item id&gt;"/"local:NNNN" identity for AvatarType (see
-    /// the avatar-scraper tool's catalog_ids.py) - unlike AvatarType's display text, which can
-    /// change as label-cleanup rules improve, this is meant to stay the same for a given avatar
-    /// across re-classification. Null for photos classified before this existed, or against a
-    /// model directory with no catalog_ids.txt.</summary>
-    public string? AvatarCatalogId { get; set; }
+    /// <summary>FK into AvatarCatalog.Id - unlike AvatarType's display text, which can change as
+    /// label-cleanup rules improve, this is meant to stay the same for a given avatar across
+    /// re-classification. Resolved from the classifier's flat "booth:&lt;item id&gt;"/
+    /// "local:NNNN" id (see AvatarTypeService.Classify, avatar-scraper's catalog_ids.py) via
+    /// AvatarCatalogRepository.GetOrCreateByTrainedCatalogId. Null for photos classified before
+    /// this existed, or against a model directory with no catalog_ids.txt.</summary>
+    public long? AvatarCatalogId { get; set; }
 
     /// <summary>
     /// VRCX embeds author/world/player info directly into the photo's PNG metadata at

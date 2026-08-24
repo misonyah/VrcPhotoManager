@@ -646,7 +646,8 @@ public class FaceRepository(string dbPath)
     {
         using var context = NewContext();
         var faceIds = context.FaceLabels
-            .Where(l => !l.Confirmed && (l.Source == FaceLabelSource.EmbeddingMatch || l.Source == FaceLabelSource.AutoTagged) && l.Confidence >= minConfidence)
+            .Where(l => !l.Confirmed && (l.Source == FaceLabelSource.EmbeddingMatch || l.Source == FaceLabelSource.AutoTagged
+                || l.Source == FaceLabelSource.ExifElimination) && l.Confidence >= minConfidence)
             .Select(l => l.DetectedFaceId);
         return context.DetectedFaces
             .Where(f => !f.Deleted && faceIds.Contains(f.Id))
@@ -663,7 +664,8 @@ public class FaceRepository(string dbPath)
     {
         using var context = NewContext();
         var rows = context.FaceLabels.AsNoTracking()
-            .Where(l => !l.Confirmed && (l.Source == FaceLabelSource.EmbeddingMatch || l.Source == FaceLabelSource.AutoTagged))
+            .Where(l => !l.Confirmed && (l.Source == FaceLabelSource.EmbeddingMatch || l.Source == FaceLabelSource.AutoTagged
+                || l.Source == FaceLabelSource.ExifElimination))
             .Join(context.DetectedFaces.Where(f => !f.Deleted), l => l.DetectedFaceId, f => f.Id,
                 (l, f) => new { f.PhotoId, l.Confidence })
             .ToList();
@@ -707,7 +709,8 @@ public class FaceRepository(string dbPath)
         {
             labelByFaceId.TryGetValue(face.Id, out var label);
             bool undetermined = label is null
-                || (!label.Confirmed && (label.Source == FaceLabelSource.EmbeddingMatch || label.Source == FaceLabelSource.AutoTagged));
+                || (!label.Confirmed && (label.Source == FaceLabelSource.EmbeddingMatch || label.Source == FaceLabelSource.AutoTagged
+                    || label.Source == FaceLabelSource.ExifElimination));
             if (!undetermined) continue;
 
             int value = label?.PersonId is long personId && refCountByPerson.TryGetValue(personId, out int count)
@@ -767,10 +770,16 @@ public class FaceRepository(string dbPath)
         context.SaveChanges();
     }
 
-    public List<DetectedFace> GetDetectedFacesWithoutEmbedding()
+    /// <summary>photoIds null (the default) means the whole library - used by the full-library
+    /// Suggest Faces run. A non-null set scopes this to just those photos - used by Tag Faces'
+    /// incremental "refresh suggestions for what's currently in view" banner, so it doesn't pay
+    /// for a full-library scan just to catch up a filtered handful of photos.</summary>
+    public List<DetectedFace> GetDetectedFacesWithoutEmbedding(IReadOnlyCollection<long>? photoIds = null)
     {
         using var context = NewContext();
-        return context.DetectedFaces.AsNoTracking().Where(f => !f.Deleted && f.Embedding == null).ToList();
+        var query = context.DetectedFaces.AsNoTracking().Where(f => !f.Deleted && f.Embedding == null);
+        if (photoIds is not null) query = query.Where(f => photoIds.Contains(f.PhotoId));
+        return query.ToList();
     }
 
     public void SetEmbedding(long detectedFaceId, byte[] embedding)
@@ -799,18 +808,38 @@ public class FaceRepository(string dbPath)
 
     /// <summary>
     /// Faces eligible for a new suggestion: have an embedding already computed, and either no
-    /// label at all, or only an unconfirmed EmbeddingMatch or AutoTagged label (safe to re-score
-    /// and replace as more reference data accumulates - never touches a confirmed label, or any
-    /// label from a source other than EmbeddingMatch or AutoTagged).
+    /// label at all, or only an unconfirmed EmbeddingMatch/AutoTagged/ExifElimination label (safe
+    /// to re-score and replace as more reference data accumulates - never touches a confirmed
+    /// label, or any label from a source other than those three). photoIds null (the default)
+    /// means the whole library - see GetDetectedFacesWithoutEmbedding's doc comment for why a
+    /// non-null scope exists.
     /// </summary>
-    public List<DetectedFace> GetFacesNeedingSuggestion()
+    public List<DetectedFace> GetFacesNeedingSuggestion(IReadOnlyCollection<long>? photoIds = null)
     {
         using var context = NewContext();
         var settledFaceIds = context.FaceLabels
-            .Where(l => l.Confirmed || (l.Source != FaceLabelSource.EmbeddingMatch && l.Source != FaceLabelSource.AutoTagged))
+            .Where(l => l.Confirmed || (l.Source != FaceLabelSource.EmbeddingMatch && l.Source != FaceLabelSource.AutoTagged
+                && l.Source != FaceLabelSource.ExifElimination))
             .Select(l => l.DetectedFaceId);
-        return context.DetectedFaces.AsNoTracking()
-            .Where(f => !f.Deleted && f.Embedding != null && !settledFaceIds.Contains(f.Id))
-            .ToList();
+        var query = context.DetectedFaces.AsNoTracking()
+            .Where(f => !f.Deleted && f.Embedding != null && !settledFaceIds.Contains(f.Id));
+        if (photoIds is not null) query = query.Where(f => photoIds.Contains(f.PhotoId));
+        return query.ToList();
+    }
+
+    /// <summary>Every detected face (not deleted) that isn't Confirmed yet - regardless of
+    /// whether it has an embedding computed or already carries an unconfirmed suggestion.
+    /// Broader than GetFacesNeedingSuggestion on purpose: FaceSuggestionService's VRCX-presence
+    /// elimination pass needs no embedding at all to identify a face (it's a pure headcount
+    /// against the photo's presence list), so restricting to embedded faces would silently miss
+    /// brand-new detections. photoIds null means the whole library.</summary>
+    public List<DetectedFace> GetUnconfirmedDetectedFaces(IReadOnlyCollection<long>? photoIds = null)
+    {
+        using var context = NewContext();
+        var confirmedFaceIds = context.FaceLabels.Where(l => l.Confirmed).Select(l => l.DetectedFaceId);
+        var query = context.DetectedFaces.AsNoTracking()
+            .Where(f => !f.Deleted && !confirmedFaceIds.Contains(f.Id));
+        if (photoIds is not null) query = query.Where(f => photoIds.Contains(f.PhotoId));
+        return query.ToList();
     }
 }
