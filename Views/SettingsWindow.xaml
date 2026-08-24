@@ -248,6 +248,40 @@
                     </ListBox>
                 </DockPanel>
             </TabItem>
+
+            <TabItem Header="Library">
+                <DockPanel Margin="12">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button x:Name="AddLocalFolderButton" Content="Add local folder..." Padding="8,4" Margin="0,0,8,0"
+                                Click="AddLocalFolderButton_Click"
+                                ToolTip="Add another local folder to scan as part of your photo library." />
+                        <Button x:Name="AddDiscordChannelButton" Content="Add Discord channel..." Padding="8,4"
+                                IsEnabled="False"
+                                ToolTip="Not yet available - Discord channel libraries are a work in progress." />
+                    </StackPanel>
+                    <ListBox x:Name="LibraryListBox" MaxHeight="320" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock FontWeight="Bold">
+                                            <Run Text="{Binding DisplayName}" />
+                                            <Run Text=" (" /><Run Text="{Binding TypeText}" /><Run Text=")" />
+                                        </TextBlock>
+                                        <TextBlock FontSize="11" Foreground="Gray" Text="{Binding DetailText}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Remove" Padding="8,2"
+                                            Click="RemoveLibraryButton_Click" Tag="{Binding Id}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </TabItem>
         </TabControl>
         </ScrollViewer>
 

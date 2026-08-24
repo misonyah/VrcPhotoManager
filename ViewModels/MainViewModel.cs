@@ -580,6 +580,7 @@ public class MainViewModel : INotifyPropertyChanged
     public FaceRepository Faces => _faces;
     public AvatarRegionRepository AvatarRegions => _avatarRegions;
     public AvatarCatalogRepository AvatarCatalog => _avatarCatalog;
+    public LibraryRepository Libraries => _libraries;
     public AvatarTypeService? AvatarClassifier => _avatarClassifier;
     public VrcxProfileLookupService? ProfileLookup => _profileLookup;
     public CcipEmbeddingService? CcipEmbedder => _ccipEmbedder;

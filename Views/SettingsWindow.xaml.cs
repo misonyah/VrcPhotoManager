@@ -15,14 +15,16 @@ public partial class SettingsWindow : Window
 {
     private readonly PhotoRepository _repo;
     private readonly AvatarCatalogRepository _avatarCatalog;
+    private readonly LibraryRepository _libraries;
     private readonly CredentialStore _credentials;
     private readonly ModelDownloadService _downloader = new();
     private CancellationTokenSource? _downloadCts;
 
-    public SettingsWindow(PhotoRepository repo, AvatarCatalogRepository avatarCatalog)
+    public SettingsWindow(PhotoRepository repo, AvatarCatalogRepository avatarCatalog, LibraryRepository libraries)
     {
         InitializeComponent();
         _avatarCatalog = avatarCatalog;
+        _libraries = libraries;
         _credentials = new CredentialStore(repo);
         // SizeToContent="Height" alone would let this window grow past the screen on a
         // packed tab (e.g. Avatars with a long catalog) - capping MaxHeight to the primary
@@ -102,9 +104,11 @@ public partial class SettingsWindow : Window
         CropPresetsList.ItemsSource = MainViewModel.UploadCropPresets.Select(DescribeCropPreset).ToList();
 
         RefreshAvatarCatalogList();
+        RefreshLibraryList();
     }
 
     private record AvatarCatalogRow(long Id, string DisplayName, string StoresText, string ParentText);
+    private record LibraryRow(long Id, string DisplayName, string TypeText, string DetailText);
 
     private static string DescribeStores(AvatarCatalog c)
     {
@@ -521,6 +525,39 @@ public partial class SettingsWindow : Window
         Process.Start(new ProcessStartInfo(
             "https://github.com/settings/tokens/new?scopes=gist&description=VRC+Photo+Manager+Index")
         { UseShellExecute = true });
+    }
+
+    private void RefreshLibraryList()
+    {
+        LibraryListBox.ItemsSource = _libraries.GetAll().Select(l => new LibraryRow(
+            l.Id,
+            l.DisplayName,
+            l.Type == LibraryType.LocalFolder ? "Local folder" : "Discord channel",
+            l.Type == LibraryType.LocalFolder
+                ? l.LocalPath ?? ""
+                : $"Last synced: {(l.LastSyncedAt is DateTime d ? d.ToLocalTime().ToString("g") : "Never")}"
+        )).ToList();
+    }
+
+    private void AddLocalFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select a folder to add as a photo library" };
+        if (dialog.ShowDialog() == true)
+        {
+            string path = dialog.FolderName;
+            string displayName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(displayName)) displayName = path;
+
+            _libraries.AddLocalFolder(path, displayName);
+            RefreshLibraryList();
+        }
+    }
+
+    private void RemoveLibraryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is not long id) return;
+        _libraries.Remove(id);
+        RefreshLibraryList();
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)

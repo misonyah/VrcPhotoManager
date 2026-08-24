@@ -429,7 +429,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainViewModel vm) return;
         HidePreviewOverlay();
-        new Views.SettingsWindow(vm.Repo, vm.AvatarCatalog).Show();
+        new Views.SettingsWindow(vm.Repo, vm.AvatarCatalog, vm.Libraries).Show();
     }
 
     private void ViewMetadata_Click(object sender, RoutedEventArgs e)
