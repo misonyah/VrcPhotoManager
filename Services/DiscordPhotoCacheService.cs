@@ -47,9 +47,16 @@ public class DiscordPhotoCacheService(string cacheRootDir)
             {
                 if (File.Exists(candidate.LocalPath))
                 {
-                    var info = new FileInfo(candidate.LocalPath);
+                    // FileInfo lazily stats on first property access, not on construction - read
+                    // Length BEFORE deleting, or it throws FileNotFoundException (an IOException
+                    // subclass) trying to stat an already-gone file, which the catch below then
+                    // silently swallows: the file still gets deleted, but currentTotal never
+                    // decrements and ClearLocalPath is skipped, so the break condition never
+                    // trips and the loop wipes the ENTIRE cache instead of stopping once under
+                    // the cap.
+                    long fileLength = new FileInfo(candidate.LocalPath).Length;
                     await Task.Run(() => File.Delete(candidate.LocalPath));
-                    currentTotal -= info.Length;
+                    currentTotal -= fileLength;
                 }
                 photoRepo.ClearLocalPath(candidate.PhotoId);
             }

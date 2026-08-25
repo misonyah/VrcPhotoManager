@@ -954,7 +954,13 @@ public partial class App : Application
         var before = repo.GetCachedDiscordPhotosForEviction();
         Console.WriteLine($"Before: {before.Count} cached photos, {before.Sum(p => p.FileSize)} bytes total");
 
-        cache.EnforceCacheLimitAsync(repo, limitBytes).GetAwaiter().GetResult();
+        // Wrapped in Task.Run(...).GetAwaiter().GetResult() rather than a bare
+        // .GetAwaiter().GetResult() - EnforceCacheLimitAsync awaits Task.Run(() => File.Delete(...))
+        // internally, and a bare call here would try to resume that continuation on this same
+        // Dispatcher thread while it's blocked synchronously waiting for it - the same deadlock
+        // class documented on RunResolvePhotoDiagnostic/RunVrcdnSyncDiagnostic elsewhere in this
+        // file. Confirmed live: the bare form hung indefinitely running this diagnostic for real.
+        Task.Run(() => cache.EnforceCacheLimitAsync(repo, limitBytes)).GetAwaiter().GetResult();
 
         var after = repo.GetCachedDiscordPhotosForEviction();
         Console.WriteLine($"After (limit={limitBytes}): {after.Count} cached photos, {after.Sum(p => p.FileSize)} bytes total");
