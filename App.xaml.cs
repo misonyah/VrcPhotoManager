@@ -384,6 +384,7 @@ public partial class App : Application
         string dbPath = Path.Combine(dataDir, "vrcdn_manager.db");
         var photoRepo = new Data.PhotoRepository(dbPath);
         var faceRepo = new Data.FaceRepository(dbPath);
+        var libraries = new Data.LibraryRepository(dbPath);
 
         string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.CcipModelDir);
         if (modelDir is null)
@@ -398,8 +399,22 @@ public partial class App : Application
             return;
         }
 
+        // Same PhotoSourceResolver every UI/diagnostic consumer goes through (see
+        // RunResolvePhotoDiagnostic) - needed here so an eligible-but-not-yet-cached Discord
+        // photo (see isEligible below) actually gets downloaded before RunAsync's embedding loop
+        // tries to read it, same fix as MainViewModel.SuggestFacesAsync.
+        var credentials = new Services.CredentialStore(photoRepo);
+        string? discordToken = credentials.LoadDiscordBotToken();
+        var discordClient = discordToken is not null ? new Services.DiscordApiClient(discordToken) : null;
+        var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
+        var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
+
+        // Same eligibility rule as MainViewModel.IsEligibleForBatchOperation - skip an uncached
+        // Discord photo unless its library has explicitly opted into auto-downloading originals.
+        bool isEligible(Models.Photo p) => p.RemoteSourceId is null || p.LocalPath is not null
+            || libraries.GetById(p.LibraryId)?.AutoDownloadOriginals == true;
+
         var photos = photoRepo.GetAll();
-        var pathById = photos.ToDictionary(p => p.Id, p => p.LocalPath);
         var avatarTypeById = photos.ToDictionary(p => p.Id, p => p.AvatarType);
         Data.PhotoRepository? eliminationRepo = photoRepo.GetBoolSetting(Services.SettingsKeys.EnableExifElimination, true) ? photoRepo : null;
 
@@ -408,6 +423,28 @@ public partial class App : Application
         // that resumes on that same SynchronizationContext deadlocks.
         Task.Run(async () =>
         {
+            // Only eligible photos get a path entry at all (an ineligible one is a silent skip
+            // in RunAsync's embedding loop, not a caught exception); an eligible-but-uncached
+            // Discord photo that still needs embedding gets resolved/downloaded here first - see
+            // MainViewModel.SuggestFacesAsync for the identical, fuller-commented version of this.
+            var needingEmbeddingPhotoIds = faceRepo.GetDetectedFacesWithoutEmbedding()
+                .Select(f => f.PhotoId).ToHashSet();
+            var pathById = new Dictionary<long, string>();
+            foreach (var p in photos)
+            {
+                if (!isEligible(p)) continue;
+                if (p.LocalPath is not null) { pathById[p.Id] = p.LocalPath; continue; }
+                if (!needingEmbeddingPhotoIds.Contains(p.Id)) continue;
+                try
+                {
+                    pathById[p.Id] = await resolver.ResolveLocalPathAsync(p);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Resolve failed for photo {p.Id}: {ex.Message}");
+                }
+            }
+
             var result = await Services.FaceSuggestionService.RunAsync(
                 faceRepo, ccip, pathById, avatarTypeById, msg => Console.WriteLine(msg),
                 photos: eliminationRepo);
@@ -519,6 +556,7 @@ public partial class App : Application
         var photoRepo = new Data.PhotoRepository(dbPath);
         var avatarRegions = new Data.AvatarRegionRepository(dbPath);
         var avatarCatalog = new Data.AvatarCatalogRepository(dbPath);
+        var libraries = new Data.LibraryRepository(dbPath);
 
         string? modelDir = photoRepo.GetStringSetting(Services.SettingsKeys.AvatarModelDir);
         if (modelDir is null || !Directory.Exists(modelDir))
@@ -560,11 +598,18 @@ public partial class App : Application
         var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
         var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
 
+        // Same eligibility rule as MainViewModel.IsEligibleForBatchOperation - skip an uncached
+        // Discord photo unless its library has explicitly opted into auto-downloading originals,
+        // so this headless diagnostic and the "Classify Avatars" button never drift out of sync
+        // on which photos a batch run is actually allowed to touch.
+        bool isEligible(Models.Photo p) => p.RemoteSourceId is null || p.LocalPath is not null
+            || libraries.GetById(p.LibraryId)?.AutoDownloadOriginals == true;
+
         var missingIds = photoRepo.GetPhotoIdsMissingAvatarType();
         var retryIds = photoRepo.GetPhotoIdsWithNoConfidentMatch();
         var regionIds = avatarRegions.GetPhotoIdsWithRegions();
         var toClassify = photoRepo.GetAll()
-            .Where(p => (missingIds.Contains(p.Id) || retryIds.Contains(p.Id)) && !regionIds.Contains(p.Id))
+            .Where(p => (missingIds.Contains(p.Id) || retryIds.Contains(p.Id)) && !regionIds.Contains(p.Id) && isEligible(p))
             .ToList();
         if (toClassify.Count == 0) { Console.WriteLine("Nothing to classify - every photo already has an avatar-type result."); return; }
         Console.WriteLine($"Classifying {toClassify.Count} photos...");

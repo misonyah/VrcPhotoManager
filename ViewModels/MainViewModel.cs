@@ -1131,6 +1131,19 @@ public class MainViewModel : INotifyPropertyChanged
         return files.Count;
     }
 
+    /// <summary>A photo is eligible for a batch operation (Detect Faces, Classify Avatars,
+    /// Suggest Faces, Classify Photos) if it's a local-folder photo (always available), an
+    /// already-cached Discord photo, or an uncached Discord photo whose library has explicitly
+    /// opted into auto-downloading originals during scans - see the design spec's "Batch-feature
+    /// toggle" section for why this defaults to false.</summary>
+    private bool IsEligibleForBatchOperation(Photo photo)
+    {
+        if (photo.RemoteSourceId is null) return true; // local-folder photo
+        if (photo.LocalPath is not null) return true; // already cached
+        var library = _libraries.GetById(photo.LibraryId);
+        return library?.AutoDownloadOriginals == true;
+    }
+
     private async Task ScanFacesAsync()
     {
         if (_faceDetector is null)
@@ -1140,7 +1153,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = "Scanning for faces...";
-        var photos = _allPhotos.ToList();
+        var photos = _allPhotos.Where(p => IsEligibleForBatchOperation(p.Model)).ToList();
         // A fully-resolved photo (already scanned, and every detection it found is now tagged,
         // marked <unknown>, or deleted - e.g. via TagFacesWindow's "All tagged" button) has
         // nothing left for the detector to find, so re-running it there is wasted ML inference.
@@ -1323,7 +1336,38 @@ public class MainViewModel : INotifyPropertyChanged
     {
         if (_ccipEmbedder is null) { StatusMessage = "CCIP face-matching model not available."; return; }
 
-        var pathById = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath);
+        // FaceSuggestionService.RunAsync has no PhotoSourceResolver of its own - it just reads
+        // whatever path pathById gives it - so this call site is the only place that can both
+        // gate ineligible Discord photos (see IsEligibleForBatchOperation) AND actually download
+        // an eligible-but-not-yet-cached one before the embedding loop tries to read its bytes.
+        // An ineligible photo simply gets no dictionary entry at all: RunAsync's embedding loop
+        // does `if (!pathByPhotoId.TryGetValue(...)) return;` per face, so a missing entry is a
+        // silent, clean skip rather than a caught exception from a null/missing path.
+        //
+        // Resolving (and thus downloading) is restricted to photos actually needing an embedding
+        // right now (needingEmbeddingPhotoIds) rather than every eligible-but-uncached Discord
+        // photo in the library, so this doesn't pay for a download nobody's about to use. This
+        // duplicates RunAsync's own GetDetectedFacesWithoutEmbedding(scopedPhotoIds: null) query
+        // below - an accepted, cheap redundancy, same as TagFacesWindow's own separate count of
+        // the same query for its refresh banner.
+        var needingEmbeddingPhotoIds = _faces.GetDetectedFacesWithoutEmbedding()
+            .Select(f => f.PhotoId).ToHashSet();
+        var pathById = new Dictionary<long, string>();
+        foreach (var vm in _allPhotos)
+        {
+            if (!IsEligibleForBatchOperation(vm.Model)) continue;
+            if (vm.Model.LocalPath is not null) { pathById[vm.Model.Id] = vm.Model.LocalPath; continue; }
+            if (!needingEmbeddingPhotoIds.Contains(vm.Model.Id)) continue; // no unembedded face - no I/O needed
+            try
+            {
+                pathById[vm.Model.Id] = await _photoSourceResolver.ResolveLocalPathAsync(vm.Model);
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Resolve failed for photo {vm.Model.Id}: {ex.Message}";
+            }
+        }
+
         var avatarTypeByPhotoId = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType);
         PhotoRepository? eliminationRepo = _repo.GetBoolSetting(SettingsKeys.EnableExifElimination, true) ? _repo : null;
         var result = await FaceSuggestionService.RunAsync(
@@ -1561,7 +1605,7 @@ public class MainViewModel : INotifyPropertyChanged
     {
         if (_tagger is null) { StatusMessage = "WD14 classifier not available."; return; }
 
-        var toClassify = _allPhotos.Where(p => p.Rating is null).ToList();
+        var toClassify = _allPhotos.Where(p => p.Rating is null && IsEligibleForBatchOperation(p.Model)).ToList();
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has a rating."; return; }
 
         int done = 0;
@@ -1635,7 +1679,7 @@ public class MainViewModel : INotifyPropertyChanged
         var retryIds = _repo.GetPhotoIdsWithNoConfidentMatch();
         var regionIds = _avatarRegions.GetPhotoIdsWithRegions();
         var toClassify = _allPhotos.Where(p => (missingIds.Contains(p.Model.Id) || retryIds.Contains(p.Model.Id))
-            && !regionIds.Contains(p.Model.Id)).ToList();
+            && !regionIds.Contains(p.Model.Id) && IsEligibleForBatchOperation(p.Model)).ToList();
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has an avatar-type result."; return; }
 
         int done = 0, failed = 0, multiAvatarPhotos = 0, regionsCreated = 0;
