@@ -3,6 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings" Width="820" SizeToContent="Height"
         ResizeMode="NoResize">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    </Window.Resources>
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <!-- "*" (not "Auto") is what actually makes the ScrollViewer below constrain/scroll
@@ -219,6 +222,15 @@
                                    Width="32" Margin="4,0,0,0" VerticalAlignment="Center" />
                         <Slider x:Name="PortalHopWindowSlider" Minimum="15" Maximum="180" TickFrequency="15" IsSnapToTickEnabled="True" />
                     </DockPanel>
+
+                    <TextBlock Text="Discord cache size cap:" Margin="0,0,0,4"
+                               ToolTip="Maximum disk space the downloaded full-size Discord photo cache is allowed to use before older cached originals get evicted (fully face-tagged photos first, then oldest-accessed).&#10;Evicted photos aren't lost - they're just re-downloaded from Discord on demand next time they're needed." />
+                    <DockPanel Margin="0,0,0,12"
+                               ToolTip="Maximum disk space the downloaded full-size Discord photo cache is allowed to use before older cached originals get evicted (fully face-tagged photos first, then oldest-accessed).&#10;Evicted photos aren't lost - they're just re-downloaded from Discord on demand next time they're needed.">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=DiscordCacheSizeLimitSlider, Path=Value, StringFormat={}{0:0} GB}"
+                                   Width="52" Margin="4,0,0,0" VerticalAlignment="Center" />
+                        <Slider x:Name="DiscordCacheSizeLimitSlider" Minimum="1" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" />
+                    </DockPanel>
                 </StackPanel>
             </TabItem>
 
@@ -256,15 +268,24 @@
                                 Click="AddLocalFolderButton_Click"
                                 ToolTip="Add another local folder to scan as part of your photo library." />
                         <Button x:Name="AddDiscordChannelButton" Content="Add Discord channel..." Padding="8,4"
-                                IsEnabled="False"
-                                ToolTip="Not yet available - Discord channel libraries are a work in progress." />
+                                Click="AddDiscordChannelButton_Click"
+                                ToolTip="Add a Discord channel as a photo library. Needs a bot token the first time - see the tooltip on the token box below." />
                     </StackPanel>
+                    <StackPanel x:Name="DiscordTokenSetupPanel" DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="Collapsed">
+                        <TextBlock Text="Discord bot token:" Margin="0,0,0,4"
+                                   ToolTip="Create a Discord application + bot in Discord's developer portal (discord.com/developers/applications), invite it to your server with 'Read Message History' + 'View Channel' permissions, then paste its token here." />
+                        <PasswordBox x:Name="DiscordTokenBox" Margin="0,0,0,4" />
+                        <Button Content="Save token" Padding="8,2" HorizontalAlignment="Left" Click="SaveDiscordTokenButton_Click" />
+                    </StackPanel>
+                    <ListBox x:Name="DiscordChannelPickerListBox" DockPanel.Dock="Top" MaxHeight="200" Visibility="Collapsed"
+                             SelectionChanged="DiscordChannelPickerListBox_SelectionChanged" Margin="0,0,0,8" />
                     <ListBox x:Name="LibraryListBox" MaxHeight="320" ScrollViewer.VerticalScrollBarVisibility="Auto">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid Margin="0,4">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
@@ -274,7 +295,14 @@
                                         </TextBlock>
                                         <TextBlock FontSize="11" Foreground="Gray" Text="{Binding DetailText}" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Remove" Padding="8,2"
+                                    <CheckBox Grid.Column="1" Margin="8,0"
+                                              VerticalAlignment="Center"
+                                              Visibility="{Binding IsDiscord, Converter={StaticResource BoolToVisibilityConverter}}"
+                                              IsChecked="{Binding AutoDownloadOriginals}"
+                                              Content="Auto-download"
+                                              Checked="AutoDownloadToggle_Changed" Unchecked="AutoDownloadToggle_Changed"
+                                              Tag="{Binding Id}" />
+                                    <Button Grid.Column="2" Content="Remove" Padding="8,2"
                                             Click="RemoveLibraryButton_Click" Tag="{Binding Id}" />
                                 </Grid>
                             </DataTemplate>

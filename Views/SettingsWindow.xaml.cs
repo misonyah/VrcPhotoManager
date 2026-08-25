@@ -79,6 +79,7 @@ public partial class SettingsWindow : Window
         SkipResolvedPhotosCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, true);
         EnableExifEliminationCheckBox.IsChecked = _repo.GetBoolSetting(SettingsKeys.EnableExifElimination, true);
         PortalHopWindowSlider.Value = _repo.GetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, 90);
+        DiscordCacheSizeLimitSlider.Value = _repo.GetDoubleSetting(SettingsKeys.DiscordCacheSizeLimitGb, 5);
 
         // GistTokenBox is deliberately left blank rather than showing the saved token - it's
         // only used to CHANGE the token (see SaveButton_Click, which leaves the stored token
@@ -108,7 +109,7 @@ public partial class SettingsWindow : Window
     }
 
     private record AvatarCatalogRow(long Id, string DisplayName, string StoresText, string ParentText);
-    private record LibraryRow(long Id, string DisplayName, string TypeText, string DetailText);
+    private record LibraryRow(long Id, string DisplayName, string TypeText, string DetailText, bool IsDiscord, bool AutoDownloadOriginals);
 
     private static string DescribeStores(AvatarCatalog c)
     {
@@ -499,6 +500,7 @@ public partial class SettingsWindow : Window
         _repo.SetBoolSetting(SettingsKeys.SkipResolvedPhotosOnFaceScan, SkipResolvedPhotosCheckBox.IsChecked == true);
         _repo.SetBoolSetting(SettingsKeys.EnableExifElimination, EnableExifEliminationCheckBox.IsChecked == true);
         _repo.SetDoubleSetting(SettingsKeys.PortalHopWindowSeconds, PortalHopWindowSlider.Value);
+        _repo.SetDoubleSetting(SettingsKeys.DiscordCacheSizeLimitGb, DiscordCacheSizeLimitSlider.Value);
 
         // GistTokenBox left empty means "don't change the saved token" - only overwrite it when
         // something was actually typed, so reopening Settings and clicking Save without touching
@@ -535,7 +537,9 @@ public partial class SettingsWindow : Window
             l.Type == LibraryType.LocalFolder ? "Local folder" : "Discord channel",
             l.Type == LibraryType.LocalFolder
                 ? l.LocalPath ?? ""
-                : $"Last synced: {(l.LastSyncedAt is DateTime d ? d.ToLocalTime().ToString("g") : "Never")}"
+                : $"Last synced: {(l.LastSyncedAt is DateTime d ? d.ToLocalTime().ToString("g") : "Never")}",
+            l.Type == LibraryType.DiscordChannel,
+            l.AutoDownloadOriginals
         )).ToList();
     }
 
@@ -558,6 +562,77 @@ public partial class SettingsWindow : Window
         if ((sender as Button)?.Tag is not long id) return;
         _libraries.Remove(id);
         RefreshLibraryList();
+    }
+
+    /// <summary>Shows the token-entry panel the first time (no saved token yet), otherwise goes
+    /// straight to loading the guild/channel picker with the already-saved token.</summary>
+    private void AddDiscordChannelButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_credentials.LoadDiscordBotToken() is null)
+        {
+            DiscordTokenSetupPanel.Visibility = Visibility.Visible;
+            return;
+        }
+        _ = LoadDiscordChannelsAsync();
+    }
+
+    private void SaveDiscordTokenButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(DiscordTokenBox.Password)) return;
+        _credentials.SaveDiscordBotToken(DiscordTokenBox.Password);
+        DiscordTokenBox.Clear();
+        DiscordTokenSetupPanel.Visibility = Visibility.Collapsed;
+        _ = LoadDiscordChannelsAsync();
+    }
+
+    private record DiscordChannelRow(string GuildId, string GuildName, string ChannelId, string ChannelName);
+
+    /// <summary>Lists every text channel in every guild the bot has been invited to, flattened
+    /// into one picker list ("Guild / #channel") - the design doesn't call for per-guild
+    /// grouping, and the bot is expected to only be in a small number of servers.</summary>
+    private async Task LoadDiscordChannelsAsync()
+    {
+        string? token = _credentials.LoadDiscordBotToken();
+        if (token is null) return;
+
+        using var client = new DiscordApiClient(token);
+        var rows = new List<DiscordChannelRow>();
+        try
+        {
+            var guilds = await client.GetGuildsAsync(CancellationToken.None);
+            foreach (var guild in guilds)
+            {
+                var channels = await client.GetChannelsAsync(guild.Id, CancellationToken.None);
+                rows.AddRange(channels.Select(c => new DiscordChannelRow(guild.Id, guild.Name, c.Id, c.Name)));
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Failed to load Discord channels: {ex.Message}", "Discord", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        DiscordChannelPickerListBox.ItemsSource = rows.Select(r => $"{r.GuildName} / #{r.ChannelName}").ToList();
+        DiscordChannelPickerListBox.Tag = rows; // stash the full rows for the selection handler
+        DiscordChannelPickerListBox.Visibility = Visibility.Visible;
+    }
+
+    private void DiscordChannelPickerListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DiscordChannelPickerListBox.SelectedIndex < 0) return;
+        if (DiscordChannelPickerListBox.Tag is not List<DiscordChannelRow> rows) return;
+        var selected = rows[DiscordChannelPickerListBox.SelectedIndex];
+
+        _libraries.AddDiscordChannel(selected.GuildId, selected.ChannelId, $"#{selected.ChannelName}");
+        DiscordChannelPickerListBox.Visibility = Visibility.Collapsed;
+        DiscordChannelPickerListBox.SelectedIndex = -1;
+        RefreshLibraryList();
+    }
+
+    private void AutoDownloadToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if ((sender as CheckBox)?.Tag is not long id) return;
+        _libraries.SetAutoDownloadOriginals(id, (sender as CheckBox)!.IsChecked == true);
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
