@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using VrcPhotoManager.Models;
+using VrcPhotoManager.Services;
 
 namespace VrcPhotoManager.Data;
 
@@ -69,26 +70,47 @@ public class PhotoRepository
     /// which used to hardcode this path directly - see docs/superpowers/VrcPhotoManager/specs/
     /// 2026-08-23-multi-library-discord-design.md). Every pre-existing Photo row (library_id
     /// still 0, the AddColumn migration's placeholder default) is backfilled to point at it.
-    /// Idempotent: only inserts the seed row when no LocalFolder library exists yet, so this
-    /// runs safely on every app start, not just the first one after upgrading.</summary>
+    ///
+    /// Idempotent via the DefaultLibrarySeeded setting flag, checked instead of "does a
+    /// LocalFolder library currently exist" - the latter would silently re-seed a brand new
+    /// default library (and re-run on every subsequent app start) whenever the user deliberately
+    /// removes it via Settings' Remove Library button (see SettingsWindow.RemoveLibraryButton_Click):
+    /// every photo already scanned from the removed library would stay orphaned on its now-
+    /// deleted LibraryId (this backfill only re-targets rows still at LibraryId == 0, not rows
+    /// pointing at a real-but-now-deleted id), while the removal itself appeared to silently
+    /// undo. An upgrade from a version predating this flag still seeds correctly exactly once:
+    /// the flag isn't set yet, so this runs, sees the LocalFolder library that older versions'
+    /// idempotency check already created, skips creating a duplicate, and then sets the flag so
+    /// it never re-evaluates the LocalFolder check again.</summary>
     private static void SeedDefaultLibraryAndBackfillPhotos(VrcdnDbContext context)
     {
+        bool alreadySeeded = context.Settings.Any(s => s.Key == SettingsKeys.DefaultLibrarySeeded);
+        if (alreadySeeded) return;
+
         bool anyLocalFolderLibrary = context.Libraries.Any(l => l.Type == Models.LibraryType.LocalFolder);
-        if (anyLocalFolderLibrary) return;
-
-        string defaultPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "VRChat");
-        var seedLibrary = new Models.Library
+        if (!anyLocalFolderLibrary)
         {
-            Type = Models.LibraryType.LocalFolder,
-            LocalPath = defaultPath,
-            DisplayName = "VRChat Screenshots",
-        };
-        context.Libraries.Add(seedLibrary);
-        context.SaveChanges();
+            string defaultPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "VRChat");
+            var seedLibrary = new Models.Library
+            {
+                Type = Models.LibraryType.LocalFolder,
+                LocalPath = defaultPath,
+                DisplayName = "VRChat Screenshots",
+            };
+            context.Libraries.Add(seedLibrary);
+            context.SaveChanges();
 
-        context.Photos.Where(p => p.LibraryId == 0)
-            .ExecuteUpdate(s => s.SetProperty(p => p.LibraryId, seedLibrary.Id));
+            context.Photos.Where(p => p.LibraryId == 0)
+                .ExecuteUpdate(s => s.SetProperty(p => p.LibraryId, seedLibrary.Id));
+        }
+
+        context.Settings.Add(new AppSetting
+        {
+            Key = SettingsKeys.DefaultLibrarySeeded,
+            Value = System.Text.Encoding.UTF8.GetBytes("true"),
+        });
+        context.SaveChanges();
     }
 
     public long UpsertLocalFile(string path, long size, double mtime, long libraryId)

@@ -106,4 +106,12 @@ public static class SettingsKeys
     /// <summary>Discord full-size photo cache size limit in gigabytes - see
     /// DiscordPhotoCacheService.EnforceCacheLimitAsync for the eviction logic.</summary>
     public const string DiscordCacheSizeLimitGb = "discord_cache_size_limit_gb";
+
+    /// <summary>Set once, permanently, the first time PhotoRepository.SeedDefaultLibraryAndBackfillPhotos
+    /// actually runs its seeding logic. Checked instead of "does a LocalFolder library currently
+    /// exist" so a deliberate removal of the seeded default library (Settings > Remove Library)
+    /// sticks - without this flag, the next app start would see no LocalFolder library and
+    /// silently recreate a new one, while every photo from the removed library stayed orphaned
+    /// on the deleted id.</summary>
+    public const string DefaultLibrarySeeded = "default_library_seeded";
 }

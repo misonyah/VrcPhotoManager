@@ -560,6 +560,21 @@ public partial class SettingsWindow : Window
     private void RemoveLibraryButton_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button)?.Tag is not long id) return;
+        var library = _libraries.GetById(id);
+        if (library is null) return;
+
+        // Removing a library doesn't touch its already-scanned photos - they keep pointing at
+        // this (now-deleted) LibraryId forever, with no future rescans and no UI to remove them
+        // (an uncached Discord photo whose library was removed becomes permanently ineligible
+        // for batch operations - see IsEligibleForBatchOperation). No reassignment UI exists, so
+        // this is at minimum a clear warning before an otherwise-silent, effectively permanent
+        // orphaning.
+        var confirm = MessageBox.Show(this,
+            $"Remove '{library.DisplayName}'? Photos already scanned from this library will remain " +
+            "in your library but will no longer be updated by future scans.",
+            "Remove Library", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
         _libraries.Remove(id);
         RefreshLibraryList();
     }
