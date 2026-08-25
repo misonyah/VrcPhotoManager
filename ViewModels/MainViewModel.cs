@@ -29,6 +29,7 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly AvatarCatalogRepository _avatarCatalog;
     private readonly LibraryRepository _libraries;
     private readonly PhotoSourceResolver _photoSourceResolver;
+    private readonly DiscordPhotoCacheService _discordCache;
     private FaceDetectionService? _faceDetector;
     private VrcxProfileLookupService? _profileLookup;
     private string? _selfUserId;
@@ -667,10 +668,13 @@ public class MainViewModel : INotifyPropertyChanged
         // see PhotoSourceResolver's own doc comment. Built once here (not per-call-site) so a
         // Discord photo's already-cached local path is reused across every consumer instead of
         // re-resolving (and potentially re-downloading) it separately for each.
-        var discordCache = new DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
+        // Also reused by ScanLibraryAsync's post-sync eviction pass (see EnforceCacheLimitAsync
+        // call below) so both the download-on-demand side and the eviction side agree on exactly
+        // where cached originals live, instead of a second instance recomputing the same path.
+        _discordCache = new DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
         string? discordToken = _credentials.LoadDiscordBotToken();
         var discordClient = discordToken is not null ? new DiscordApiClient(discordToken) : null;
-        _photoSourceResolver = new PhotoSourceResolver(_repo, discordCache, discordClient);
+        _photoSourceResolver = new PhotoSourceResolver(_repo, _discordCache, discordClient);
 
         ScanLibraryCommand = new RelayCommand(ScanLibraryAsync);
         // Gated on ScanLibrary/DetectFaces having succeeded at least once (not just this
@@ -971,6 +975,25 @@ public class MainViewModel : INotifyPropertyChanged
                     }
                     if (token.IsCancellationRequested) return;
                 }
+            }
+
+            // Reclaim cached Discord full-size originals once the configured cap is exceeded
+            // (Settings' Discord cache slider - see SettingsKeys.DiscordCacheSizeLimitGb). Runs
+            // whenever there are Discord libraries at all - not just when botToken is set above -
+            // since a cache built up in an earlier session (when a token was configured) can
+            // still be over cap even if this session has no token to sync with.
+            // EnforceCacheLimitAsync is already a safe no-op when under the cap, so this doesn't
+            // need its own "actually over the limit" check. A failed eviction pass (locked file,
+            // disk hiccup) shouldn't abort the scan that already completed successfully above.
+            try
+            {
+                double limitGb = _repo.GetDoubleSetting(SettingsKeys.DiscordCacheSizeLimitGb, 5);
+                long limitBytes = (long)(limitGb * 1024 * 1024 * 1024);
+                await _discordCache.EnforceCacheLimitAsync(_repo, limitBytes);
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Discord cache eviction failed: {ex.Message}";
             }
         }
 
