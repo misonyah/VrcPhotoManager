@@ -24,11 +24,15 @@ public static class DiscordLibraryService
     /// documented REST rate-limit contract DiscordApiClient already handles, but a large channel's
     /// initial backfill (thousands of thumbnail requests) risks CDN throttling under a tight
     /// unthrottled loop, confirmed as a real design concern in the multi-library spec.</summary>
-    public static async Task SyncChannelAsync(
+    /// <returns>The ids of every Photo row newly inserted by this sync call, in the order they
+    /// were inserted - so callers (MainViewModel.ScanLibraryAsync) can add just the new photos
+    /// into their in-memory list without re-querying/diffing the whole library.</returns>
+    public static async Task<List<long>> SyncChannelAsync(
         Models.Library library, DiscordApiClient client, Data.PhotoRepository photoRepo,
         Data.LibraryRepository libraryRepo, IProgress<string>? progress, CancellationToken ct)
     {
-        if (library.DiscordChannelId is null) return;
+        var newPhotoIds = new List<long>();
+        if (library.DiscordChannelId is null) return newPhotoIds;
 
         using var http = new HttpClient();
         // Discord's `after` param, when omitted entirely, returns the channel's MOST RECENT
@@ -49,15 +53,28 @@ public static class DiscordLibraryService
             foreach (var message in page)
             {
                 totalMessages++;
-                var imageAttachments = message.Attachments.Where(IsImageAttachment).ToList();
-                for (int i = 0; i < imageAttachments.Count; i++)
+                // Indexed by true position in the FULL (unfiltered) attachment list, NOT the
+                // images-only filtered list - PhotoSourceResolver.RefetchAndDownloadAsync's
+                // stale-CDN-URL recovery path parses this same "{messageId}_{index}" key back
+                // apart and indexes into message.Attachments (unfiltered) to fetch a fresh URL.
+                // Indexing by position in a filtered list here would silently diverge from that
+                // for any message mixing a non-image attachment among/before its images (a
+                // routine real-world case - a .txt/.mp4/.zip alongside screenshots), making a
+                // stale-URL refetch download and cache the WRONG attachment under an existing
+                // photo's identity - possibly one that already has face tags. Skipping
+                // non-images inside this loop (rather than pre-filtering) keeps i as the
+                // attachment's true position for every image, with no behavior change for the
+                // common all-image-attachments case.
+                for (int i = 0; i < message.Attachments.Count; i++)
                 {
-                    var attachment = imageAttachments[i];
+                    var attachment = message.Attachments[i];
+                    if (!IsImageAttachment(attachment)) continue;
                     string remoteSourceId = $"{message.Id}_{i}";
                     if (photoRepo.GetByRemoteSourceId(remoteSourceId) is not null) continue;
 
                     byte[] thumbnail = await FetchThumbnailAsync(http, attachment.Url, ct);
-                    photoRepo.UpsertDiscordPhoto(library.Id, remoteSourceId, attachment.Url, thumbnail, library.DiscordChannelId!);
+                    long photoId = photoRepo.UpsertDiscordPhoto(library.Id, remoteSourceId, attachment.Url, thumbnail, library.DiscordChannelId!);
+                    newPhotoIds.Add(photoId);
                     totalNew++;
                     // Pacing: see this method's own doc comment - the CDN has no documented
                     // rate-limit contract to react to (unlike the REST calls above, which
@@ -73,5 +90,7 @@ public static class DiscordLibraryService
 
             if (page.Count < 100) break; // last page
         }
+
+        return newPhotoIds;
     }
 }

@@ -25,6 +25,11 @@ public class PhotoSourceResolver(Data.PhotoRepository photoRepo, DiscordPhotoCac
         if (photo.LocalPath is not null && File.Exists(photo.LocalPath))
         {
             photoRepo.TouchLastAccessed(photo.Id);
+            // Keep the in-memory Photo instance in sync with the DB write above - LocalPath/
+            // FileSize are already correct here, but every caller holding this same Photo
+            // reference (MainViewModel/PhotoViewModel) would otherwise keep seeing a stale
+            // LastAccessedAt for the rest of the session.
+            photo.LastAccessedAt = DateTime.UtcNow;
             return photo.LocalPath;
         }
 
@@ -48,6 +53,14 @@ public class PhotoSourceResolver(Data.PhotoRepository photoRepo, DiscordPhotoCac
         Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
         await File.WriteAllBytesAsync(cachePath, bytes, ct);
         photoRepo.SetLocalPathAndAccessed(photo.Id, cachePath, bytes.Length);
+        // Keep the in-memory Photo instance (the same one the caller passed in, and that every
+        // MainViewModel/PhotoViewModel holding a reference to this photo already has) in sync
+        // with the DB write just above - without this, LocalPath stays null in memory for the
+        // rest of the app session even after a real, successful download (e.g. producing a
+        // garbage upload filename from Path.GetFileName(null) downstream).
+        photo.LocalPath = cachePath;
+        photo.FileSize = bytes.Length;
+        photo.LastAccessedAt = DateTime.UtcNow;
         return cachePath;
     }
 
