@@ -607,11 +607,14 @@ public class MainViewModel : INotifyPropertyChanged
     public bool SuggestionsMayBeStale { get; set; }
 
     /// <summary>The two dictionaries FaceSuggestionService.RunAsync needs, built the same way
-    /// SuggestFacesAsync already builds them for its own (unscoped) full-library run - reused
-    /// as-is by Tag Faces' incremental refresh, which only narrows scopedPhotoIds, not these.</summary>
-    public (Dictionary<long, string> PathByPhotoId, Dictionary<long, string?> AvatarTypeByPhotoId) GetPhotoPathsAndAvatarTypes() =>
-        (_allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.LocalPath),
-         _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType));
+    /// SuggestFacesAsync builds them for its own (unscoped) full-library run - reused as-is by
+    /// Tag Faces' incremental refresh, which only narrows scopedPhotoIds, not these. Delegates
+    /// to BuildFaceSuggestionInputsAsync so an ineligible uncached Discord photo is correctly
+    /// excluded (not passed downstream with a null path) and an eligible-but-uncached one that
+    /// still needs an embedding is resolved (downloaded) first - see that method's doc comment.
+    /// Async because resolving can mean a real Discord CDN download.</summary>
+    public Task<(Dictionary<long, string> PathByPhotoId, Dictionary<long, string?> AvatarTypeByPhotoId)> GetPhotoPathsAndAvatarTypesAsync() =>
+        BuildFaceSuggestionInputsAsync();
 
     /// <summary>Read fresh (not cached) each time - it's a single cheap SQLite lookup, so
     /// there's no need for a separate "reload after Settings closes" step.</summary>
@@ -964,7 +967,19 @@ public class MainViewModel : INotifyPropertyChanged
                 {
                     try
                     {
-                        await DiscordLibraryService.SyncChannelAsync(library, discordClient, _repo, _libraries, progress, token);
+                        var newPhotoIds = await DiscordLibraryService.SyncChannelAsync(library, discordClient, _repo, _libraries, progress, token);
+                        // SyncChannelAsync only writes new Photo rows to the DB - nothing else
+                        // adds them to _allPhotos (what RebuildRows/the UI grid actually reads
+                        // from), so without this a successful Discord sync would show nothing
+                        // new in the grid until an app restart. Mirrors ScanLocalFolderLibraryAsync's
+                        // own AddPhoto call for each new local file.
+                        foreach (long photoId in newPhotoIds)
+                        {
+                            if (_repo.GetById(photoId) is Photo newPhoto)
+                            {
+                                AddPhoto(new PhotoViewModel(newPhoto, _repo));
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -1002,6 +1017,12 @@ public class MainViewModel : INotifyPropertyChanged
         // lived at the end of ScanLocalFolderLibraryAsync (per-local-folder), which was correct
         // back when that was the only kind of library, but would have run it once per folder
         // (and never after a Discord sync) once multi-library support landed.
+        //
+        // RebuildRows() here picks up any newly-synced Discord photos just added to _allPhotos
+        // above - ScanLocalFolderLibraryAsync already rebuilds incrementally as it goes (see its
+        // own per-chunk RebuildRows() call), so this is a harmless redundant call for the
+        // local-folder case but the only one for a Discord-only scan.
+        RebuildRows();
         ApplyPlayerCounts();
         StatusMessage = $"Scan complete: {totalLocalFiles} photos.";
         RecordActionSuccess("ScanLibrary", nameof(ScanLibraryTooltip));
@@ -1259,7 +1280,11 @@ public class MainViewModel : INotifyPropertyChanged
         int processed = 0, matched = 0;
         foreach (var vm in candidates)
         {
-            if (GamelogCorrelationService.TryParseCaptureTime(vm.Model.LocalPath) is DateTime time)
+            // Discord photos have LocalPath == null (they're never player/world-scanned locally,
+            // so nothing skips them upstream) - TryParseCaptureTime does Path.GetFileName
+            // internally, which throws on a null path, so skip them explicitly instead.
+            if (vm.Model.LocalPath is not null
+                && GamelogCorrelationService.TryParseCaptureTime(vm.Model.LocalPath) is DateTime time)
             {
                 bool matchedAnything = false;
 
@@ -1355,24 +1380,27 @@ public class MainViewModel : INotifyPropertyChanged
         RecordActionSuccess("SyncVrcPlayerData", nameof(SyncVrcPlayerDataTooltip));
     }
 
-    private async Task SuggestFacesAsync()
+    /// <summary>Builds the two dictionaries FaceSuggestionService.RunAsync needs - shared by
+    /// SuggestFacesAsync's own (unscoped) full-library run and GetPhotoPathsAndAvatarTypesAsync's
+    /// build for Tag Faces' incremental "refresh what's in view" banner (RunAsync's scopedPhotoIds
+    /// narrows things further inside RunAsync itself, not these).
+    ///
+    /// FaceSuggestionService.RunAsync has no PhotoSourceResolver of its own - it just reads
+    /// whatever path pathById gives it - so this is the one place that both gates ineligible
+    /// Discord photos (see IsEligibleForBatchOperation) AND actually downloads an eligible-but-
+    /// not-yet-cached one before the embedding loop tries to read its bytes. An ineligible photo
+    /// simply gets no dictionary entry at all: RunAsync's embedding loop does
+    /// `if (!pathByPhotoId.TryGetValue(...)) return;` per face, so a missing entry is a silent,
+    /// clean skip rather than a caught exception from a null/missing path.
+    ///
+    /// Resolving (and thus downloading) is restricted to photos actually needing an embedding
+    /// right now (needingEmbeddingPhotoIds) rather than every eligible-but-uncached Discord photo
+    /// in the library, so this doesn't pay for a download nobody's about to use. This duplicates
+    /// RunAsync's own GetDetectedFacesWithoutEmbedding(scopedPhotoIds: null) query - an accepted,
+    /// cheap redundancy, same as TagFacesWindow's own separate count of the same query for its
+    /// refresh banner.</summary>
+    private async Task<(Dictionary<long, string> PathByPhotoId, Dictionary<long, string?> AvatarTypeByPhotoId)> BuildFaceSuggestionInputsAsync()
     {
-        if (_ccipEmbedder is null) { StatusMessage = "CCIP face-matching model not available."; return; }
-
-        // FaceSuggestionService.RunAsync has no PhotoSourceResolver of its own - it just reads
-        // whatever path pathById gives it - so this call site is the only place that can both
-        // gate ineligible Discord photos (see IsEligibleForBatchOperation) AND actually download
-        // an eligible-but-not-yet-cached one before the embedding loop tries to read its bytes.
-        // An ineligible photo simply gets no dictionary entry at all: RunAsync's embedding loop
-        // does `if (!pathByPhotoId.TryGetValue(...)) return;` per face, so a missing entry is a
-        // silent, clean skip rather than a caught exception from a null/missing path.
-        //
-        // Resolving (and thus downloading) is restricted to photos actually needing an embedding
-        // right now (needingEmbeddingPhotoIds) rather than every eligible-but-uncached Discord
-        // photo in the library, so this doesn't pay for a download nobody's about to use. This
-        // duplicates RunAsync's own GetDetectedFacesWithoutEmbedding(scopedPhotoIds: null) query
-        // below - an accepted, cheap redundancy, same as TagFacesWindow's own separate count of
-        // the same query for its refresh banner.
         var needingEmbeddingPhotoIds = _faces.GetDetectedFacesWithoutEmbedding()
             .Select(f => f.PhotoId).ToHashSet();
         var pathById = new Dictionary<long, string>();
@@ -1392,6 +1420,14 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         var avatarTypeByPhotoId = _allPhotos.ToDictionary(p => p.Model.Id, p => p.Model.AvatarType);
+        return (pathById, avatarTypeByPhotoId);
+    }
+
+    private async Task SuggestFacesAsync()
+    {
+        if (_ccipEmbedder is null) { StatusMessage = "CCIP face-matching model not available."; return; }
+
+        var (pathById, avatarTypeByPhotoId) = await BuildFaceSuggestionInputsAsync();
         PhotoRepository? eliminationRepo = _repo.GetBoolSetting(SettingsKeys.EnableExifElimination, true) ? _repo : null;
         var result = await FaceSuggestionService.RunAsync(
             _faces, _ccipEmbedder, pathById, avatarTypeByPhotoId, msg => StatusMessage = msg,
@@ -1839,10 +1875,13 @@ public class MainViewModel : INotifyPropertyChanged
             username);
 
         // refresh in-memory view models from the db
-        var refreshed = _repo.GetAll().ToDictionary(p => p.LocalPath);
+        // Discord photos have LocalPath == null until resolved/cached - ToDictionary rejects a
+        // null key, and a null-LocalPath vm has nothing in this dictionary to match anyway, so
+        // both the dictionary build and the lookup below exclude them.
+        var refreshed = _repo.GetAll().Where(p => p.LocalPath != null).ToDictionary(p => p.LocalPath!);
         foreach (var vm in _allPhotos)
         {
-            if (refreshed.TryGetValue(vm.Model.LocalPath, out var updated))
+            if (vm.Model.LocalPath is not null && refreshed.TryGetValue(vm.Model.LocalPath, out var updated))
             {
                 vm.Model.RemoteStatus = updated.RemoteStatus;
                 vm.Model.RemoteUrl = updated.RemoteUrl;

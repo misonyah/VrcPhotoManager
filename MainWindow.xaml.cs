@@ -474,12 +474,12 @@ public partial class MainWindow : Window
         CopyVrcdnUrlToClipboard(vm, photo);
     }
 
-    private void TagFaces_Click(object sender, RoutedEventArgs e)
+    private async void TagFaces_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as MenuItem)?.DataContext is not PhotoViewModel photo) return;
         if (DataContext is not MainViewModel vm) return;
 
-        OpenTagFaces(vm, photo);
+        await OpenTagFacesAsync(vm, photo);
     }
 
     private void PhotoImage_Click(object sender, MouseButtonEventArgs e)
@@ -490,13 +490,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PhotoImage_MiddleClick(object sender, MouseButtonEventArgs e)
+    private async void PhotoImage_MiddleClick(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Middle) return;
         if ((sender as FrameworkElement)?.DataContext is not PhotoViewModel photo) return;
         if (DataContext is not MainViewModel vm) return;
 
-        OpenTagFaces(vm, photo);
+        await OpenTagFacesAsync(vm, photo);
     }
 
     /// <summary>
@@ -519,7 +519,7 @@ public partial class MainWindow : Window
     /// to handle safely. If one's already open, this just brings it to the front instead of
     /// opening another (found via a real report of duplicate windows appearing).
     /// </summary>
-    private void OpenTagFaces(MainViewModel vm, PhotoViewModel photo)
+    private async Task OpenTagFacesAsync(MainViewModel vm, PhotoViewModel photo)
     {
         if (_openTagFacesWindow is not null)
         {
@@ -529,7 +529,17 @@ public partial class MainWindow : Window
         }
 
         HidePreviewOverlay();
-        var (pathByPhotoId, avatarTypeByPhotoId) = vm.GetPhotoPathsAndAvatarTypes();
+        var (pathByPhotoId, avatarTypeByPhotoId) = await vm.GetPhotoPathsAndAvatarTypesAsync();
+        // Re-check the singleton guard: GetPhotoPathsAndAvatarTypesAsync can await a real
+        // Discord download, giving a second rapid-fire click a window to race past the check
+        // above before this one finishes - without this, both could otherwise proceed to open
+        // their own TagFacesWindow.
+        if (_openTagFacesWindow is not null)
+        {
+            _openTagFacesWindow.Activate();
+            vm.StatusMessage = "A Tag Faces window is already open - close it before opening another.";
+            return;
+        }
         var window = new Views.TagFacesWindow(vm.Faces, vm.Repo, vm.AvatarRegions, vm.AvatarCatalog, vm.PhotoSourceResolver, vm.AvatarClassifier, vm.ProfileLookup, photo.Model,
             vm.CcipEmbedder, vm.GetVisiblePhotoIds(), pathByPhotoId, avatarTypeByPhotoId,
             vm.SuggestionsMayBeStale, stale => vm.SuggestionsMayBeStale = stale);
