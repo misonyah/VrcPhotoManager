@@ -275,8 +275,15 @@
                                 ToolTip="Re-enter the Discord bot token, e.g. if it was regenerated or was wrong the first time." />
                     </StackPanel>
                     <StackPanel x:Name="DiscordTokenSetupPanel" DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="Collapsed">
-                        <TextBlock Text="Discord bot token:" Margin="0,0,0,4" TextWrapping="Wrap"
-                                   ToolTip="1) discord.com/developers/applications -> New Application. 2) Bot page -> Reset Token -> Copy (this exact value, NOT the Application ID or Client Secret). 3) Same page -> enable the 'Message Content Intent' toggle under Privileged Gateway Intents. 4) OAuth2 -> URL Generator -> check scope 'bot' and permissions 'View Channel' + 'Read Message History' -> open the generated URL and invite the bot to your server. 5) Paste the token from step 2 below." />
+                        <TextBlock Text="Set up a Discord bot" FontSize="14" FontWeight="Bold" Margin="0,0,0,4" />
+                        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,8">
+                            1. Go to discord.com/developers/applications and click "New Application".
+                            <LineBreak/>2. Open its "Bot" page, click "Reset Token", then "Copy". Use this exact value below - NOT the Application ID or Client Secret from other pages, that's the most common mistake here.
+                            <LineBreak/>3. Still on the Bot page, enable "Message Content Intent" under Privileged Gateway Intents.
+                            <LineBreak/>4. Open "OAuth2 -&gt; URL Generator". Check scope "bot", then permissions "View Channel" and "Read Message History". Open the generated URL and invite the bot to your server.
+                            <LineBreak/>5. Paste the token from step 2 below and click Save.
+                        </TextBlock>
+                        <TextBlock Text="Discord bot token:" Margin="0,0,0,4" />
                         <PasswordBox x:Name="DiscordTokenBox" Margin="0,0,0,4" />
                         <Button Content="Save token" Padding="8,2" HorizontalAlignment="Left" Click="SaveDiscordTokenButton_Click" />
                     </StackPanel>
