@@ -19,6 +19,7 @@ public class PhotoViewModel : INotifyPropertyChanged
 
     private BitmapImage? _thumbnail;
     private bool _thumbnailLoadAttempted;
+    private bool _thumbnailLoadInProgress;
 
     /// <summary>Right-click "Rating" submenu - CommandParameter is the rating string, or
     /// null to clear it back to unclassified.</summary>
@@ -307,30 +308,54 @@ public class PhotoViewModel : INotifyPropertyChanged
         DetectedFaceCount > 0 && TaggedFaceCount == DetectedFaceCount ? AllTaggedBadgeBrush : DefaultBadgeBrush;
 
     /// <summary>
-    /// Lazily fetched from the db on first access (i.e. when the item is actually
-    /// realized by the virtualizing row panel), so off-screen rows never hold a decoded
-    /// bitmap or query the thumbnail blob at all.
+    /// Lazily fetched on first access (i.e. when the item is actually realized by the
+    /// virtualizing row panel), so off-screen rows never hold a decoded bitmap or query the
+    /// thumbnail blob at all. The fetch itself (SQLite read + bitmap decode) runs on a
+    /// background thread and only touches the UI thread for the final property assignment -
+    /// a synchronous read here would otherwise block scrolling for real, visible time
+    /// whenever it collided with a concurrent writer (e.g. an in-progress Discord sync
+    /// inserting new rows) and had to wait out SQLite's busy-timeout, confirmed as a real
+    /// reported symptom, not a hypothetical.
     /// </summary>
     public BitmapImage? Thumbnail
     {
         get
         {
-            if (!_thumbnailLoadAttempted && Model.HasThumbnail)
+            if (!_thumbnailLoadAttempted && !_thumbnailLoadInProgress && Model.HasThumbnail)
             {
-                _thumbnailLoadAttempted = true;
-                byte[]? bytes = _repo.GetThumbnail(Model.Id);
-                if (bytes is not null)
-                {
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.CacheOption = BitmapCacheOption.OnLoad;
-                    bmp.StreamSource = new MemoryStream(bytes);
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    _thumbnail = bmp;
-                }
+                _thumbnailLoadInProgress = true;
+                _ = LoadThumbnailAsync();
             }
             return _thumbnail;
+        }
+    }
+
+    private async Task LoadThumbnailAsync()
+    {
+        // BitmapImage can be constructed and decoded off the UI thread as long as it's
+        // Frozen before any thread touches it again - Freeze() makes it thread-independent,
+        // which is what lets the DB read AND the decode both happen in the background here.
+        var bmp = await Task.Run(() =>
+        {
+            byte[]? bytes = _repo.GetThumbnail(Model.Id);
+            if (bytes is null) return null;
+            var b = new BitmapImage();
+            b.BeginInit();
+            b.CacheOption = BitmapCacheOption.OnLoad;
+            b.StreamSource = new MemoryStream(bytes);
+            b.EndInit();
+            b.Freeze();
+            return b;
+        });
+
+        // Resumes on the UI thread (this method was called from the Thumbnail getter, which
+        // only ever runs there) - safe to touch _thumbnail/raise PropertyChanged directly.
+        _thumbnailLoadAttempted = true;
+        _thumbnailLoadInProgress = false;
+        if (bmp is not null)
+        {
+            _thumbnail = bmp;
+            OnPropertyChanged(nameof(Thumbnail));
         }
     }
 
