@@ -275,14 +275,25 @@
                                 ToolTip="Re-enter the Discord bot token, e.g. if it was regenerated or was wrong the first time." />
                     </StackPanel>
                     <StackPanel x:Name="DiscordTokenSetupPanel" DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="Collapsed">
-                        <TextBlock Text="Set up a Discord bot" FontSize="14" FontWeight="Bold" Margin="0,0,0,4" />
+                        <TextBlock Margin="0,0,0,8">
+                            <Run Text="Set up a Discord bot" FontSize="14" FontWeight="Bold" />
+                        </TextBlock>
                         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,8">
-                            1. Go to discord.com/developers/applications and click "New Application".
+                            1. Open
+                            <Hyperlink Click="OpenDiscordDevPortalLink_Click">discord.com/developers/applications</Hyperlink>
+                            and click "New Application".
                             <LineBreak/>2. Open its "Bot" page, click "Reset Token", then "Copy". Use this exact value below - NOT the Application ID or Client Secret from other pages, that's the most common mistake here.
                             <LineBreak/>3. Still on the Bot page, enable "Message Content Intent" under Privileged Gateway Intents.
-                            <LineBreak/>4. Open "OAuth2 -&gt; URL Generator". Check scope "bot", then permissions "View Channel" and "Read Message History". Open the generated URL and invite the bot to your server.
+                            <LineBreak/>4. On the "General Information" page, copy the Application ID, paste it below, then click "Open invite link" - it's pre-filled with the right permissions (View Channel + Read Message History), no manual OAuth2 setup needed.
                             <LineBreak/>5. Paste the token from step 2 below and click Save.
                         </TextBlock>
+                        <TextBlock Text="Discord Application ID:" Margin="0,0,0,4" />
+                        <DockPanel Margin="0,0,0,8">
+                            <Button DockPanel.Dock="Right" Content="Open invite link" Padding="8,2" Margin="8,0,0,0"
+                                    Click="OpenDiscordInviteLink_Click"
+                                    ToolTip="Opens Discord's own invite page with the bot scope and the exact permissions VrcPhotoManager needs already selected." />
+                            <TextBox x:Name="DiscordApplicationIdTextBox" VerticalContentAlignment="Center" />
+                        </DockPanel>
                         <TextBlock Text="Discord bot token:" Margin="0,0,0,4" />
                         <PasswordBox x:Name="DiscordTokenBox" Margin="0,0,0,4" />
                         <Button Content="Save token" Padding="8,2" HorizontalAlignment="Left" Click="SaveDiscordTokenButton_Click" />

@@ -591,6 +591,30 @@ public partial class SettingsWindow : Window
         _ = LoadDiscordChannelsAsync();
     }
 
+    private void OpenDiscordDevPortalLink_Click(object sender, RoutedEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo("https://discord.com/developers/applications") { UseShellExecute = true });
+    }
+
+    /// <summary>Discord's own invite-authorize URL accepts the target permissions as a precomputed
+    /// bitmask query param, so the user never has to click through the OAuth2 "URL Generator"
+    /// page's own checkboxes - paste the Application ID and this is already scoped exactly right.
+    /// 66560 = View Channel (1&lt;&lt;10 = 1024) + Read Message History (1&lt;&lt;16 = 65536), the same
+    /// two permissions DiscordTokenSetupPanel's instructions ask for.</summary>
+    private void OpenDiscordInviteLink_Click(object sender, RoutedEventArgs e)
+    {
+        string clientId = DiscordApplicationIdTextBox.Text.Trim();
+        if (string.IsNullOrEmpty(clientId))
+        {
+            MessageBox.Show(this, "Paste the Discord Application ID first (from the app's \"General Information\" page).",
+                "Discord", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        Process.Start(new ProcessStartInfo(
+            $"https://discord.com/api/oauth2/authorize?client_id={Uri.EscapeDataString(clientId)}&permissions=66560&scope=bot")
+        { UseShellExecute = true });
+    }
+
     /// <summary>Always available (unlike AddDiscordChannelButton_Click, which only shows the
     /// token box when none is saved yet) - lets a saved-but-wrong or since-regenerated token be
     /// corrected without waiting for a failed API call to trigger the panel.</summary>
