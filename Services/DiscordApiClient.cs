@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace VrcPhotoManager.Services;
 
-public record DiscordGuild(string Id, string Name);
+public record DiscordGuild(string Id, string Name, string? IconUrl);
 public record DiscordChannel(string Id, string Name);
 public record DiscordAttachment(string Url, string Filename, [property: JsonPropertyName("content_type")] string? ContentType);
 public record DiscordMessage(string Id, List<DiscordAttachment> Attachments);
@@ -55,10 +55,17 @@ public class DiscordApiClient : IDisposable
     {
         using var response = await GetWithRateLimitRetryAsync($"{ApiBase}/users/@me/guilds", ct);
         var raw = await response.Content.ReadFromJsonAsync<List<JsonElement>>(cancellationToken: ct) ?? [];
-        return raw.Select(g => new DiscordGuild(
-            g.GetProperty("id").GetString()!,
-            g.GetProperty("name").GetString()!
-        )).ToList();
+        return raw.Select(g =>
+        {
+            string id = g.GetProperty("id").GetString()!;
+            // "icon" is a nullable hash, not a URL - a guild with no custom icon set has none.
+            // A static .png is requested even for an animated ("a_..." prefixed) icon hash -
+            // Discord still serves a single still frame for that extension, which is all a
+            // small per-photo status badge needs; no reason to pull in a .gif for this.
+            string? iconHash = g.TryGetProperty("icon", out var iconEl) ? iconEl.GetString() : null;
+            string? iconUrl = iconHash is not null ? $"https://cdn.discordapp.com/icons/{id}/{iconHash}.png" : null;
+            return new DiscordGuild(id, g.GetProperty("name").GetString()!, iconUrl);
+        }).ToList();
     }
 
     public async Task<List<DiscordChannel>> GetChannelsAsync(string guildId, CancellationToken ct)

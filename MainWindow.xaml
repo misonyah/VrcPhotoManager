@@ -164,6 +164,20 @@
                             BorderBrush="White" BorderThickness="1"
                             Background="{Binding Rating, Converter={StaticResource RatingToBrushConverter}}"
                             ToolTip="{Binding Rating}" />
+                    <!-- Which Discord server this photo came from - null (no badge) for every
+                         local-folder photo, or a Discord library whose guild has no custom icon.
+                         Offset up from the plain Margin="4" corner (same trick AvatarType's label
+                         uses at bottom-left) so it doesn't sit on top of the mutually-exclusive
+                         cloud/crop/upload-status badges that already anchor there. -->
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="4,4,4,26" Width="14" Height="14" CornerRadius="7"
+                            BorderBrush="White" BorderThickness="1"
+                            Visibility="{Binding DiscordGuildIcon, Converter={StaticResource NullToVisibilityConverter}}"
+                            ToolTip="From a Discord library">
+                        <Border.Background>
+                            <ImageBrush ImageSource="{Binding DiscordGuildIcon}" Stretch="UniformToFill" />
+                        </Border.Background>
+                    </Border>
                     <!-- Uploaded: a plain filled cyan cloud (no pill background) instead of a
                          text badge - NotUploaded is the common case and already shows nothing,
                          so a permanent "Uploaded" text pill on every uploaded photo was more

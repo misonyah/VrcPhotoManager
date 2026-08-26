@@ -21,6 +21,13 @@ public class Library
     /// <summary>Set when Type == DiscordChannel - for display only (which server).</summary>
     public string? DiscordGuildId { get; set; }
 
+    /// <summary>Discord-only, resolved once when the channel is added (see
+    /// DiscordApiClient.GetGuildsAsync's DiscordGuild.IconUrl) - a CDN URL, or null if the
+    /// guild has no custom icon set. Displayed as a small badge on that library's photo
+    /// thumbnails (see PhotoViewModel.DiscordGuildIcon) so photos from different servers are
+    /// visually distinguishable at a glance.</summary>
+    public string? DiscordGuildIconUrl { get; set; }
+
     /// <summary>Set when Type == DiscordChannel.</summary>
     public string? DiscordChannelId { get; set; }
 

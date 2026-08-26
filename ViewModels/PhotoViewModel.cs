@@ -16,19 +16,25 @@ public class PhotoViewModel : INotifyPropertyChanged
 {
     public Photo Model { get; }
     private readonly PhotoRepository _repo;
+    private readonly LibraryRepository _libraries;
 
     private BitmapImage? _thumbnail;
     private bool _thumbnailLoadAttempted;
     private bool _thumbnailLoadInProgress;
 
+    private string? _discordGuildIconUrl;
+    private bool _discordGuildIconUrlResolved;
+    private bool _discordGuildIconLoadInProgress;
+
     /// <summary>Right-click "Rating" submenu - CommandParameter is the rating string, or
     /// null to clear it back to unclassified.</summary>
     public ICommand SetRatingCommand { get; }
 
-    public PhotoViewModel(Photo model, PhotoRepository repo)
+    public PhotoViewModel(Photo model, PhotoRepository repo, LibraryRepository libraries)
     {
         Model = model;
         _repo = repo;
+        _libraries = libraries;
         SetRatingCommand = new RelayCommand<string>(rating =>
         {
             Model.Rating = rating;
@@ -357,6 +363,52 @@ public class PhotoViewModel : INotifyPropertyChanged
             _thumbnail = bmp;
             OnPropertyChanged(nameof(Thumbnail));
         }
+    }
+
+    /// <summary>Small per-thumbnail badge showing which Discord server a photo came from - null
+    /// for a local-folder photo (fast-pathed below, no lookup at all) or a Discord library whose
+    /// guild has no custom icon set. Same off-UI-thread lazy pattern as Thumbnail: the owning
+    /// Library's icon URL is resolved once (a small, rarely-changing table, but still done in
+    /// the background on principle after the Thumbnail scroll-hang fix), then the actual bitmap
+    /// is shared process-wide via DiscordGuildIconCache since every photo in a library has the
+    /// same one icon.</summary>
+    public BitmapImage? DiscordGuildIcon
+    {
+        get
+        {
+            if (Model.RemoteSourceId is null) return null; // local-folder photo, never has one
+            if (_discordGuildIconUrlResolved && _discordGuildIconUrl is not null)
+            {
+                var cached = DiscordGuildIconCache.TryGet(_discordGuildIconUrl);
+                if (cached is not null) return cached;
+            }
+            else if (_discordGuildIconUrlResolved)
+            {
+                return null; // resolved, this library's guild genuinely has no icon
+            }
+
+            if (!_discordGuildIconLoadInProgress)
+            {
+                _discordGuildIconLoadInProgress = true;
+                _ = LoadDiscordGuildIconAsync();
+            }
+            return null;
+        }
+    }
+
+    private async Task LoadDiscordGuildIconAsync()
+    {
+        if (!_discordGuildIconUrlResolved)
+        {
+            _discordGuildIconUrl = await Task.Run(() => _libraries.GetById(Model.LibraryId)?.DiscordGuildIconUrl);
+            _discordGuildIconUrlResolved = true;
+        }
+        if (_discordGuildIconUrl is not null)
+        {
+            await DiscordGuildIconCache.LoadAsync(_discordGuildIconUrl);
+        }
+        _discordGuildIconLoadInProgress = false;
+        OnPropertyChanged(nameof(DiscordGuildIcon));
     }
 
     public void RefreshStatus()

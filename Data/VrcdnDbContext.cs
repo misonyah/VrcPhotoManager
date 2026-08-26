@@ -267,6 +267,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(l => l.DisplayName).HasColumnName("display_name").IsRequired();
             entity.Property(l => l.LocalPath).HasColumnName("local_path");
             entity.Property(l => l.DiscordGuildId).HasColumnName("discord_guild_id");
+            entity.Property(l => l.DiscordGuildIconUrl).HasColumnName("discord_guild_icon_url");
             entity.Property(l => l.DiscordChannelId).HasColumnName("discord_channel_id");
             entity.Property(l => l.LastSyncedAt).HasColumnName("last_synced_at");
             entity.Property(l => l.LastSyncedMessageId).HasColumnName("last_synced_message_id");

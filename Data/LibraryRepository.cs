@@ -17,13 +17,14 @@ public class LibraryRepository(string dbPath)
         return library;
     }
 
-    public Library AddDiscordChannel(string guildId, string channelId, string displayName)
+    public Library AddDiscordChannel(string guildId, string channelId, string displayName, string? guildIconUrl = null)
     {
         using var context = NewContext();
         var library = new Library
         {
             Type = LibraryType.DiscordChannel,
             DiscordGuildId = guildId,
+            DiscordGuildIconUrl = guildIconUrl,
             DiscordChannelId = channelId,
             DisplayName = displayName,
         };

@@ -735,7 +735,7 @@ public class MainViewModel : INotifyPropertyChanged
         var photos = await Task.Run(() => _repo.GetAll());
         foreach (var photo in photos)
         {
-            AddPhoto(new PhotoViewModel(photo, _repo));
+            AddPhoto(new PhotoViewModel(photo, _repo, _libraries));
         }
         RebuildRows();
         StatusMessage = $"{_allPhotos.Count} photos loaded.";
@@ -1008,7 +1008,7 @@ public class MainViewModel : INotifyPropertyChanged
                         {
                             if (_repo.GetById(photoId) is Photo newPhoto)
                             {
-                                AddPhoto(new PhotoViewModel(newPhoto, _repo));
+                                AddPhoto(new PhotoViewModel(newPhoto, _repo, _libraries));
                             }
                         }
                     }
@@ -1111,7 +1111,7 @@ public class MainViewModel : INotifyPropertyChanged
                 if (existing is null)
                 {
                     var model = new Photo { Id = id, LocalPath = path, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), LibraryId = libraryId };
-                    existing = new PhotoViewModel(model, _repo);
+                    existing = new PhotoViewModel(model, _repo, _libraries);
                     AddPhoto(existing);
                 }
 
@@ -1868,7 +1868,7 @@ public class MainViewModel : INotifyPropertyChanged
                 // The cropped file is saved alongside its source, so it belongs to the same library.
                 long id = _repo.UpsertLocalFile(newPath, info.Length, info.LastWriteTimeUtc.ToOADate(), vm.Model.LibraryId);
                 _repo.SetImageDimensions(id, 1920, 1080);
-                AddPhoto(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080, LibraryId = vm.Model.LibraryId }, _repo));
+                AddPhoto(new PhotoViewModel(new Photo { Id = id, LocalPath = newPath, FileSize = info.Length, Mtime = info.LastWriteTimeUtc.ToOADate(), Width = 1920, Height = 1080, LibraryId = vm.Model.LibraryId }, _repo, _libraries));
                 cropped++;
             }
             catch (Exception ex)

@@ -663,7 +663,7 @@ public partial class SettingsWindow : Window
         _ = LoadDiscordChannelsAsync();
     }
 
-    private record DiscordChannelRow(string GuildId, string GuildName, string ChannelId, string ChannelName);
+    private record DiscordChannelRow(string GuildId, string GuildName, string? GuildIconUrl, string ChannelId, string ChannelName);
 
     /// <summary>Lists every text channel in every guild the bot has been invited to, flattened
     /// into one picker list ("Guild / #channel") - the design doesn't call for per-guild
@@ -681,7 +681,7 @@ public partial class SettingsWindow : Window
             foreach (var guild in guilds)
             {
                 var channels = await client.GetChannelsAsync(guild.Id, CancellationToken.None);
-                rows.AddRange(channels.Select(c => new DiscordChannelRow(guild.Id, guild.Name, c.Id, c.Name)));
+                rows.AddRange(channels.Select(c => new DiscordChannelRow(guild.Id, guild.Name, guild.IconUrl, c.Id, c.Name)));
             }
         }
         catch (Exception ex)
@@ -709,7 +709,7 @@ public partial class SettingsWindow : Window
         if (DiscordChannelPickerListBox.Tag is not List<DiscordChannelRow> rows) return;
         var selected = rows[DiscordChannelPickerListBox.SelectedIndex];
 
-        _libraries.AddDiscordChannel(selected.GuildId, selected.ChannelId, $"#{selected.ChannelName}");
+        _libraries.AddDiscordChannel(selected.GuildId, selected.ChannelId, $"#{selected.ChannelName}", selected.GuildIconUrl);
         DiscordChannelPickerListBox.Visibility = Visibility.Collapsed;
         DiscordChannelPickerListBox.SelectedIndex = -1;
         RefreshLibraryList();
