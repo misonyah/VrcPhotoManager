@@ -35,6 +35,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Suggested Discord bot icon, offered from the token setup panel so every VrcPhotoManager
+         bot can look the same without each user needing to source their own image. A loose file
+         next to the exe (not embedded) so "Open icon location" can point Explorer straight at it
+         for a manual upload to Discord's own app-icon field, which has no API/URL-based path. -->
+    <Content Include="Assets\VrcPhotoManager.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

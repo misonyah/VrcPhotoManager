@@ -41,6 +41,12 @@
             </ComboBox.ItemContainerStyle>
         </ComboBox>
 
+        <TextBlock Text="Library:" Margin="0,0,0,4"
+                   ToolTip="Show photos from only one configured library (local folder or Discord channel)." />
+        <ComboBox ItemsSource="{Binding LibraryFilterOptions}" DisplayMemberPath="DisplayText"
+                  SelectedValuePath="Id" SelectedValue="{Binding LibraryFilter}" Margin="0,0,0,12"
+                  ToolTip="Show photos from only one configured library (local folder or Discord channel)." />
+
         <!-- One row per PlayerFilterCriteria entry (always ends with one empty row - see
              MainViewModel.EnsurePlayerFilterCriteriaShape) - picking a player in what was the
              last row automatically reveals a fresh empty one beneath it, so this list grows on

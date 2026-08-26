@@ -129,6 +129,26 @@ public class MainViewModel : INotifyPropertyChanged
         AvatarTypeFilterOptions = options;
     }
 
+    /// <summary>Id null = "All Libraries" (no filtering). Computed live from _libraries.GetAll()
+    /// on every access rather than cached/refreshed like AvatarTypeFilterOptions - the library
+    /// list is small (a handful of folders/channels) and only changes via Settings' Add/Remove
+    /// buttons, so there's no meaningful cost to just re-querying it each time the dropdown
+    /// binds, and it sidesteps needing Settings to call back into MainViewModel on every
+    /// add/remove to keep a cached copy in sync.</summary>
+    public record LibraryFilterOption(long? Id, string DisplayText);
+
+    public List<LibraryFilterOption> LibraryFilterOptions =>
+        new List<LibraryFilterOption> { new(null, "All Libraries") }
+            .Concat(_libraries.GetAll().Select(l => new LibraryFilterOption(l.Id, l.DisplayName)))
+            .ToList();
+
+    private long? _libraryFilter;
+    public long? LibraryFilter
+    {
+        get => _libraryFilter;
+        set { _libraryFilter = value; OnPropertyChanged(); RebuildRows(); }
+    }
+
     private string _statusFilter = "All";
     public string StatusFilter
     {
@@ -233,6 +253,7 @@ public class MainViewModel : INotifyPropertyChanged
         StatusFilter = "All";
         UploadCropModeFilter = "Any";
         AvatarTypeFilter = "Any";
+        LibraryFilter = null;
         SelectedPlayerFilter = AllPlayersOption;
         TaggedOnlyFilter = false;
         OwnPhotosOnlyFilter = false;
@@ -2331,6 +2352,10 @@ public class MainViewModel : INotifyPropertyChanged
         if (OwnPhotosOnlyFilter && _selfUserId is not null)
         {
             filtered = filtered.Where(p => p.Model.AuthorId == _selfUserId);
+        }
+        if (LibraryFilter is long libraryFilterId)
+        {
+            filtered = filtered.Where(p => p.Model.LibraryId == libraryFilterId);
         }
         // Every non-empty row narrows further: an Include row intersects (the photo must have
         // THIS player too, on top of whatever earlier rows already required), an Exclude row

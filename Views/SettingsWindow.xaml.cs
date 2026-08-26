@@ -610,6 +610,22 @@ public partial class SettingsWindow : Window
         Process.Start(new ProcessStartInfo("https://discord.com/developers/applications") { UseShellExecute = true });
     }
 
+    /// <summary>Discord's app-icon upload has no URL/API path (it's a plain file picker on
+    /// their own page), so the best VrcPhotoManager can do is open Explorer selecting the
+    /// suggested icon - the user still drags/browses it into Discord's upload field themselves.
+    /// "/select," highlights the file in an open Explorer window rather than opening it.</summary>
+    private void OpenBotIconLocation_Click(object sender, RoutedEventArgs e)
+    {
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "VrcPhotoManager.png");
+        if (!File.Exists(iconPath))
+        {
+            MessageBox.Show(this, "Suggested icon not found - it should be included with this install.",
+                "Discord", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{iconPath}\"") { UseShellExecute = true });
+    }
+
     /// <summary>Discord's own invite-authorize URL accepts the target permissions as a precomputed
     /// bitmask query param, so the user never has to click through the OAuth2 "URL Generator"
     /// page's own checkboxes - paste the Application ID and this is already scoped exactly right.

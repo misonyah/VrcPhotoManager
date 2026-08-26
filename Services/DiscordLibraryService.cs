@@ -50,9 +50,11 @@ public static class DiscordLibraryService
             var page = await client.GetMessagesAsync(library.DiscordChannelId, cursor, ct);
             if (page.Count == 0) break;
 
+            int pageMessageIndex = 0;
             foreach (var message in page)
             {
                 totalMessages++;
+                pageMessageIndex++;
                 // Indexed by true position in the FULL (unfiltered) attachment list, NOT the
                 // images-only filtered list - PhotoSourceResolver.RefetchAndDownloadAsync's
                 // stale-CDN-URL recovery path parses this same "{messageId}_{index}" key back
@@ -76,6 +78,11 @@ public static class DiscordLibraryService
                     long photoId = photoRepo.UpsertDiscordPhoto(library.Id, remoteSourceId, attachment.Url, thumbnail, library.DiscordChannelId!);
                     newPhotoIds.Add(photoId);
                     totalNew++;
+                    // Reported per-photo, not just once per 100-message page - a single page's
+                    // thumbnail fetches (each paced below) can take many seconds on a channel
+                    // with a lot of history, and the old once-per-page report left the status
+                    // text looking frozen for that whole stretch.
+                    progress?.Report($"Syncing {library.DisplayName} (Discord)... message {pageMessageIndex}/{page.Count} this page, {totalNew} new photos so far ({totalMessages} messages total)");
                     // Pacing: see this method's own doc comment - the CDN has no documented
                     // rate-limit contract to react to (unlike the REST calls above, which
                     // DiscordApiClient already handles via 429/Retry-After), so this is a plain

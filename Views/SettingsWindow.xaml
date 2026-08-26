@@ -287,6 +287,9 @@
                             <LineBreak/>4. On the "General Information" page, copy the Application ID, paste it below, then click "Open invite link" - it's pre-filled with the right permissions (View Channel + Read Message History), no manual OAuth2 setup needed.
                             <LineBreak/>5. Paste the token from step 2 below and click Save.
                         </TextBlock>
+                        <Button Content="Open suggested bot icon..." Padding="8,2" HorizontalAlignment="Left" Margin="0,0,0,8"
+                                Click="OpenBotIconLocation_Click"
+                                ToolTip="Opens a suggested icon you can optionally upload for your bot in step 1, so every VrcPhotoManager bot looks the same." />
                         <TextBlock Text="Discord Application ID:" Margin="0,0,0,4" />
                         <DockPanel Margin="0,0,0,8">
                             <Button DockPanel.Dock="Right" Content="Open invite link" Padding="8,2" Margin="8,0,0,0"
