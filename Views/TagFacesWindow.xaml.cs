@@ -232,12 +232,12 @@ public partial class TagFacesWindow : Window
         if (suggestionsMayBeStale) _ = ShowStaleSuggestionsBannerAsync();
         // ScrollViewer gives its content infinite measure space on both axes (needed so it
         // can scroll once zoomed past the viewport), which means Stretch="Uniform" no longer
-        // auto-fits the image to the window - Image just reports its native pixel size. Wait
-        // for the window's first layout pass (Loaded) to know the real viewport size, then set
-        // an initial zoom that reproduces the old "fit to window" starting view. Prev/Next
-        // navigation (NavigateToPhoto) calls InitializeZoom directly instead - by then the
-        // window's already been through its first layout pass, so there's no Loaded to wait for.
-        Loaded += (_, _) => InitializeZoom();
+        // auto-fits the image to the window - Image just reports its native pixel size.
+        // InitializeZoom is triggered from LoadPhotoImageAsync itself now (both for this
+        // initial load and for Prev/Next navigation), once the real bitmap for whichever photo
+        // is actually loaded - a not-yet-cached Discord photo's download can take far longer
+        // than one layout pass, so waiting on Loaded/a fixed dispatcher deferral here computed
+        // the zoom from whatever was already on screen instead of the new photo.
         // Escape/right-click (below) can now close this window while the person-picker popup
         // is still open (e.g. mid-tagging a freshly-drawn manual box) - explicitly close the
         // popup first rather than trusting WPF to tear it down on its own, so
@@ -312,6 +312,16 @@ public partial class TagFacesWindow : Window
             bitmap.EndInit();
             bitmap.Freeze();
             PhotoImage.Source = bitmap;
+            // Fit-to-window zoom has to be computed from THIS bitmap, not whatever was on
+            // screen before - triggered from here (once the real resolve/download is actually
+            // done) rather than from a fixed one-layout-pass deferral at the call site, since a
+            // not-yet-cached Discord photo's download can take far longer than that single
+            // frame. The constructor's initial load and NavigateToPhoto (Left/Right) both funnel
+            // through this same path now, so both get the fix. DispatcherPriority.Loaded still
+            // matters even though the bitmap itself is already loaded - it's ImageScrollViewer's
+            // own layout pass (ActualWidth/Height) InitializeZoom needs to wait for, same
+            // "layout hasn't happened yet" concern the old call sites were guarding against.
+            Dispatcher.BeginInvoke(InitializeZoom, DispatcherPriority.Loaded);
         }
         catch (Exception ex)
         {
@@ -335,12 +345,11 @@ public partial class TagFacesWindow : Window
         if (_photos.GetById(_scopedPhotoIds[targetIndex]) is not Photo target) return;
 
         LoadPhoto(target);
-        // Deferred, not called synchronously right here - PhotoImage.Source just changed, and
-        // this gives WPF's layout system an actual pass to settle before InitializeZoom reads
-        // anything - same "wait for a real layout pass" precedent as MainWindow's own
-        // scroll-position restore (RestoreScrollPositionOnce) for the same class of timing
-        // issue. Loaded priority runs after layout/render, ahead of user input.
-        Dispatcher.BeginInvoke(InitializeZoom, DispatcherPriority.Loaded);
+        // InitializeZoom is no longer triggered from here - LoadPhoto fires off
+        // LoadPhotoImageAsync (which may need to resolve/download a Discord original), and that
+        // method now schedules InitializeZoom itself once the correct bitmap for `target` is
+        // actually loaded, rather than on a fixed one-layout-pass timer that could fire before
+        // a slow download finishes and compute the zoom from the previous photo instead.
     }
 
     /// <summary>Escape closes the window outright - quicker than hunting for the X, and there's
