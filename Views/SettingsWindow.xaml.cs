@@ -591,6 +591,14 @@ public partial class SettingsWindow : Window
         _ = LoadDiscordChannelsAsync();
     }
 
+    /// <summary>Always available (unlike AddDiscordChannelButton_Click, which only shows the
+    /// token box when none is saved yet) - lets a saved-but-wrong or since-regenerated token be
+    /// corrected without waiting for a failed API call to trigger the panel.</summary>
+    private void ChangeDiscordTokenButton_Click(object sender, RoutedEventArgs e)
+    {
+        DiscordTokenSetupPanel.Visibility = Visibility.Visible;
+    }
+
     private void SaveDiscordTokenButton_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(DiscordTokenBox.Password)) return;
@@ -623,7 +631,15 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Failed to load Discord channels: {ex.Message}", "Discord", MessageBoxButton.OK, MessageBoxImage.Warning);
+            // Re-show the token panel on any failure rather than leaving the user stuck with a
+            // silently-permanent bad token - LoadDiscordBotToken()==null is the only thing that
+            // used to trigger it, so a bad-but-saved token had no way back into the UI short of
+            // editing the database directly.
+            string hint = ex.Message.Contains("401") || ex.Message.Contains("Unauthorized")
+                ? "\n\nThis usually means the saved bot token is wrong (a common mix-up: pasting the Application ID or Client Secret instead of the Bot Token from Discord's developer portal). Re-enter it below."
+                : "";
+            MessageBox.Show(this, $"Failed to load Discord channels: {ex.Message}{hint}", "Discord", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DiscordTokenSetupPanel.Visibility = Visibility.Visible;
             return;
         }
 

@@ -267,13 +267,16 @@
                         <Button x:Name="AddLocalFolderButton" Content="Add local folder..." Padding="8,4" Margin="0,0,8,0"
                                 Click="AddLocalFolderButton_Click"
                                 ToolTip="Add another local folder to scan as part of your photo library." />
-                        <Button x:Name="AddDiscordChannelButton" Content="Add Discord channel..." Padding="8,4"
+                        <Button x:Name="AddDiscordChannelButton" Content="Add Discord channel..." Padding="8,4" Margin="0,0,8,0"
                                 Click="AddDiscordChannelButton_Click"
                                 ToolTip="Add a Discord channel as a photo library. Needs a bot token the first time - see the tooltip on the token box below." />
+                        <Button x:Name="ChangeDiscordTokenButton" Content="Change Discord token..." Padding="8,4"
+                                Click="ChangeDiscordTokenButton_Click"
+                                ToolTip="Re-enter the Discord bot token, e.g. if it was regenerated or was wrong the first time." />
                     </StackPanel>
                     <StackPanel x:Name="DiscordTokenSetupPanel" DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="Collapsed">
-                        <TextBlock Text="Discord bot token:" Margin="0,0,0,4"
-                                   ToolTip="Create a Discord application + bot in Discord's developer portal (discord.com/developers/applications), invite it to your server with 'Read Message History' + 'View Channel' permissions, then paste its token here." />
+                        <TextBlock Text="Discord bot token:" Margin="0,0,0,4" TextWrapping="Wrap"
+                                   ToolTip="1) discord.com/developers/applications -> New Application. 2) Bot page -> Reset Token -> Copy (this exact value, NOT the Application ID or Client Secret). 3) Same page -> enable the 'Message Content Intent' toggle under Privileged Gateway Intents. 4) OAuth2 -> URL Generator -> check scope 'bot' and permissions 'View Channel' + 'Read Message History' -> open the generated URL and invite the bot to your server. 5) Paste the token from step 2 below." />
                         <PasswordBox x:Name="DiscordTokenBox" Margin="0,0,0,4" />
                         <Button Content="Save token" Padding="8,2" HorizontalAlignment="Left" Click="SaveDiscordTokenButton_Click" />
                     </StackPanel>
