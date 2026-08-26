@@ -544,30 +544,30 @@ public class MainViewModel : INotifyPropertyChanged
             ? "Your VRCDN session has expired - log in again to keep uploading/syncing/removing."
             : "Sign in to panel.vrcdn.live in an embedded browser.\nNeeded before you can upload, sync, or remove photos on VRCDN.");
     public string ScanLibraryTooltip => GetActionTooltip("ScanLibrary",
-        "Look for new or changed photos in your VRChat screenshots folder.\nReads world/author/player info from VRCX and builds thumbnails.");
+        "Look for new or changed photos in every configured local folder and Discord channel.\nReads world/author/player info from VRCX and builds thumbnails.");
     public string CrossReferenceGamelogTooltip => GetActionTooltip("CrossReferenceGamelog",
         "For photos with no VRCX player data at all, e.g. taken by someone else nearby.\nGuesses who was present by matching the photo's timestamp against your own VRCX gamelog.",
-        ("ScanLibrary", "Scan Library"));
+        ("ScanLibrary", "Scan Libraries"));
     public string SyncVrcPlayerDataTooltip => GetActionTooltip("SyncVrcPlayerData",
         "Refresh the player cache from VRCX's friends list and gamelog history.\nTag Faces search uses this cache instead of querying VRCX live, since that got slow with a large gamelog.\nRun this occasionally to pick up new friends, renames, or people you've recently played with.");
     public string ScanFacesTooltip => GetActionTooltip("DetectFaces",
         "Detect anime-style faces in every photo and show a count badge on each thumbnail.",
-        ("ScanLibrary", "Scan Library"));
+        ("ScanLibrary", "Scan Libraries"));
     public string SuggestFacesTooltip => GetActionTooltip("SuggestFaces",
         "Suggest who's in each untagged face by comparing it to people's confirmed reference photos.\nSuggestions aren't automatic - review and confirm them in Tag Faces.",
         ("DetectFaces", "Detect Faces"));
     public string ClassifyPhotosTooltip => GetActionTooltip("ClassifyPhotos",
         "Rate any unrated photo using a local WD14 classifier.",
-        ("ScanLibrary", "Scan Library"));
+        ("ScanLibrary", "Scan Libraries"));
     public string ClassifyAvatarsTooltip => GetActionTooltip("ClassifyAvatars",
         "Detect the avatar base worn in each unclassified photo using the downloaded avatar classifier model.",
-        ("ScanLibrary", "Scan Library"));
+        ("ScanLibrary", "Scan Libraries"));
     public string CropPrintSelectedTooltip => GetActionTooltip("CropPrintBorders",
         "For selected Print-format (2048x1440) photos: crop off the white border and add the 1920x1080 result to your library.\nThe original is left untouched.");
     public string UploadSelectedTooltip => GetActionTooltip("UploadSelected",
         "Upload all selected photos that aren't already on VRCDN.");
     public string SyncMetadataTooltip => GetActionTooltip("SyncVrcdnMetadata",
-        "Check which photos are already uploaded to VRCDN and fix their status badge.\nFor VRCX metadata (author/world/players), use Scan Library instead.");
+        "Check which photos are already uploaded to VRCDN and fix their status badge.\nFor VRCX metadata (author/world/players), use Scan Libraries instead.");
     public string RemoveFromVrcdnTooltip => GetActionTooltip("RemoveFromVrcdn",
         "Delete selected photos from VRCDN's storage and mark them Not Uploaded here.");
     public string UpdateVrcdnIndexTooltip => GetActionTooltip("UpdateVrcdnIndex",
@@ -936,10 +936,20 @@ public class MainViewModel : INotifyPropertyChanged
     /// thread once this returns.</summary>
     private record ScanProbeResult(VrcxPhotoMetadata? Metadata, int? Width, int? Height);
 
-    private async Task ScanLibraryAsync()
+    private Task ScanLibraryAsync() => ScanLibraryAsync(onlyLibraryId: null);
+
+    /// <summary>Public entry point for Settings' per-row "Scan now" button - scans exactly one
+    /// library (local folder or Discord channel) instead of every configured one. Shares every
+    /// bit of the normal scan's logic (upsert, Discord sync, cache eviction, grid refresh,
+    /// finalization tail) by filtering allLibraries down to one row before anything else runs -
+    /// nothing downstream needs to know it's a single-library scan.</summary>
+    public Task ScanSingleLibraryAsync(long libraryId) => ScanLibraryAsync(libraryId);
+
+    private async Task ScanLibraryAsync(long? onlyLibraryId)
     {
         var token = _shutdownCts.Token;
         var allLibraries = _libraries.GetAll();
+        if (onlyLibraryId is long id) allLibraries = allLibraries.Where(l => l.Id == id).ToList();
 
         var localFolderLibraries = allLibraries.Where(l => l.Type == LibraryType.LocalFolder).ToList();
         StatusMessage = "Scanning library...";

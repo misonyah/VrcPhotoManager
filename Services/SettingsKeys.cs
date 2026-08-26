@@ -107,6 +107,11 @@ public static class SettingsKeys
     /// DiscordPhotoCacheService.EnforceCacheLimitAsync for the eviction logic.</summary>
     public const string DiscordCacheSizeLimitGb = "discord_cache_size_limit_gb";
 
+    /// <summary>Remembered so the "Discord Application ID" box in Settings' Library tab
+    /// (used to build the pre-permissioned bot invite link) doesn't need re-pasting every time
+    /// the token setup panel is reopened - it's not a secret, just a convenience.</summary>
+    public const string DiscordApplicationId = "discord_application_id";
+
     /// <summary>Set once, permanently, the first time PhotoRepository.SeedDefaultLibraryAndBackfillPhotos
     /// actually runs its seeding logic. Checked instead of "does a LocalFolder library currently
     /// exist" so a deliberate removal of the seeded default library (Settings > Remove Library)

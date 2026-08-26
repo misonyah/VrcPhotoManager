@@ -425,7 +425,7 @@
                         ToolTip="Open a standalone filter panel - the same filters as the bar above, in one window you can keep open on the side." />
 
                 <Separator Margin="0,0,0,8" />
-                <Button Content="Scan Library" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8"
+                <Button Content="Scan Libraries" Command="{Binding ScanLibraryCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding ScanLibraryTooltip}" />
                 <Button Content="Cross-reference Gamelog" Command="{Binding CrossReferenceGamelogCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding CrossReferenceGamelogTooltip}" />

@@ -16,15 +16,17 @@ public partial class SettingsWindow : Window
     private readonly PhotoRepository _repo;
     private readonly AvatarCatalogRepository _avatarCatalog;
     private readonly LibraryRepository _libraries;
+    private readonly MainViewModel _mainViewModel;
     private readonly CredentialStore _credentials;
     private readonly ModelDownloadService _downloader = new();
     private CancellationTokenSource? _downloadCts;
 
-    public SettingsWindow(PhotoRepository repo, AvatarCatalogRepository avatarCatalog, LibraryRepository libraries)
+    public SettingsWindow(PhotoRepository repo, AvatarCatalogRepository avatarCatalog, LibraryRepository libraries, MainViewModel mainViewModel)
     {
         InitializeComponent();
         _avatarCatalog = avatarCatalog;
         _libraries = libraries;
+        _mainViewModel = mainViewModel;
         _credentials = new CredentialStore(repo);
         // SizeToContent="Height" alone would let this window grow past the screen on a
         // packed tab (e.g. Avatars with a long catalog) - capping MaxHeight to the primary
@@ -106,6 +108,8 @@ public partial class SettingsWindow : Window
 
         RefreshAvatarCatalogList();
         RefreshLibraryList();
+
+        DiscordApplicationIdTextBox.Text = _repo.GetStringSetting(SettingsKeys.DiscordApplicationId) ?? "";
     }
 
     private record AvatarCatalogRow(long Id, string DisplayName, string StoresText, string ParentText);
@@ -557,6 +561,16 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>Fire-and-forget, matching this file's own AddDiscordChannelButton_Click/
+    /// LoadDiscordChannelsAsync convention - progress and any errors surface via
+    /// MainViewModel.StatusMessage, which MainWindow's own status bar already shows live while
+    /// this non-modal Settings window sits alongside it.</summary>
+    private void ScanSingleLibraryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is not long id) return;
+        _ = _mainViewModel.ScanSingleLibraryAsync(id);
+    }
+
     private void RemoveLibraryButton_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button)?.Tag is not long id) return;
@@ -610,6 +624,7 @@ public partial class SettingsWindow : Window
                 "Discord", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+        _repo.SetStringSetting(SettingsKeys.DiscordApplicationId, clientId);
         Process.Start(new ProcessStartInfo(
             $"https://discord.com/api/oauth2/authorize?client_id={Uri.EscapeDataString(clientId)}&permissions=66560&scope=bot")
         { UseShellExecute = true });
