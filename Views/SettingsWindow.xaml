@@ -312,6 +312,7 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
                                         <TextBlock FontWeight="Bold">
@@ -322,15 +323,22 @@
                                     </StackPanel>
                                     <CheckBox Grid.Column="1" Margin="8,0"
                                               VerticalAlignment="Center"
+                                              IsChecked="{Binding Enabled}"
+                                              Content="Enabled"
+                                              Checked="LibraryEnabledToggle_Changed" Unchecked="LibraryEnabledToggle_Changed"
+                                              Tag="{Binding Id}"
+                                              ToolTip="When off, this library's photos are hidden from the grid, skipped by Detect Faces/Classify Avatars/Suggest Faces/Classify Photos, and skipped by Scan Libraries - without removing it or losing already-scanned photos." />
+                                    <CheckBox Grid.Column="2" Margin="8,0"
+                                              VerticalAlignment="Center"
                                               Visibility="{Binding IsDiscord, Converter={StaticResource BoolToVisibilityConverter}}"
                                               IsChecked="{Binding AutoDownloadOriginals}"
                                               Content="Auto-download"
                                               Checked="AutoDownloadToggle_Changed" Unchecked="AutoDownloadToggle_Changed"
                                               Tag="{Binding Id}" />
-                                    <Button Grid.Column="2" Content="Scan now" Padding="8,2" Margin="0,0,8,0"
+                                    <Button Grid.Column="3" Content="Scan now" Padding="8,2" Margin="0,0,8,0"
                                             Click="ScanSingleLibraryButton_Click" Tag="{Binding Id}"
                                             ToolTip="Scan just this library instead of waiting for a full Scan Libraries pass." />
-                                    <Button Grid.Column="3" Content="Remove" Padding="8,2"
+                                    <Button Grid.Column="4" Content="Remove" Padding="8,2"
                                             Click="RemoveLibraryButton_Click" Tag="{Binding Id}" />
                                 </Grid>
                             </DataTemplate>

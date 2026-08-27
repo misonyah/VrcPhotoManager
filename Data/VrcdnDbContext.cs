@@ -272,6 +272,7 @@ public class VrcdnDbContext : DbContext
             entity.Property(l => l.LastSyncedAt).HasColumnName("last_synced_at");
             entity.Property(l => l.LastSyncedMessageId).HasColumnName("last_synced_message_id");
             entity.Property(l => l.AutoDownloadOriginals).HasColumnName("auto_download_originals").HasDefaultValue(false);
+            entity.Property(l => l.Enabled).HasColumnName("enabled").HasDefaultValue(true);
             entity.Property(l => l.CreatedAt).HasColumnName("created_at");
         });
 

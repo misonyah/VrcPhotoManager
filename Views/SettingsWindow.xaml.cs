@@ -113,7 +113,7 @@ public partial class SettingsWindow : Window
     }
 
     private record AvatarCatalogRow(long Id, string DisplayName, string StoresText, string ParentText);
-    private record LibraryRow(long Id, string DisplayName, string TypeText, string DetailText, bool IsDiscord, bool AutoDownloadOriginals);
+    private record LibraryRow(long Id, string DisplayName, string TypeText, string DetailText, bool IsDiscord, bool AutoDownloadOriginals, bool Enabled);
 
     private static string DescribeStores(AvatarCatalog c)
     {
@@ -543,7 +543,8 @@ public partial class SettingsWindow : Window
                 ? l.LocalPath ?? ""
                 : $"Last synced: {(l.LastSyncedAt is DateTime d ? d.ToLocalTime().ToString("g") : "Never")}",
             l.Type == LibraryType.DiscordChannel,
-            l.AutoDownloadOriginals
+            l.AutoDownloadOriginals,
+            l.Enabled
         )).ToList();
     }
 
@@ -719,6 +720,17 @@ public partial class SettingsWindow : Window
     {
         if ((sender as CheckBox)?.Tag is not long id) return;
         _libraries.SetAutoDownloadOriginals(id, (sender as CheckBox)!.IsChecked == true);
+    }
+
+    /// <summary>Pauses/resumes a library without removing it or orphaning its photos - see
+    /// Library.Enabled's own doc comment. Refreshes the main grid immediately (via the shared
+    /// RebuildRowsWithLeadingPadding(0), a plain rebuild with no padding) so hiding/showing a
+    /// library's photos doesn't need Settings to be closed first to take visible effect.</summary>
+    private void LibraryEnabledToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if ((sender as CheckBox)?.Tag is not long id) return;
+        _libraries.SetEnabled(id, (sender as CheckBox)!.IsChecked == true);
+        _mainViewModel.RebuildRowsWithLeadingPadding(0);
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)

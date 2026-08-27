@@ -409,10 +409,16 @@ public partial class App : Application
         var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
         var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
 
-        // Same eligibility rule as MainViewModel.IsEligibleForBatchOperation - skip an uncached
-        // Discord photo unless its library has explicitly opted into auto-downloading originals.
-        bool isEligible(Models.Photo p) => p.RemoteSourceId is null || p.LocalPath is not null
-            || libraries.GetById(p.LibraryId)?.AutoDownloadOriginals == true;
+        // Same eligibility rule as MainViewModel.IsEligibleForBatchOperation - skip a disabled
+        // library entirely, or an uncached Discord photo unless its library has explicitly
+        // opted into auto-downloading originals. librariesById built once, not looked up per
+        // photo, for the same reason the real MainViewModel method does this now.
+        var librariesById = libraries.GetAll().ToDictionary(l => l.Id);
+        bool isEligible(Models.Photo p)
+        {
+            if (!librariesById.TryGetValue(p.LibraryId, out var library) || !library.Enabled) return false;
+            return p.RemoteSourceId is null || p.LocalPath is not null || library.AutoDownloadOriginals;
+        }
 
         var photos = photoRepo.GetAll();
         var avatarTypeById = photos.ToDictionary(p => p.Id, p => p.AvatarType);
@@ -502,7 +508,13 @@ public partial class App : Application
         var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
         var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
 
-        var photos = photoRepo.GetAll();
+        // Still a full rescan (every photo, not just unresolved ones - see this method's own
+        // "not just unresolved" framing above), but a disabled library (Settings > Library tab)
+        // is meant to be fully paused from every batch operation, this diagnostic included -
+        // matches the Enabled checkbox's own tooltip text.
+        var libraries = new Data.LibraryRepository(dbPath);
+        var enabledLibraryIds = libraries.GetAll().Where(l => l.Enabled).Select(l => l.Id).ToHashSet();
+        var photos = photoRepo.GetAll().Where(p => enabledLibraryIds.Contains(p.LibraryId)).ToList();
         Console.WriteLine($"Scanning {photos.Count} photos (full rescan, not just unresolved ones)...");
 
         int processed = 0, totalExisting = 0, totalNew = 0, totalRemoved = 0;
@@ -598,12 +610,17 @@ public partial class App : Application
         var cache = new Services.DiscordPhotoCacheService(Path.Combine(dataDir, "DiscordCache"));
         var resolver = new Services.PhotoSourceResolver(photoRepo, cache, discordClient);
 
-        // Same eligibility rule as MainViewModel.IsEligibleForBatchOperation - skip an uncached
-        // Discord photo unless its library has explicitly opted into auto-downloading originals,
-        // so this headless diagnostic and the "Classify Avatars" button never drift out of sync
-        // on which photos a batch run is actually allowed to touch.
-        bool isEligible(Models.Photo p) => p.RemoteSourceId is null || p.LocalPath is not null
-            || libraries.GetById(p.LibraryId)?.AutoDownloadOriginals == true;
+        // Same eligibility rule as MainViewModel.IsEligibleForBatchOperation - skip a disabled
+        // library entirely, or an uncached Discord photo unless its library has explicitly
+        // opted into auto-downloading originals, so this headless diagnostic and the "Classify
+        // Avatars" button never drift out of sync on which photos a batch run is allowed to
+        // touch. librariesById built once, not looked up per photo.
+        var librariesById = libraries.GetAll().ToDictionary(l => l.Id);
+        bool isEligible(Models.Photo p)
+        {
+            if (!librariesById.TryGetValue(p.LibraryId, out var library) || !library.Enabled) return false;
+            return p.RemoteSourceId is null || p.LocalPath is not null || library.AutoDownloadOriginals;
+        }
 
         var missingIds = photoRepo.GetPhotoIdsMissingAvatarType();
         var retryIds = photoRepo.GetPhotoIdsWithNoConfidentMatch();

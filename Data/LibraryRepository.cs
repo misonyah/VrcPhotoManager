@@ -64,4 +64,10 @@ public class LibraryRepository(string dbPath)
         using var context = NewContext();
         context.Libraries.Where(l => l.Id == id).ExecuteUpdate(s => s.SetProperty(l => l.AutoDownloadOriginals, value));
     }
+
+    public void SetEnabled(long id, bool value)
+    {
+        using var context = NewContext();
+        context.Libraries.Where(l => l.Id == id).ExecuteUpdate(s => s.SetProperty(l => l.Enabled, value));
+    }
 }

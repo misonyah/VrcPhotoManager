@@ -971,6 +971,11 @@ public class MainViewModel : INotifyPropertyChanged
         var token = _shutdownCts.Token;
         var allLibraries = _libraries.GetAll();
         if (onlyLibraryId is long id) allLibraries = allLibraries.Where(l => l.Id == id).ToList();
+        // A disabled library (Settings > Library tab) is meant to be fully paused, including
+        // from scanning - applies even to the single-library "Scan now" button above, so
+        // toggling Enabled off and clicking Scan now on the same row is a silent no-op rather
+        // than a contradiction.
+        allLibraries = allLibraries.Where(l => l.Enabled).ToList();
 
         var localFolderLibraries = allLibraries.Where(l => l.Type == LibraryType.LocalFolder).ToList();
         StatusMessage = "Scanning library...";
@@ -1211,13 +1216,20 @@ public class MainViewModel : INotifyPropertyChanged
     /// already-cached Discord photo, or an uncached Discord photo whose library has explicitly
     /// opted into auto-downloading originals during scans - see the design spec's "Batch-feature
     /// toggle" section for why this defaults to false.</summary>
-    private bool IsEligibleForBatchOperation(Photo photo)
+    /// <summary>librariesById is built once per caller (see GetLibrariesById) and passed
+    /// through rather than looked up per-photo here - this runs inside a .Where(...) over
+    /// potentially the whole library, and a per-photo _libraries.GetById DB round-trip would
+    /// turn an O(n) filter into effectively O(n) DB calls (same "avoid the per-item lookup"
+    /// fix already applied to GetFilteredSortedPhotos' disabled-library check).</summary>
+    private static bool IsEligibleForBatchOperation(Photo photo, Dictionary<long, Library> librariesById)
     {
+        if (!librariesById.TryGetValue(photo.LibraryId, out var library) || !library.Enabled) return false;
         if (photo.RemoteSourceId is null) return true; // local-folder photo
         if (photo.LocalPath is not null) return true; // already cached
-        var library = _libraries.GetById(photo.LibraryId);
-        return library?.AutoDownloadOriginals == true;
+        return library.AutoDownloadOriginals;
     }
+
+    private Dictionary<long, Library> GetLibrariesById() => _libraries.GetAll().ToDictionary(l => l.Id);
 
     private async Task ScanFacesAsync()
     {
@@ -1228,7 +1240,8 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         StatusMessage = "Scanning for faces...";
-        var photos = _allPhotos.Where(p => IsEligibleForBatchOperation(p.Model)).ToList();
+        var librariesById = GetLibrariesById();
+        var photos = _allPhotos.Where(p => IsEligibleForBatchOperation(p.Model, librariesById)).ToList();
         // A fully-resolved photo (already scanned, and every detection it found is now tagged,
         // marked <unknown>, or deleted - e.g. via TagFacesWindow's "All tagged" button) has
         // nothing left for the detector to find, so re-running it there is wasted ML inference.
@@ -1434,10 +1447,11 @@ public class MainViewModel : INotifyPropertyChanged
     {
         var needingEmbeddingPhotoIds = _faces.GetDetectedFacesWithoutEmbedding()
             .Select(f => f.PhotoId).ToHashSet();
+        var librariesById = GetLibrariesById();
         var pathById = new Dictionary<long, string>();
         foreach (var vm in _allPhotos)
         {
-            if (!IsEligibleForBatchOperation(vm.Model)) continue;
+            if (!IsEligibleForBatchOperation(vm.Model, librariesById)) continue;
             if (vm.Model.LocalPath is not null) { pathById[vm.Model.Id] = vm.Model.LocalPath; continue; }
             if (!needingEmbeddingPhotoIds.Contains(vm.Model.Id)) continue; // no unembedded face - no I/O needed
             try
@@ -1695,7 +1709,8 @@ public class MainViewModel : INotifyPropertyChanged
     {
         if (_tagger is null) { StatusMessage = "WD14 classifier not available."; return; }
 
-        var toClassify = _allPhotos.Where(p => p.Rating is null && IsEligibleForBatchOperation(p.Model)).ToList();
+        var librariesById = GetLibrariesById();
+        var toClassify = _allPhotos.Where(p => p.Rating is null && IsEligibleForBatchOperation(p.Model, librariesById)).ToList();
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has a rating."; return; }
 
         int done = 0;
@@ -1768,8 +1783,9 @@ public class MainViewModel : INotifyPropertyChanged
         var missingIds = _repo.GetPhotoIdsMissingAvatarType();
         var retryIds = _repo.GetPhotoIdsWithNoConfidentMatch();
         var regionIds = _avatarRegions.GetPhotoIdsWithRegions();
+        var librariesById = GetLibrariesById();
         var toClassify = _allPhotos.Where(p => (missingIds.Contains(p.Model.Id) || retryIds.Contains(p.Model.Id))
-            && !regionIds.Contains(p.Model.Id) && IsEligibleForBatchOperation(p.Model)).ToList();
+            && !regionIds.Contains(p.Model.Id) && IsEligibleForBatchOperation(p.Model, librariesById)).ToList();
         if (toClassify.Count == 0) { StatusMessage = "Nothing to classify - every photo already has an avatar-type result."; return; }
 
         int done = 0, failed = 0, multiAvatarPhotos = 0, regionsCreated = 0;
@@ -2324,6 +2340,16 @@ public class MainViewModel : INotifyPropertyChanged
     private List<PhotoViewModel> GetFilteredSortedPhotos()
     {
         IEnumerable<PhotoViewModel> filtered = _allPhotos;
+        // Unconditional, not one of the toggleable Filter Photos criteria below - a disabled
+        // library (Settings > Library tab) is meant to be fully paused, not just optionally
+        // filterable back into view. Computed once per call as a HashSet rather than a per-photo
+        // _libraries.GetById lookup - the library list is small, this avoids one DB round trip
+        // per photo on every rebuild.
+        var disabledLibraryIds = _libraries.GetAll().Where(l => !l.Enabled).Select(l => l.Id).ToHashSet();
+        if (disabledLibraryIds.Count > 0)
+        {
+            filtered = filtered.Where(p => !disabledLibraryIds.Contains(p.Model.LibraryId));
+        }
         if (RatingFilter != "All")
         {
             filtered = RatingFilter == "(none)"

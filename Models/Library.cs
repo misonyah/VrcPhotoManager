@@ -44,4 +44,12 @@ public class Library
     public bool AutoDownloadOriginals { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Default true. When false, this library is fully paused: its photos are hidden
+    /// from the main grid, excluded from every batch operation's candidate set (Detect Faces,
+    /// Classify Avatars, Suggest Faces, Classify Photos - see MainViewModel.
+    /// IsEligibleForBatchOperation), and skipped during Scan Libraries - without removing the
+    /// library or orphaning its already-scanned photos the way outright removal does. Toggled
+    /// via a checkbox in Settings' Library tab.</summary>
+    public bool Enabled { get; set; } = true;
 }
