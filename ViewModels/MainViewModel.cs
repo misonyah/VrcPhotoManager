@@ -688,7 +688,7 @@ public class MainViewModel : INotifyPropertyChanged
         _avatarCatalog = new AvatarCatalogRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         _libraries = new LibraryRepository(Path.Combine(dataDir, "vrcdn_manager.db"));
         // Shared chokepoint for every consumer that touches a photo's file bytes (thumbnail/
-        // preview, Tag Faces, Detect Faces, Classify Photos/Avatars, crop/print, VRCDN upload) -
+        // preview, Tag Faces, Detect Faces, Classify Ratings/Avatars, crop/print, VRCDN upload) -
         // see PhotoSourceResolver's own doc comment. Built once here (not per-call-site) so a
         // Discord photo's already-cached local path is reused across every consumer instead of
         // re-resolving (and potentially re-downloading) it separately for each.
@@ -1212,7 +1212,7 @@ public class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>A photo is eligible for a batch operation (Detect Faces, Classify Avatars,
-    /// Suggest Faces, Classify Photos) if it's a local-folder photo (always available), an
+    /// Suggest Faces, Classify Ratings) if it's a local-folder photo (always available), an
     /// already-cached Discord photo, or an uncached Discord photo whose library has explicitly
     /// opted into auto-downloading originals during scans - see the design spec's "Batch-feature
     /// toggle" section for why this defaults to false.</summary>

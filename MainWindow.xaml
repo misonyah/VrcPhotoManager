@@ -298,9 +298,9 @@
         <!-- Filters -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8" VerticalAlignment="Center">
             <TextBlock Text="Rating:" VerticalAlignment="Center" Margin="0,0,4,0"
-                       ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Photos can suggest one." />
+                       ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Ratings can suggest one." />
             <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Width="110" Margin="0,0,16,0"
-                      ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Photos can suggest one." />
+                      ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Ratings can suggest one." />
 
             <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,4,0"
                        ToolTip="Filter by VRCDN upload status." />
@@ -452,7 +452,7 @@
                         ToolTip="{Binding ScanFacesTooltip}" />
                 <Button Content="Suggest Faces" Command="{Binding SuggestFacesCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding SuggestFacesTooltip}" />
-                <Button Content="Classify Photos" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
+                <Button Content="Classify Ratings" Command="{Binding ClassifyPhotosCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding ClassifyPhotosTooltip}" />
                 <Button Content="Classify Avatars" Command="{Binding ClassifyAvatarsCommand}" Padding="8,4" Margin="0,0,0,8"
                         ToolTip="{Binding ClassifyAvatarsTooltip}" />

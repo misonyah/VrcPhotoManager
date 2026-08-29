@@ -16,9 +16,9 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto">
     <StackPanel Margin="12">
         <TextBlock Text="Rating:" Margin="0,0,0,4"
-                   ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Photos can suggest one." />
+                   ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Ratings can suggest one." />
         <ComboBox ItemsSource="{Binding RatingFilterOptions}" SelectedItem="{Binding RatingFilter}" Margin="0,0,0,12"
-                  ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Photos can suggest one." />
+                  ToolTip="Filter by the content rating you've assigned this photo.&#10;'(none)' means it hasn't been rated yet - Classify Ratings can suggest one." />
 
         <TextBlock Text="Status:" Margin="0,0,0,4" ToolTip="Filter by VRCDN upload status." />
         <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding StatusFilter}" Margin="0,0,0,12"

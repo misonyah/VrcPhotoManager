@@ -26,7 +26,7 @@
                 <StackPanel Margin="12">
                     <TextBlock Text="WD14 Nudity Classifier Model" FontSize="14" FontWeight="Bold" Margin="0,0,0,4" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,0,0,12">
-                        Used by "Classify Photos". Model: SmilingWolf/wd-vit-tagger-v3 (Hugging Face).
+                        Used by "Classify Ratings". Model: SmilingWolf/wd-vit-tagger-v3 (Hugging Face).
                     </TextBlock>
 
                     <TextBlock Text="Model folder (model.onnx + selected_tags.csv):" Margin="0,0,0,4" />
@@ -327,7 +327,7 @@
                                               Content="Enabled"
                                               Checked="LibraryEnabledToggle_Changed" Unchecked="LibraryEnabledToggle_Changed"
                                               Tag="{Binding Id}"
-                                              ToolTip="When off, this library's photos are hidden from the grid, skipped by Detect Faces/Classify Avatars/Suggest Faces/Classify Photos, and skipped by Scan Libraries - without removing it or losing already-scanned photos." />
+                                              ToolTip="When off, this library's photos are hidden from the grid, skipped by Detect Faces/Classify Avatars/Suggest Faces/Classify Ratings, and skipped by Scan Libraries - without removing it or losing already-scanned photos." />
                                     <CheckBox Grid.Column="2" Margin="8,0"
                                               VerticalAlignment="Center"
                                               Visibility="{Binding IsDiscord, Converter={StaticResource BoolToVisibilityConverter}}"

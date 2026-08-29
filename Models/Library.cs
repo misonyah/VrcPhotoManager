@@ -38,7 +38,7 @@ public class Library
     public string? LastSyncedMessageId { get; set; }
 
     /// <summary>Discord-only, default false. When false, batch operations (Detect Faces,
-    /// Classify Avatars, Suggest Faces, Classify Photos) only process already-cached Discord
+    /// Classify Avatars, Suggest Faces, Classify Ratings) only process already-cached Discord
     /// photos instead of downloading everything needed - see PhotoSourceResolver callers in
     /// Part 2.</summary>
     public bool AutoDownloadOriginals { get; set; }
@@ -47,7 +47,7 @@ public class Library
 
     /// <summary>Default true. When false, this library is fully paused: its photos are hidden
     /// from the main grid, excluded from every batch operation's candidate set (Detect Faces,
-    /// Classify Avatars, Suggest Faces, Classify Photos - see MainViewModel.
+    /// Classify Avatars, Suggest Faces, Classify Ratings - see MainViewModel.
     /// IsEligibleForBatchOperation), and skipped during Scan Libraries - without removing the
     /// library or orphaning its already-scanned photos the way outright removal does. Toggled
     /// via a checkbox in Settings' Library tab.</summary>
