@@ -11,8 +11,15 @@
              just isn't what the closed box displays for that state. -->
         <TextBlock x:Name="PlayerFilterPlaceholder" Text="All players" Foreground="Gray"
                    Margin="6,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+        <!-- StaysOpen="True" is deliberate, not an oversight: with "False" WPF auto-closes the
+             popup on the click's own MouseDown (its built-in "click outside" detection treats
+             AllowsTransparency content this way), which fires before PlayerFilterListBox's
+             MouseUp handler ever sees the click - so a click on a suggestion is silently eaten
+             and the box just reverts (found via a real report). Every real close path is
+             already handled explicitly below (LostFocus, Escape, CommitPlayerFilter), so nothing
+             relies on StaysOpen's own auto-close behavior. -->
         <Popup x:Name="PlayerFilterPopup" PlacementTarget="{Binding ElementName=PlayerFilterTextBox}"
-               Placement="Bottom" Width="260" StaysOpen="False" AllowsTransparency="True">
+               Placement="Bottom" Width="260" StaysOpen="True" AllowsTransparency="True">
             <Border Background="#FF2D2D30" BorderBrush="Gray" BorderThickness="1">
                 <ListBox x:Name="PlayerFilterListBox" MaxHeight="240" MouseUp="PlayerFilterListBox_MouseUp">
                     <ListBox.ItemContainerStyle>

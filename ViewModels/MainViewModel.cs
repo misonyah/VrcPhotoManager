@@ -279,9 +279,12 @@ public class MainViewModel : INotifyPropertyChanged
     /// A player filter entry is keyed by exactly one of VrcUserId (VRCX-observed player - the
     /// dropdown filters by VRCX's own "who was in this instance" data) or PersonId (a manually
     /// registered person with no VRC id - VRCX never observed them, so the only meaningful
-    /// filter is "photos where this person has a confirmed face tag").
+    /// filter is "photos where this person has a confirmed face tag"). HasConfirmedTag defaults
+    /// true (matches AllPlayersOption and PlayerFilterPicker's DefaultOption, neither of which
+    /// should ever be hidden) - RefreshPlayerFilterOptions sets it false for a VRCX player with
+    /// zero confirmed tags, so SearchPlayerFilterOptions can hide them while "Tagged only" is on.
     /// </summary>
-    public record PlayerFilterOption(string? VrcUserId, long? PersonId, string DisplayText)
+    public record PlayerFilterOption(string? VrcUserId, long? PersonId, string DisplayText, bool HasConfirmedTag = true)
     {
         public bool IsManual => PersonId is not null;
     }
@@ -1514,16 +1517,18 @@ public class MainViewModel : INotifyPropertyChanged
         // tagged.
         var vrcxPlayers = _repo.GetDistinctPlayers().Select(p =>
             (Name: p.DisplayName, Option: new PlayerFilterOption(p.UserId, null,
-                $"{p.DisplayName} ({taggedCounts.GetValueOrDefault(p.UserId)}/{presentCounts.GetValueOrDefault(p.UserId)})")));
+                $"{p.DisplayName} ({taggedCounts.GetValueOrDefault(p.UserId)}/{presentCounts.GetValueOrDefault(p.UserId)})",
+                taggedCounts.GetValueOrDefault(p.UserId) > 0)));
 
         // Manually-created people (typed in the Tag Faces "new person" box, no linked VRC id)
         // never show up in VRCX's own player data - mixed into the same sorted list (not
         // appended after) so they land next to their alphabetical neighbors, marked "(manual)"
         // so they're visually distinct until linked to a real VRC account (see
-        // PlayerFilterOption.IsManual / ItemContainerStyle in the XAML).
+        // PlayerFilterOption.IsManual / ItemContainerStyle in the XAML). Always HasConfirmedTag:
+        // true - a manual person only ever exists because of a confirmed tag in the first place.
         var manualPeople = _faces.GetAllPersons()
             .Where(p => p.VrcUserId is null)
-            .Select(p => (Name: p.Name, Option: new PlayerFilterOption(null, p.Id, $"{p.Name} (manual)")));
+            .Select(p => (Name: p.Name, Option: new PlayerFilterOption(null, p.Id, $"{p.Name} (manual)", true)));
 
         var options = new List<PlayerFilterOption> { AllPlayersOption };
         options.AddRange(vrcxPlayers.Concat(manualPeople)
@@ -1602,13 +1607,17 @@ public class MainViewModel : INotifyPropertyChanged
     /// Unicode display names, and a match via a recorded alias (see VrcUserAlias) finds
     /// someone under a name they no longer go by, not just their current one. An empty query
     /// returns the full option list, matching a plain dropdown's "click to browse everything".
+    /// While "Tagged only" is checked, untagged VRCX players are hidden from the suggestions too
+    /// (not just from the resulting photo list) - picking one you can already see has zero
+    /// confirmed tags would otherwise always show "nothing found" (found via a real report).
     /// </summary>
     public List<PlayerFilterOption> SearchPlayerFilterOptions(string query)
     {
-        if (string.IsNullOrWhiteSpace(query)) return PlayerFilterOptions;
+        var candidates = TaggedOnlyFilter ? PlayerFilterOptions.Where(o => o.HasConfirmedTag).ToList() : PlayerFilterOptions;
+        if (string.IsNullOrWhiteSpace(query)) return candidates;
 
         var aliasesByUserId = _faces.GetAllAliasesGroupedByUser();
-        return PlayerFilterOptions.Where(o =>
+        return candidates.Where(o =>
             FuzzyNameSearch.Matches(o.DisplayText, query)
             || (o.VrcUserId is not null && aliasesByUserId.TryGetValue(o.VrcUserId, out var aliases)
                 && aliases.Any(a => FuzzyNameSearch.Matches(a, query))))
